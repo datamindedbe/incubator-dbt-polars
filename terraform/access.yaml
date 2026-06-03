@@ -1,0 +1,10 @@
+domain2:
+  purpose1:
+    writers: 
+      - user1
+    readers: 
+      - user2
+  purpose2:
+    writers: 
+      - user2 
+    readers: []
