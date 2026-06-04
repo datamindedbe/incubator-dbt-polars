@@ -1,10 +1,18 @@
 domain2:
   purpose1:
-    writers: 
+    writers:
       - user1
-    readers: 
+      - grigorii.osipov@dataminded.com
+    readers:
       - user2
   purpose2:
-    writers: 
-      - user2 
+    writers:
+      - user2
+      - grigorii.osipov@dataminded.com
+    readers: []
+
+grigorii:
+  dev:
+    writers:
+      - grigorii.osipov@dataminded.com
     readers: []

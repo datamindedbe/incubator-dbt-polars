@@ -41,12 +41,13 @@ provider "azurerm" {
 }
 
 provider "databricks" {
-  host = azurerm_databricks_workspace.this.workspace_url
+  host                        = azurerm_databricks_workspace.this.workspace_url
+  azure_workspace_resource_id = azurerm_databricks_workspace.this.id
 }
 
-
 provider "databricks" {
-  alias      = "account"
-  host       = "https://accounts.azuredatabricks.net"
-  account_id = "ceaf1e38-1947-4da4-bdfc-c20649d9e1f0"
+  alias           = "account"
+  host            = "https://accounts.azuredatabricks.net"
+  account_id      = "ceaf1e38-1947-4da4-bdfc-c20649d9e1f0"
+  azure_tenant_id = "55226c2c-0b83-4621-a5cd-e8e0e57ec920"
 }

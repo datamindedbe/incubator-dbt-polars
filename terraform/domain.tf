@@ -25,7 +25,7 @@ resource "databricks_external_location" "catalog" {
 resource "databricks_grant" "external_location" {
   for_each = local.domain_users
 
-  principal         = databricks_service_principal.user[each.value.user].application_id
+  principal         = local.principal_id[each.value.user]
   external_location = databricks_external_location.catalog[each.value.domain].id
   privileges        = ["CREATE_EXTERNAL_TABLE", "EXTERNAL_USE_LOCATION"]
 }
@@ -33,7 +33,7 @@ resource "databricks_grant" "external_location" {
 resource "databricks_grant" "catalog" {
   for_each = local.domain_users
 
-  principal  = databricks_service_principal.user[each.value.user].application_id
+  principal  = local.principal_id[each.value.user]
   catalog    = databricks_catalog.catalog[each.value.domain].id
   privileges = ["USE_CATALOG"]
 }

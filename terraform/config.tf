@@ -2,6 +2,18 @@ locals {
   config = yamldecode(file("access.yaml"))
 
   domains = keys(local.config)
+
+  # Split user list into human users (email addresses) and service principals.
+  unique_human_users = toset([for u in local.unique_users : u if can(regex("@", u))])
+  unique_sp_users    = toset([for u in local.unique_users : u if !can(regex("@", u))])
+
+  # Unified map: user string -> principal identifier used in grants.
+  # Human users are granted by email; SPs by application_id.
+  principal_id = merge(
+    { for u in local.unique_human_users : u => u },
+    { for u in local.unique_sp_users : u => databricks_service_principal.user[u].application_id }
+  )
+
   schemas = merge([
     for domain in local.domains :
     merge([
