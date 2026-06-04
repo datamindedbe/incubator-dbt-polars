@@ -13,7 +13,7 @@ resource "databricks_grant" "schema_reader" {
 
   principal  = local.principal_id[each.value.user]
   schema     = databricks_schema.schema[each.value.key].id
-  privileges = ["USE_SCHEMA"]
+  privileges = ["USE_SCHEMA", "EXTERNAL_USE_SCHEMA"]
 }
 
 resource "databricks_grant" "schema_writer" {
@@ -21,5 +21,5 @@ resource "databricks_grant" "schema_writer" {
 
   principal  = local.principal_id[each.value.user]
   schema     = databricks_schema.schema[each.value.key].id
-  privileges = ["ALL_PRIVILEGES"]
+  privileges = ["ALL_PRIVILEGES", "EXTERNAL_USE_SCHEMA"]
 }
