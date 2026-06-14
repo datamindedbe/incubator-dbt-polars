@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING, Any, Type
 
 from dbt.adapters.base import BaseRelation
+from dbt.adapters.contracts.relation import HasQuoting, RelationConfig  
 
 
 class TableFormat(str, Enum):
@@ -12,3 +16,22 @@ class TableFormat(str, Enum):
 @dataclass(frozen=True, eq=False, repr=False)
 class PolarsRelation(BaseRelation):
     format: TableFormat = TableFormat.delta
+
+    @classmethod
+    def create_from(
+        cls: Type[PolarsRelation],
+        quoting: HasQuoting,
+        relation_config: RelationConfig,
+        **kwargs: Any,
+    ) -> PolarsRelation:
+        # This override allows using the catalog as an alias for the database
+        # property on all relations
+
+        relation = super().create_from(quoting, relation_config, **kwargs)
+    
+        if not relation.catalog:
+            config = relation_config.config
+            catalog = (config.get("catalog") if config else None) or relation_config.database
+            if catalog:
+                return relation.replace(catalog=catalog)
+        return relation

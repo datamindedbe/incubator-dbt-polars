@@ -59,7 +59,10 @@ class LocalCatalog(BaseCatalog):
         shutil.rmtree(self._schema_path(relation.schema), ignore_errors=True)
 
     def list_schemas(self) -> list[str]:
-        return [p.name for p in Path(self.config.root).iterdir() if p.is_dir()]
+        root = Path(self.config.root)
+        if not root.exists():
+            return []
+        return [p.name for p in root.iterdir() if p.is_dir()]
 
     def table_exists(self, relation: PolarsRelation) -> bool:
         path = self._relation_path(relation)

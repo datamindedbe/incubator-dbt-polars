@@ -36,6 +36,7 @@ class PolarsTestMixin:
         )
         project.adapter.drop_schema(relation)
 
+    # TODO: reenable
     # @pytest.fixture(scope="class", autouse=True)
     # def keep_test_schema(self, project):
     #     project.drop_test_schema = lambda: None

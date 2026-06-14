@@ -45,6 +45,10 @@ class PolarsCredentials(Credentials):
         return ("database", "schema", "catalogs")
 
     @property
+    def catalog(self) -> str:
+        return self.database
+
+    @property
     def catalog_configs(self) -> dict[str, CatalogConfig]:
         return self._catalog_configs
 

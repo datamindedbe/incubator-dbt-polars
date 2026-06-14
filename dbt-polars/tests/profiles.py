@@ -9,5 +9,8 @@ def local_catalog(name: str, root: str) -> dict:
 def default_target() -> dict:
     return {
         "type": "polars",
-        "catalogs": [local_catalog(name="local", root="test_root/")],
+        "catalogs": [
+            local_catalog(name="local", root="test_root/"), 
+            local_catalog(name="local2", root="test_root2/")
+        ],
     }

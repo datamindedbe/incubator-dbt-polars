@@ -91,3 +91,38 @@ class TestSimpleSeedWithBOM(BaseSimpleSeedWithBOM):
             project.project_root / Path("seeds") / "seed_bom.csv",
             "",
         )
+
+
+class TestSeedWithExplicitCatalog:
+    """Verify that a seed with an explicit catalog config is written to the correct catalog."""
+
+    @pytest.fixture(scope="class")
+    def seeds(self):
+        return {"seed_actual.csv": seeds.seed__actual_csv}
+
+    @pytest.fixture(scope="class")
+    def project_config_update(self):
+        return {
+            "seeds": {
+                "quote_columns": False,
+                "+catalog": "local2",
+            },
+        }
+
+    def test_seed_uses_explicit_catalog(self, project):
+        result = util.run_dbt(["seed"])
+        assert len(result) == 1
+
+        credentials = project.adapter.config.credentials
+        local2_root = credentials.catalog_configs["local2"].root
+        default_root = credentials.catalog_configs[project.database].root
+
+        seed_in_local2 = (
+            Path(project.project_root) / local2_root / project.test_schema / "seed_actual"
+        )
+        seed_in_default = (
+            Path(project.project_root) / default_root / project.test_schema / "seed_actual"
+        )
+
+        assert not seed_in_default.exists(), f"Seed incorrectly written to default catalog at {seed_in_default}"
+        assert seed_in_local2.exists(), f"Seed not found in local2 catalog at {seed_in_local2}"

@@ -110,7 +110,7 @@ class PolarsAdapter(BaseAdapter):
             name = name.strip('"')
 
         if not name:
-            name = credentials.database
+            name = credentials.catalog
 
         if name in self.CatalogAdapters:
             return self.CatalogAdapters[name]
