@@ -23,6 +23,9 @@ where = ["."]
 namespaces = true
 include = ["dbt.*"]
 
+[tool.setuptools.package-data]
+"*" = ["*.sql", "*.yml", "*.md"]
+
 [dependency-groups]
 dev = [
     "pytest",

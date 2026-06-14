@@ -2,7 +2,7 @@ name: test_project
 version: "1.0.0"
 config-version: 2
 
-profile: polars_databricks
+profile: databricks_fork
 
 seed-paths: ["seeds"]
 model-paths: ["models"]
@@ -14,9 +14,6 @@ target-path: "target"
 clean-targets:
   - "target"
   - "catalog"
-
-seeds:
-  test_project:
 
 models:
   test_project:

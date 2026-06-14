@@ -1,5 +1,4 @@
-name: dbt_polars
-version: 1.7.0
+name: 'polars'
+version: '1.0.0'
 config-version: 2
-
 macro-paths: ["macros"]
