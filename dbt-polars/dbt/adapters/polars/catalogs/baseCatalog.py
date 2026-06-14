@@ -1,0 +1,57 @@
+import abc
+from abc import abstractmethod
+
+import polars as pl
+
+from dbt.adapters.base import BaseRelation
+
+
+class CatalogConfig(abc.ABC):
+    name: str
+    type: str
+
+    @abc.abstractmethod
+    def unique_field(self) -> str: ...
+
+    @abc.abstractmethod
+    def connection_keys(self) -> str: ...
+
+
+class BaseCatalog(abc.ABC):
+
+    def __init__(self, config: CatalogConfig):
+        self.config = config
+
+    @abstractmethod
+    def create_schema(self, relation: BaseRelation) -> None: ...
+
+    @abstractmethod
+    def drop_schema(self, relation: BaseRelation) -> None: ...
+
+    @abstractmethod
+    def list_schemas(self) -> list[str]: ...
+
+    @abstractmethod
+    def drop_relation(self, relation: BaseRelation) -> None: ...
+
+    @abstractmethod
+    def get_relation(self, relation: BaseRelation) -> pl.LazyFrame: ...
+
+    @abstractmethod
+    def table_exists(self, relation: BaseRelation) -> bool: ...
+
+    @abstractmethod
+    def write_relation(self, relation: BaseRelation, df: pl.DataFrame) -> None: ...
+
+    @abstractmethod
+    def truncate_relation(self, relation: BaseRelation) -> None: ...
+
+    @abstractmethod
+    def list_relations_without_caching(
+        self, schema_relation: BaseRelation
+    ) -> list[BaseRelation]: ...
+
+    def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
+        # TODO: Test if this function needs to be implemented for the local adapter
+        # to enable adding columns in seeds
+        pass

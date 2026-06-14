@@ -1,47 +1,35 @@
-from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import ClassVar, List, Optional, Tuple
+from __future__ import annotations
 
-import agate
+import abc
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import ClassVar, Dict, Optional, Any, TYPE_CHECKING
 
 from dbt.adapters.base import BaseConnectionManager
-from dbt.adapters.contracts.connection import AdapterResponse, Connection, ConnectionState, Credentials
+from dbt_common.dataclass_schema import StrEnum
+from dbt_common.exceptions import DbtRuntimeError, DbtDatabaseError
 from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.contracts.connection import (
+    ConnectionState,
+    Credentials,
+    AdapterResponse,
+)
+from dbt.adapters.polars.catalogs import CatalogConfig, CATALOG_CONFIG_REGISTRY
+from dbt_common.clients.agate_helper import empty_table
+
+if TYPE_CHECKING:
+    import agate
 
 logger = AdapterLogger("polars")
 
 
 @dataclass
 class PolarsCredentials(Credentials):
-    """
-    Profile credentials for dbt-polars.
+    database: str = ""
+    schema: str = ""
+    catalogs: list[Dict[str, Any]] = field(default_factory=list)
 
-    Local target (default):
-        type: polars
-        path: /path/to/catalog
-        database: local
-        schema: main
-
-    Databricks Unity Catalog target:
-        type: polars
-        host: https://adb-<id>.azuredatabricks.net
-        catalog: my_catalog
-        database: my_catalog
-        schema: my_schema
-        client_id: "<service-principal-application-id>"
-        client_secret: "<oauth-secret>"  # OAuth M2M secret for the service principal
-    """
-
-    # local
-    path: str = ""
-
-    # databricks unity catalog
-    host: str = ""
-    catalog: str = ""
-    client_id: str = ""             # Databricks service principal application ID
-    client_secret: str = ""         # OAuth secret for the service principal
-
-    _ALIASES: ClassVar[dict] = {}
+    _ALIASES: ClassVar[Dict[str, str]] = {}
 
     @property
     def type(self) -> str:
@@ -49,74 +37,103 @@ class PolarsCredentials(Credentials):
 
     @property
     def unique_field(self) -> str:
-        return self.host or self.path
+        # TODO
+        return "todo"
+        # return self._catalog_config.unique_field()
 
-    def _connection_keys(self) -> Tuple[str, ...]:
-        if self.host:
-            return ("host", "catalog", "client_id", "database", "schema")
-        return ("path", "database", "schema")
+    def _connection_keys(self) -> tuple:
+        return ("database", "schema", "catalogs")
+
+    @property
+    def catalog_configs(self) -> dict[str, CatalogConfig]:
+        return self._catalog_configs
+
+    def __post_init__(self) -> None:
+        self._catalog_configs = {
+            c["name"]: self._parse_catalog(c) for c in self.catalogs
+        }
+
+        if not self.database:
+            self.database = self.catalogs[0]["name"]
+            logger.info(
+                f"No default catalog specified via 'database', using '{self.database}'."
+            )
+        elif self.database not in self._catalog_configs:
+            raise DbtRuntimeError(
+                f"Default catalog '{self.database}' not found in catalogs"
+            )
+
+    def _parse_catalog(self, entry: Dict[str, Any]) -> CatalogConfig:
+        catalog_type = entry.get("type")
+
+        if catalog_type not in CATALOG_CONFIG_REGISTRY:
+            raise DbtRuntimeError(f"Unknown catalog type: {catalog_type}")
+
+        return CATALOG_CONFIG_REGISTRY.get(catalog_type)(
+            **{k: v for k, v in entry.items()}
+        )
 
 
-class PolarsConnectionHandle:
-    """Carries the catalog base path for the local filesystem target."""
+class PolarsHandle:
+    """A stub handle for the Polars adapter (no real DB connection)."""
 
-    def __init__(self, path: str) -> None:
-        self.path = path
-
-    def close(self) -> None:
+    def close(self):
         pass
 
-
-class DatabricksConnectionHandle:
-    """Carries a live Databricks API client for the Unity Catalog target."""
-
-    def __init__(self, client: "Any", catalog: str, schema: str) -> None:
-        self.client = client
-        self.catalog = catalog
-        self.schema = schema
-
-    def close(self) -> None:
+    def rollback(self):
         pass
+
+    def cursor(self):
+        return PolarsCursor()
+
+
+class PolarsCursor:
+    """A stub cursor for the Polars adapter."""
+
+    def __init__(self):
+        self.description = []
+        self._rows = []
+
+    def execute(self, sql: str, bindings: Optional[Any] = None):
+        pass
+
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
+
+    def fetchmany(self, size: int):
+        return []
 
 
 class PolarsConnectionManager(BaseConnectionManager):
-    TYPE = "polars"
+    TYPE: str = "polars"
+
+    @contextmanager
+    def exception_handler(self, sql: str):
+        try:
+            yield
+        except Exception as e:
+            logger.debug(f"An exception occurred while executing query:\n{sql}\n")
+            raise DbtDatabaseError(str(e)) from e
 
     @classmethod
-    def open(cls, connection: Connection) -> Connection:
+    def open(cls, connection):
         if connection.state == ConnectionState.OPEN:
             return connection
-        creds = connection.credentials
-        if creds.host:
-            from dbt.adapters.polars._databricks import DatabricksClient, get_oauth_token
-            token = get_oauth_token(creds.host, creds.client_id, creds.client_secret)
-            client = DatabricksClient(creds.host, token)
-            connection.handle = DatabricksConnectionHandle(
-                client=client,
-                catalog=creds.catalog or creds.database,
-                schema=creds.schema,
-            )
-        else:
-            connection.handle = PolarsConnectionHandle(creds.path)
+
+        connection.handle = PolarsHandle()
         connection.state = ConnectionState.OPEN
         return connection
 
-    @classmethod
-    def get_response(cls, cursor) -> AdapterResponse:
-        return AdapterResponse(_message="OK")
-
-    def cancel(self, connection: Connection) -> None:
-        pass
-
-    @classmethod
-    def cancel_open(cls) -> List[str]:
-        return []
-
     def begin(self) -> None:
-        pass
+        connection = self.get_thread_connection()
+        connection.transaction_open = True
 
     def commit(self) -> None:
-        pass
+        connection = self.get_thread_connection()
+        connection.transaction_open = False
 
     def execute(
         self,
@@ -124,35 +141,15 @@ class PolarsConnectionManager(BaseConnectionManager):
         auto_begin: bool = False,
         fetch: bool = False,
         limit: Optional[int] = None,
-    ) -> Tuple[AdapterResponse, agate.Table]:
-        if not fetch:
-            return AdapterResponse(_message="OK"), agate.Table([])
+    ) -> tuple[AdapterResponse, agate.Table]:
+        return AdapterResponse(_message="OK"), empty_table()
 
-        import re as _re
-        from dbt.adapters.polars._catalog import build_sql_context, cte_names, strip_qualifiers
+    @classmethod
+    def get_response(cls, cursor):
+        pass
 
-        cleaned = strip_qualifiers(sql)
-        exclude = cte_names(cleaned)
-        needed = set(_re.findall(r'"(\w+)"', cleaned)) - exclude
+    def cancel(self, connection):
+        pass
 
-        handle = self.get_thread_connection().handle
-        if isinstance(handle, DatabricksConnectionHandle):
-            from dbt.adapters.polars._databricks import build_uc_sql_context
-            ctx = build_uc_sql_context(handle.client, handle.catalog, handle.schema, exclude=exclude, needed=needed)
-        else:
-            ctx = build_sql_context(handle.path, exclude=exclude)
-
-        df = ctx.execute(cleaned, eager=True)
-        if limit is not None:
-            df = df.head(limit)
-
-        return AdapterResponse(_message="OK"), agate.Table(
-            df.rows(), column_names=df.columns
-        )
-
-    @contextmanager
-    def exception_handler(self, sql: str):
-        try:
-            yield
-        except Exception as exc:
-            raise RuntimeError(str(exc)) from exc
+    def cancel_open(self) -> Optional[list[str]]:
+        return []

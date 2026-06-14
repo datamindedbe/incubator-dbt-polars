@@ -176,28 +176,3 @@ Example 3 of 3 of required macros that does not have a default implementation.
 '''Returns current UTC time'''
 {# docs show not to be implemented currently. #}
 {% endmacro %}
-
-{% macro polars__create_view_as(relation, sql) -%}
-  {{ adapter.execute_select_as_delta(sql, relation.database, relation.schema, relation.identifier) }}
-{%- endmacro %}
-
-{% macro polars__create_table_as(temporary, relation, compiled_code, language='sql') -%}
-  {%- if language == 'python' -%}
-    {{ adapter.submit_python_job(model, compiled_code) }}
-  {%- else -%}
-    {{ adapter.execute_select_as_delta(compiled_code, relation.database, relation.schema, relation.identifier) }}
-  {%- endif -%}
-{%- endmacro %}
-
-{% macro polars__create_csv_table(model, agate_table) %}
-  {# No-op: Polars writes Delta tables via load_dataframe, no DDL needed #}
-{% endmacro %}
-
-{% macro polars__reset_csv_table(model, full_refresh, old_relation, agate_table) %}
-  {# No-op: overwrite mode in load_dataframe handles this #}
-{% endmacro %}
-
-{% macro polars__load_csv_rows(model, agate_table) %}
-  {%- set column_override = model['config'].get('column_types', {}) -%}
-  {{ adapter.load_dataframe(model.database, model.schema, model.alias, agate_table, column_override) }}
-{% endmacro %}

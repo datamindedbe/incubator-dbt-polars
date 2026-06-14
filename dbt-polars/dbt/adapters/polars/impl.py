@@ -1,442 +1,269 @@
-import os
-import shutil
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Type
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
 
 import polars as pl
-from dbt.adapters.base import BaseAdapter, BaseRelation
-from dbt.adapters.base.impl import PythonJobHelper
-from dbt.adapters.base.meta import available
-from dbt.adapters.base.column import Column
-from dbt.adapters.base.relation import RelationType
-from dbt.adapters.contracts.connection import AdapterResponse
 
-from dbt.adapters.polars.connections import (
-    DatabricksConnectionHandle,
-    PolarsConnectionManager,
-)
+from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
+from dbt.adapters.base import BaseAdapter, BaseRelation, available, Column
+from dbt.adapters.polars.catalogs import BaseCatalog, CATALOG_REGISTRY
+from dbt.adapters.polars.relation import PolarsRelation
+from dbt_common.exceptions import DbtRuntimeError
+from dbt_common.clients.agate_helper import Number, Integer as DbtInteger
+from dbt.adapters.events.logging import AdapterLogger
 
-# Maps SQL type strings (from seeds `column_types` config) to Polars types.
-_SQL_TO_POLARS: Dict[str, type] = {
-    "int": pl.Int64,
-    "integer": pl.Int64,
+if TYPE_CHECKING:
+    import agate
+
+_POLARS_TYPE_MAP: dict[str, pl.PolarsDataType] = {
+    # Polars-native names
+    "Int8": pl.Int8,
+    "Int16": pl.Int16,
+    "Int32": pl.Int32,
+    "Int64": pl.Int64,
+    "UInt8": pl.UInt8,
+    "UInt16": pl.UInt16,
+    "UInt32": pl.UInt32,
+    "UInt64": pl.UInt64,
+    "Float32": pl.Float32,
+    "Float64": pl.Float64,
+    "Boolean": pl.Boolean,
+    "Utf8": pl.Utf8,
+    "String": pl.Utf8,
+    "Categorical": pl.Categorical,
+    "Date": pl.Date,
+    "Datetime": pl.Datetime,
+    "Time": pl.Time,
+    "Duration": pl.Duration,
+    "Decimal": pl.Decimal,
+    "Binary": pl.Binary,
+    # SQL aliases (lowercase)
+    "int8": pl.Int8,
+    "int16": pl.Int16,
+    "int32": pl.Int32,
+    "int64": pl.Int64,
+    "tinyint": pl.Int8,
+    "smallint": pl.Int16,
+    "integer": pl.Int32,
+    "int": pl.Int32,
+    "int4": pl.Int32,
+    "int2": pl.Int16,
     "bigint": pl.Int64,
-    "smallint": pl.Int32,
-    "float": pl.Float64,
+    "uint8": pl.UInt8,
+    "uint16": pl.UInt16,
+    "uint32": pl.UInt32,
+    "uint64": pl.UInt64,
+    "float4": pl.Float32,
+    "real": pl.Float32,
+    "float32": pl.Float32,
+    "float8": pl.Float64,
     "double": pl.Float64,
-    "numeric": pl.Float64,
-    "decimal": pl.Float64,
+    "float64": pl.Float64,
+    "float": pl.Float64,
+    "double precision": pl.Float64,
     "varchar": pl.Utf8,
-    "string": pl.Utf8,
     "text": pl.Utf8,
+    "string": pl.Utf8,
     "char": pl.Utf8,
+    "character varying": pl.Utf8,
+    "utf8": pl.Utf8,
+    "categorical": pl.Categorical,
     "boolean": pl.Boolean,
     "bool": pl.Boolean,
     "date": pl.Date,
     "timestamp": pl.Datetime,
     "datetime": pl.Datetime,
+    "time": pl.Time,
+    "duration": pl.Duration,
+    "decimal": pl.Decimal,
+    "numeric": pl.Decimal,
+    "binary": pl.Binary,
 }
 
 
-def _agate_to_polars(agate_table, column_override: Dict[str, str]) -> pl.DataFrame:
-    """Convert dbt's agate.Table (loaded from CSV) to a Polars DataFrame."""
-    columns = {
-        col: [row[i] for row in agate_table.rows]
-        for i, col in enumerate(agate_table.column_names)
-    }
-    df = pl.DataFrame(columns, infer_schema_length=None)
+def _resolve_polars_type(type_str: str) -> pl.PolarsDataType:
+    key = type_str.split("(")[0].strip()
+    dtype = _POLARS_TYPE_MAP.get(key) or _POLARS_TYPE_MAP.get(key.lower())
+    if dtype is None:
+        raise DbtRuntimeError(f"Unknown column type: '{type_str}'")
+    return dtype
 
-    for col, type_str in (column_override or {}).items():
-        base_type = type_str.lower().split("(")[0].strip()
-        polars_type = _SQL_TO_POLARS.get(base_type)
-        if polars_type and col in df.columns:
-            df = df.with_columns(pl.col(col).cast(polars_type))
 
-    return df
+logger = AdapterLogger("polars")
 
 
 class PolarsAdapter(BaseAdapter):
+    """
+    Controls actual implmentation of adapter, and ability to override certain methods.
+    """
+
     ConnectionManager = PolarsConnectionManager
+    Relation = PolarsRelation
+    CatalogAdapters: dict[str, BaseCatalog] = {}
+
+    def get_catalog(self, name: Optional[str]) -> BaseCatalog:
+        connection = self.connections.get_thread_connection()
+        credentials: PolarsCredentials = connection.credentials
+
+        # Unquote the catalog name if it's quoted
+        if name is not None:
+            name = name.strip('"')
+
+        if not name:
+            name = credentials.database
+
+        if name in self.CatalogAdapters:
+            return self.CatalogAdapters[name]
+
+        if name not in credentials.catalog_configs:
+            raise DbtRuntimeError(f"Unknown catalog {name}")
+
+        config = credentials.catalog_configs.get(name)
+        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](config)
+
+        return self.CatalogAdapters[name]
 
     @classmethod
-    def date_function(cls) -> str:
-        return "now()"
+    def date_function(cls):
+        """
+        Returns canonical date func
+        """
+        return "datenow()"
 
     @classmethod
     def is_cancelable(cls) -> bool:
         return False
 
-    # ------------------------------------------------------------------
-    # Python model support
-    # ------------------------------------------------------------------
-
-    @property
-    def python_submission_helpers(self) -> Dict[str, Type[PythonJobHelper]]:
-        from dbt.adapters.polars._python import PolarsPythonJobHelper
-        return {"polars": PolarsPythonJobHelper}
-
-    @property
-    def default_python_submission_method(self) -> str:
-        return "polars"
-
-    def generate_python_submission_response(self, submission_result: Any) -> AdapterResponse:
-        return AdapterResponse(_message="OK")
-
-    # ------------------------------------------------------------------
-    # Handle helpers
-    # ------------------------------------------------------------------
-
-    def _handle(self):
-        return self.connections.get_thread_connection().handle
-
-    def _is_databricks(self) -> bool:
-        return isinstance(self._handle(), DatabricksConnectionHandle)
-
-    def _uc(self) -> DatabricksConnectionHandle:
-        return self._handle()
-
-    # ------------------------------------------------------------------
-    # Local helpers (only used when not Databricks)
-    # ------------------------------------------------------------------
-
-    def _catalog_path(self) -> str:
-        return self.config.credentials.path
-
-    def _table_path(self, schema: str, identifier: str) -> str:
-        return os.path.join(self._catalog_path(), schema, identifier)
-
-    # ------------------------------------------------------------------
-    # Schema management
-    # ------------------------------------------------------------------
-
+    # --- Catalog operations ---
     def create_schema(self, relation: BaseRelation) -> None:
-        if self._is_databricks():
-            uc = self._uc()
-            try:
-                uc.client.create_schema(uc.catalog, relation.schema)
-            except Exception:
-                pass  # already exists
-        else:
-            os.makedirs(
-                os.path.join(self._catalog_path(), relation.schema),
-                exist_ok=True,
-            )
+        self.get_catalog(relation.catalog).create_schema(relation)
 
     def drop_schema(self, relation: BaseRelation) -> None:
-        if self._is_databricks():
-            uc = self._uc()
-            uc.client.drop_schema(uc.catalog, relation.schema)
-        else:
-            schema_dir = os.path.join(self._catalog_path(), relation.schema)
-            if os.path.isdir(schema_dir):
-                shutil.rmtree(schema_dir)
+        self.get_catalog(relation.catalog).drop_schema(relation)
 
-    def list_schemas(self, database: str) -> List[str]:
-        if self._is_databricks():
-            uc = self._uc()
-            return uc.client.list_schemas(uc.catalog)
-        root = self._catalog_path()
-        if not os.path.isdir(root):
+    def list_schemas(self, database: str) -> list[str]:
+        return self.get_catalog(database).list_schemas()
+
+    def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
+        if goal.catalog != current.catalog:
+            # TODO: test this
+            raise DbtRuntimeError(
+                f"The provider currently doesn't support expanding column types across catalogs. {current.catalog}.{current.schema}.{current.table} to {goal.catalog}.{goal.schema}.{goal.table} "
+            )
+
+        self.get_catalog(goal.catalog).expand_column_types(goal, current)
+
+    def get_columns_in_relation(self, relation: BaseRelation) -> list[Column]:
+        catalog = self.get_catalog(relation.catalog)
+        if not catalog.table_exists(relation):
             return []
-        return [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
-
-    # ------------------------------------------------------------------
-    # Relation management
-    # ------------------------------------------------------------------
+        schema = catalog.get_relation(relation).collect_schema()
+        return [Column(col, str(type)) for col, type in schema.items()]
 
     def list_relations_without_caching(
         self, schema_relation: BaseRelation
-    ) -> List[BaseRelation]:
-        if self._is_databricks():
-            uc = self._uc()
-            tables = uc.client.list_tables(uc.catalog, schema_relation.schema)
-            return [
-                self.Relation.create(
-                    database=schema_relation.database,
-                    schema=schema_relation.schema,
-                    identifier=t["name"],
-                    type=RelationType.Table,
-                )
-                for t in tables
-            ]
-        schema_dir = os.path.join(self._catalog_path(), schema_relation.schema)
-        if not os.path.isdir(schema_dir):
-            return []
-        return [
-            self.Relation.create(
-                database=schema_relation.database,
-                schema=schema_relation.schema,
-                identifier=name,
-                type=RelationType.Table,
-            )
-            for name in os.listdir(schema_dir)
-            if os.path.isdir(os.path.join(schema_dir, name))
-        ]
-
-    def drop_relation(self, relation: BaseRelation) -> None:
-        if self._is_databricks():
-            uc = self._uc()
-            try:
-                uc.client.drop_table(uc.catalog, relation.schema, relation.identifier)
-            except Exception:
-                pass
-        else:
-            path = self._table_path(relation.schema, relation.identifier)
-            if os.path.isdir(path):
-                shutil.rmtree(path)
+    ) -> list[BaseRelation]:
+        return self.get_catalog(schema_relation.catalog).list_relations_without_caching(
+            schema_relation
+        )
 
     def rename_relation(
         self, from_relation: BaseRelation, to_relation: BaseRelation
     ) -> None:
-        if self._is_databricks():
-            # UC rename only updates the table name in the metastore — the
-            # storage_location stays pointing at the old path (e.g.
-            # test_select__dbt_tmp).  On the next run dbt tries to create
-            # test_select__dbt_tmp again, and UC rejects it as LOCATION_OVERLAP.
-            #
-            # Fix: copy the data to the canonical final path and re-register,
-            # then drop the source entry.  The final table always lives at
-            # {schema_root}/{final_name}, regardless of what name dbt used
-            # for the temp relation.
-            uc = self._uc()
-            from_info = uc.client.get_table(
-                uc.catalog, from_relation.schema, from_relation.identifier
+        if from_relation.catalog != to_relation.catalog:
+            # TODO: is this relevant, does dbt support this?
+            raise DbtRuntimeError(
+                f"The provider currently doesn't support renaming tables across catalogs. {from_relation.catalog}.{from_relation.schema}.{from_relation.table} to {to_relation.catalog}.{to_relation.schema}.{to_relation.table} "
             )
-            read_creds = uc.client.vend_storage_credentials(
-                from_info["table_id"], "READ"
-            )
-            df = pl.scan_delta(
-                from_info["storage_location"], storage_options=read_creds
-            ).collect()
-            uc.client.write_and_register(
-                df, uc.catalog, to_relation.schema, to_relation.identifier
-            )
-            uc.client.drop_table(
-                uc.catalog, from_relation.schema, from_relation.identifier
-            )
-        else:
-            shutil.move(
-                self._table_path(from_relation.schema, from_relation.identifier),
-                self._table_path(to_relation.schema, to_relation.identifier),
-            )
+        return self.get_catalog(from_relation.catalog).rename_relation(
+            from_relation, to_relation
+        )
+
+    def drop_relation(self, relation: PolarsRelation) -> None:
+        self.get_catalog(relation.catalog).drop_relation(relation)
 
     def truncate_relation(self, relation: BaseRelation) -> None:
-        if self._is_databricks():
-            uc = self._uc()
-            try:
-                info = uc.client.get_table(
-                    uc.catalog, relation.schema, relation.identifier
-                )
-                table_id = info["table_id"]
-                location = info["storage_location"]
-                write_creds = uc.client.vend_storage_credentials(table_id, "READ_WRITE")
-                schema = pl.scan_delta(location, storage_options=write_creds).schema
-                pl.DataFrame(schema=schema).write_delta(
-                    location, mode="overwrite", storage_options=write_creds
-                )
-            except Exception:
-                pass
-        else:
-            path = self._table_path(relation.schema, relation.identifier)
-            try:
-                self._scan_delta_table(path).limit(0).collect().write_delta(
-                    path, mode="overwrite"
-                )
-            except Exception:
-                pass
+        self.get_catalog(relation.catalog).truncate_relation(relation)
 
-    # ------------------------------------------------------------------
-    # Column operations
-    # ------------------------------------------------------------------
-
-    def get_columns_in_relation(self, relation: BaseRelation) -> List[Column]:
-        if self._is_databricks():
-            uc = self._uc()
-            try:
-                info = uc.client.get_table(
-                    uc.catalog, relation.schema, relation.identifier
-                )
-                return [
-                    Column(col["name"], col.get("type_text", "string"))
-                    for col in info.get("columns", [])
-                ]
-            except Exception:
-                return []
-        path = self._table_path(relation.schema, relation.identifier)
-        try:
-            schema = self._scan_delta_table(path).schema
-            return [Column(col, str(dtype)) for col, dtype in schema.items()]
-        except Exception:
-            return []
-
-    def _get_one_catalog(
-        self,
-        information_schema: Any,
-        schemas: Set[str],
-        used_schemas: FrozenSet[Tuple[str, str]],
-    ) -> "agate.Table":
-        import agate
-
-        column_names = [
-            "table_database", "table_schema", "table_name", "table_type",
-            "table_comment", "column_name", "column_index", "column_type",
-            "column_comment",
-        ]
-        rows = []
-
-        if self._is_databricks():
-            uc = self._uc()
-            for schema_name in schemas:
-                for table in uc.client.list_tables(uc.catalog, schema_name):
-                    name = table.get("name", "")
-                    if not name:
-                        continue
-                    try:
-                        info = uc.client.get_table(uc.catalog, schema_name, name)
-                        for i, col in enumerate(info.get("columns", [])):
-                            rows.append((
-                                uc.catalog, schema_name, name, "table", None,
-                                col["name"], i, col.get("type_text", "string"), None,
-                            ))
-                    except Exception:
-                        pass
-        else:
-            database = self.config.credentials.database
-            for schema_name in schemas:
-                schema_dir = os.path.join(self._catalog_path(), schema_name)
-                if not os.path.isdir(schema_dir):
-                    continue
-                for table_name in os.listdir(schema_dir):
-                    table_dir = os.path.join(schema_dir, table_name)
-                    if not os.path.isdir(table_dir):
-                        continue
-                    if not os.path.exists(os.path.join(table_dir, "_delta_log")):
-                        continue
-                    try:
-                        table_schema = self._scan_delta_table(table_dir).collect_schema()
-                        for i, (col_name, dtype) in enumerate(table_schema.items()):
-                            rows.append((
-                                database, schema_name, table_name, "table", None,
-                                col_name, i, str(dtype), None,
-                            ))
-                    except Exception:
-                        pass
-
-        return agate.Table(rows, column_names=column_names)
-
-    def expand_column_types_if_needed(
-        self, goal: BaseRelation, current: BaseRelation
-    ) -> None:
-        pass  # Delta Lake handles schema evolution natively
-
-    def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
-        pass
+    # --- Type conversions ---
+    @classmethod
+    def convert_dbt_integer_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+        return "Int64"
 
     @classmethod
-    def quote(cls, identifier: str) -> str:
-        return '"{}"'.format(identifier)
+    def convert_text_type(cls, agate_table: agate.Table, col_idx: int) -> str:
+        return "Utf8"
 
     @classmethod
-    def convert_text_type(cls, agate_table, col_idx: int) -> str:
-        return "text"
-
-    @classmethod
-    def convert_number_type(cls, agate_table, col_idx: int) -> str:
+    def convert_number_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         import agate
 
         decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))
-        return "float8" if decimals else "integer"
+        return "Float64" if decimals else "Int64"
 
     @classmethod
-    def convert_boolean_type(cls, agate_table, col_idx: int) -> str:
-        return "boolean"
+    def convert_boolean_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+        return "Boolean"
 
     @classmethod
-    def convert_date_type(cls, agate_table, col_idx: int) -> str:
-        return "date"
+    def convert_datetime_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+        return "Datetime"
 
     @classmethod
-    def convert_time_type(cls, agate_table, col_idx: int) -> str:
-        return "time"
+    def convert_date_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+        return "Date"
 
     @classmethod
-    def convert_datetime_type(cls, agate_table, col_idx: int) -> str:
-        return "timestamp"
-
-    # ------------------------------------------------------------------
-    # dbt run: execute a compiled SQL model and write as a Delta table
-    # ------------------------------------------------------------------
-
-    def _scan_delta_table(self, table_dir: str) -> pl.LazyFrame:
-        from dbt.adapters.polars._catalog import scan_delta_table
-        return scan_delta_table(table_dir)
+    def convert_time_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+        return "Duration"
 
     @available
-    def execute_select_as_delta(
+    def polars_load_csv_rows(
         self,
-        sql: str,
-        database: str,
-        schema: str,
-        identifier: str,
+        relation: PolarsRelation,
+        agate_table: "agate.Table",
+        column_types: dict[str, str],
     ) -> None:
-        import re as _re
-        import time as _time
-        from dbt.adapters.polars._catalog import cte_names, strip_qualifiers
+        import agate
 
-        t0 = _time.perf_counter()
-        cleaned = strip_qualifiers(sql)
-        exclude = cte_names(cleaned)
-        needed = set(_re.findall(r'"(\w+)"', cleaned)) - exclude
+        data = {
+            col: [row[i] for row in agate_table.rows]
+            for i, col in enumerate(agate_table.column_names)
+        }
+        df = pl.DataFrame(data)
 
-        if self._is_databricks():
-            from dbt.adapters.polars._databricks import build_uc_sql_context
-            uc = self._uc()
+        agate_type_converters = {
+            DbtInteger: self.convert_dbt_integer_type,
+            Number: self.convert_number_type,
+            agate.Text: self.convert_text_type,
+            agate.Number: self.convert_number_type,
+            agate.Boolean: self.convert_boolean_type,
+            agate.DateTime: self.convert_datetime_type,
+            agate.Date: self.convert_date_type,
+            agate.TimeDelta: self.convert_time_type,
+        }
 
-            t1 = _time.perf_counter()
-            ctx = build_uc_sql_context(uc.client, uc.catalog, schema, exclude=exclude, needed=needed)
-            t2 = _time.perf_counter()
+        casts = []
+        for col_idx, col_name in enumerate(agate_table.column_names):
+            if col_name in column_types:
+                type_str = column_types[col_name]
+            else:
+                converter = agate_type_converters.get(
+                    type(agate_table.column_types[col_idx])
+                )
+                if converter is None:
+                    continue
+                type_str = converter(agate_table, col_idx)
+            casts.append(pl.col(col_name).cast(_resolve_polars_type(type_str)))
 
-            result_df = ctx.execute(cleaned).collect()
-            t3 = _time.perf_counter()
+        if casts:
+            df = df.with_columns(casts)
 
-            uc.client.write_and_register(result_df, uc.catalog, schema, identifier)
-            t4 = _time.perf_counter()
+        self.get_catalog(relation.catalog).write_relation(relation, df)
 
-            import sys as _sys
-            print(
-                f"[timing] {identifier}: "
-                f"build_context={t2-t1:.2f}s  "
-                f"execute+collect={t3-t2:.2f}s  "
-                f"write={t4-t3:.2f}s  "
-                f"total={t4-t0:.2f}s  "
-                f"(needed={sorted(needed)})",
-                file=_sys.stderr,
-            )
-        else:
-            from dbt.adapters.polars._catalog import build_sql_context
-            build_sql_context(self._catalog_path(), exclude=exclude).execute(cleaned).collect(
-            ).write_delta(self._table_path(schema, identifier), mode="overwrite",
-                          delta_write_options={"schema_mode": "overwrite"})
+    @classmethod
+    def quote(cls, identifier: str) -> str:
+        return f'"{identifier}"'
 
-    # ------------------------------------------------------------------
-    # dbt seed: write an agate.Table (CSV) as a Delta table
-    # ------------------------------------------------------------------
 
-    @available
-    def load_dataframe(
-        self,
-        database: Optional[str],
-        schema: str,
-        table_name: str,
-        agate_table,
-        column_override: Dict[str, str],
-    ) -> None:
-        df = _agate_to_polars(agate_table, column_override)
-
-        if self._is_databricks():
-            uc = self._uc()
-            uc.client.write_and_register(df, uc.catalog, schema, table_name)
-        else:
-            path = self._table_path(schema, table_name)
-            os.makedirs(os.path.join(self._catalog_path(), schema), exist_ok=True)
-            df.write_delta(path, mode="overwrite",
-                           delta_write_options={"schema_mode": "overwrite"})
+# may require more build out to make more user friendly to confer with team and community.
