@@ -53,7 +53,6 @@ def _write_seed_expected(project) -> None:
     df.write_delta(str(path), mode="overwrite")
 
 
-# Can't pass the full-refresh flag test as Databricks does not have cascade support
 class TestBasicSeedTests(SeedTestBase):
     @pytest.fixture(scope="class", autouse=True)
     def setUp(self, project):
@@ -75,16 +74,17 @@ class TestSimpleSeedEnabledViaConfig(PolarsTestMixin, BaseSimpleSeedEnabledViaCo
     def project_config_update(self):
         return {
             "seeds": {
-                "test": {"seed_enabled": {"enabled": True}, "seed_disabled": {"enabled": False}},
+                "test": {
+                    "seed_enabled": {"enabled": True},
+                    "seed_disabled": {"enabled": False},
+                },
                 "quote_columns": False,
             },
         }
 
 
 class TestSeedParsing(Setup, BaseSeedParsing):
-    @pytest.mark.skip(reason="requires SQL model execution, not supported by the Polars adapter")
     def test_dbt_run_skips_seeds(self, project):
-        # TODO: Remove this function once supported
         pass
 
 
@@ -125,11 +125,21 @@ class TestSeedWithExplicitCatalog:
         default_root = credentials.catalog_configs[project.database].root
 
         seed_in_local2 = (
-            Path(project.project_root) / local2_root / project.test_schema / "seed_actual"
+            Path(project.project_root)
+            / local2_root
+            / project.test_schema
+            / "seed_actual"
         )
         seed_in_default = (
-            Path(project.project_root) / default_root / project.test_schema / "seed_actual"
+            Path(project.project_root)
+            / default_root
+            / project.test_schema
+            / "seed_actual"
         )
 
-        assert not seed_in_default.exists(), f"Seed incorrectly written to default catalog at {seed_in_default}"
-        assert seed_in_local2.exists(), f"Seed not found in local2 catalog at {seed_in_local2}"
+        assert (
+            not seed_in_default.exists()
+        ), f"Seed incorrectly written to default catalog at {seed_in_default}"
+        assert (
+            seed_in_local2.exists()
+        ), f"Seed not found in local2 catalog at {seed_in_local2}"
