@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 import polars as pl
+import sqlglot
+import sqlglot.expressions as exp
 
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.base import BaseAdapter, BaseRelation, available, Column
+from dbt.adapters.base.relation import RelationType
 from dbt.adapters.polars.catalogs import BaseCatalog, CATALOG_REGISTRY
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
@@ -90,6 +93,32 @@ def _resolve_polars_type(type_str: str) -> pl.PolarsDataType:
 
 
 logger = AdapterLogger("polars")
+
+
+def _parse_and_rewrite(sql: str) -> tuple[str, list[tuple[str | None, str | None, str]]]:
+    """Parse SQL with sqlglot, strip catalog/schema qualifiers from table refs.
+
+    dbt compiles {{ ref('x') }} to "catalog"."schema"."x". Polars SQLContext only
+    understands simple names, so qualifiers must be stripped before execution.
+
+    Returns the rewritten SQL and a list of (catalog, schema, identifier) tuples
+    for each table reference found.
+    """
+    ast = sqlglot.parse_one(sql)
+    refs: list[tuple[str | None, str | None, str]] = []
+
+    def strip_qualifiers(node: exp.Expression) -> exp.Expression:
+        if isinstance(node, exp.Table) and node.name:
+            refs.append((node.catalog or None, node.db or None, node.name))
+            if node.catalog or node.db:
+                return exp.Table(
+                    this=exp.Identifier(this=node.name, quoted=node.args["this"].quoted),
+                    alias=node.args.get("alias"),
+                )
+        return node
+
+    rewritten = ast.transform(strip_qualifiers)
+    return rewritten.sql(), refs
 
 
 class PolarsAdapter(BaseAdapter):
@@ -264,6 +293,31 @@ class PolarsAdapter(BaseAdapter):
     @classmethod
     def quote(cls, identifier: str) -> str:
         return f'"{identifier}"'
+
+    def _build_sql_context(
+        self, refs: list[tuple[str | None, str | None, str]]
+    ) -> pl.SQLContext:
+        credentials: PolarsCredentials = self.connections.get_thread_connection().credentials
+        frames: dict[str, pl.LazyFrame] = {}
+        for catalog_name, schema_name, identifier in refs:
+            resolved_catalog = catalog_name or credentials.catalog
+            resolved_schema = schema_name or credentials.schema
+            catalog = self.get_catalog(resolved_catalog)
+            rel = PolarsRelation.create(
+                database=resolved_catalog,
+                schema=resolved_schema,
+                identifier=identifier,
+                type=RelationType.Table,
+            )
+            if catalog.table_exists(rel):
+                frames[identifier] = catalog.get_relation(rel)
+        return pl.SQLContext(frames)
+
+    @available
+    def polars_execute_model(self, relation: PolarsRelation, sql: str) -> None:
+        rewritten_sql, refs = _parse_and_rewrite(sql)
+        result = self._build_sql_context(refs).execute(rewritten_sql).collect()
+        self.get_catalog(relation.catalog).write_relation(relation, result)
 
 
 # may require more build out to make more user friendly to confer with team and community.

@@ -71,7 +71,14 @@ class TestEmptySeed(BaseTestEmptySeed):
 
 
 class TestSimpleSeedEnabledViaConfig(PolarsTestMixin, BaseSimpleSeedEnabledViaConfig):
-    pass
+    @pytest.fixture(scope="class")
+    def project_config_update(self):
+        return {
+            "seeds": {
+                "test": {"seed_enabled": {"enabled": True}, "seed_disabled": {"enabled": False}},
+                "quote_columns": False,
+            },
+        }
 
 
 class TestSeedParsing(Setup, BaseSeedParsing):
