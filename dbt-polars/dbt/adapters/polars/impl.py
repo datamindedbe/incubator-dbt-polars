@@ -11,8 +11,14 @@ from dbt.adapters.base import BaseAdapter, BaseRelation, available, Column
 from dbt.adapters.base.relation import RelationType
 from dbt.adapters.polars.catalogs import BaseCatalog, CATALOG_REGISTRY
 from dbt.adapters.polars.relation import PolarsRelation
+from dbt.adapters.contracts.connection import AdapterResponse
 from dbt_common.exceptions import DbtRuntimeError
-from dbt_common.clients.agate_helper import Number, Integer as DbtInteger
+from dbt_common.clients.agate_helper import (
+    Number,
+    Integer as DbtInteger,
+    empty_table,
+    table_from_data,
+)
 from dbt.adapters.events.logging import AdapterLogger
 
 if TYPE_CHECKING:
@@ -313,11 +319,29 @@ class PolarsAdapter(BaseAdapter):
                 frames[identifier] = catalog.get_relation(rel)
         return pl.SQLContext(frames)
 
+    def _run_sql(self, sql: str) -> pl.DataFrame:
+        rewritten_sql, refs = _parse_and_rewrite(sql)
+        return self._build_sql_context(refs).execute(rewritten_sql).collect()
+
     @available
     def polars_execute_model(self, relation: PolarsRelation, sql: str) -> None:
-        rewritten_sql, refs = _parse_and_rewrite(sql)
-        result = self._build_sql_context(refs).execute(rewritten_sql).collect()
+        result = self._run_sql(sql)
         self.get_catalog(relation.catalog).write_relation(relation, result)
+
+    def execute(
+        self,
+        sql: str,
+        auto_begin: bool = False,
+        fetch: bool = False,
+        limit: Optional[int] = None,
+    ) -> tuple[AdapterResponse, agate.Table]:
+        if not fetch:
+            return AdapterResponse(_message="OK"), empty_table()
+
+        df = self._run_sql(sql)
+        if limit is not None and limit >= 0:
+            df = df.head(limit)
+        return AdapterResponse(_message="OK"), table_from_data(df.to_dicts(), df.columns)
 
 
 # may require more build out to make more user friendly to confer with team and community.
