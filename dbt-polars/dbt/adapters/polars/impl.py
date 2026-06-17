@@ -103,28 +103,70 @@ logger = AdapterLogger("polars")
 
 def _parse_and_rewrite(
     sql: str,
-) -> tuple[str, list[tuple[str | None, str | None, str]]]:
-    """Parse SQL with sqlglot, strip catalog/schema qualifiers from table refs.
+) -> tuple[str, dict[str, PolarsRelation]]:
+    """Strip catalog/schema qualifiers from three-level dbt refs.
 
-    dbt compiles {{ ref('x') }} to "catalog"."schema"."x". Polars SQLContext only
-    understands simple names, so qualifiers must be stripped before execution.
+    When the same identifier appears from multiple schemas, frames are renamed to
+    catalog__schema__identifier to avoid collisions in SQLContext. Raises
+    DbtRuntimeError when a collision cannot be safely resolved because the bare
+    table name is used as a column qualifier (e.g. orders.id) without an alias.
 
-    Returns the rewritten SQL and a list of (catalog, schema, identifier) tuples
-    for each table reference found.
+    Returns the rewritten SQL and a dict mapping frame_name to PolarsRelation.
     """
     ast = sqlglot.parse_one(sql)
-    refs: list[tuple[str | None, str | None, str]] = []
+
+    qualified = [n for n in ast.find_all(exp.Table) if n.name and (n.catalog or n.db)]
+
+    # Detect identifiers that appear from more than one (catalog, schema) pair
+    identifier_sources: dict[str, set[tuple[str, str]]] = {}
+    for node in qualified:
+        identifier_sources.setdefault(node.name, set()).add(
+            (node.catalog, node.db)
+        )
+    colliding = {ident for ident, s in identifier_sources.items() if len(s) > 1}
+
+    if colliding:
+        column_qualifiers = {col.table for col in ast.find_all(exp.Column) if col.table}
+        for node in qualified:
+            if (
+                node.name in colliding
+                and not node.args.get("alias")
+                and node.name in column_qualifiers
+            ):
+                sources = identifier_sources[node.name]
+                raise DbtRuntimeError(
+                    f"Identifier '{node.name}' exists in multiple schemas "
+                    f"({', '.join(f'{c}.{s}' for c, s in sources)}) and is used as a "
+                    f"column qualifier (e.g. {node.name}.<col>) without a table alias. "
+                    f"Add an explicit alias to each occurrence to disambiguate."
+                )
+
+    rename_map: dict[tuple[str, str, str], str] = {
+        (node.catalog, node.db, node.name): (
+            f"{node.catalog.strip(chr(34))}"
+            f"__{node.db.strip(chr(34))}"
+            f"__{node.name}"
+        )
+        for node in qualified
+        if node.name in colliding
+    }
+
+    refs: dict[str, PolarsRelation] = {}
 
     def strip_qualifiers(node: exp.Expression) -> exp.Expression:
-        if isinstance(node, exp.Table) and node.name:
-            refs.append((node.catalog or None, node.db or None, node.name))
-            if node.catalog or node.db:
-                return exp.Table(
-                    this=exp.Identifier(
-                        this=node.name, quoted=node.args["this"].quoted
-                    ),
-                    alias=node.args.get("alias"),
-                )
+        if isinstance(node, exp.Table) and node.name and (node.catalog or node.db):
+            raw_key = (node.catalog, node.db, node.name)
+            frame_name = rename_map.get(raw_key, node.name)
+            refs[frame_name] = PolarsRelation.create(
+                database=node.catalog,
+                schema=node.db,
+                identifier=node.name,
+                type=RelationType.Table,
+            )
+            return exp.Table(
+                this=exp.Identifier(this=frame_name, quoted=False),
+                alias=node.args.get("alias"),
+            )
         return node
 
     rewritten = ast.transform(strip_qualifiers)
@@ -304,26 +346,11 @@ class PolarsAdapter(BaseAdapter):
     def quote(cls, identifier: str) -> str:
         return f'"{identifier}"'
 
-    def _build_sql_context(
-        self, refs: list[tuple[str | None, str | None, str]]
-    ) -> pl.SQLContext:
-        credentials: PolarsCredentials = (
-            self.connections.get_thread_connection().credentials
-        )
-        frames: dict[str, pl.LazyFrame] = {}
-        for catalog_name, schema_name, identifier in refs:
-            resolved_catalog = catalog_name or credentials.catalog
-            resolved_schema = schema_name or credentials.schema
-            catalog = self.get_catalog(resolved_catalog)
-            rel = PolarsRelation.create(
-                database=resolved_catalog,
-                schema=resolved_schema,
-                identifier=identifier,
-                type=RelationType.Table,
-            )
-            if catalog.table_exists(rel):
-                frames[identifier] = catalog.get_relation(rel)
-        return pl.SQLContext(frames)
+    def _build_sql_context(self, refs: dict[str, PolarsRelation]) -> pl.SQLContext:
+        return pl.SQLContext({
+            frame_name: self.get_catalog(rel.database).get_relation(rel)
+            for frame_name, rel in refs.items()
+        })
 
     def _run_sql(self, sql: str) -> pl.DataFrame:
         rewritten_sql, refs = _parse_and_rewrite(sql)
