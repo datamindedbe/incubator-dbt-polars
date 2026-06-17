@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional
 import polars as pl
 import sqlglot
 import sqlglot.expressions as exp
+from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.base import BaseAdapter, BaseRelation, available, Column
@@ -106,10 +107,15 @@ def _parse_and_rewrite(
 ) -> tuple[str, dict[str, PolarsRelation]]:
     """Strip catalog/schema qualifiers from three-level dbt refs.
 
-    When the same identifier appears from multiple schemas, frames are renamed to
-    catalog__schema__identifier to avoid collisions in SQLContext. Raises
-    DbtRuntimeError when a collision cannot be safely resolved because the bare
-    table name is used as a column qualifier (e.g. orders.id) without an alias.
+    Every qualified table claims its bare name in the flat SQLContext namespace;
+    an explicit alias claims a second, query-local name for the same table. When
+    a name is claimed by more than one distinct (catalog, schema, identifier) --
+    either because the same bare identifier is sourced from multiple schemas, or
+    because one table's alias collides with a different table's bare name --
+    the affected tables are renamed to catalog__schema__identifier to avoid
+    collisions in SQLContext. Raises DbtRuntimeError when a collision cannot be
+    safely resolved because the bare table name is used as a column qualifier
+    (e.g. orders.id) without an alias of its own.
 
     Returns the rewritten SQL and a dict mapping frame_name to PolarsRelation.
     """
@@ -117,27 +123,53 @@ def _parse_and_rewrite(
 
     qualified = [n for n in ast.find_all(exp.Table) if n.name and (n.catalog or n.db)]
 
-    # Detect identifiers that appear from more than one (catalog, schema) pair
+    # Map every name a table claims in the flat namespace (its bare identifier,
+    # plus its alias if any) back to the (catalog, schema, identifier) tables
+    # claiming it, so a name claimed by more than one distinct table -- via
+    # either route -- is detected as colliding.
+    identities_by_name: dict[str, set[tuple[str, str, str]]] = {}
     identifier_sources: dict[str, set[tuple[str, str]]] = {}
     for node in qualified:
-        identifier_sources.setdefault(node.name, set()).add(
-            (node.catalog, node.db)
-        )
-    colliding = {ident for ident, s in identifier_sources.items() if len(s) > 1}
+        identity = (node.catalog, node.db, node.name)
+        identities_by_name.setdefault(node.name, set()).add(identity)
+        identifier_sources.setdefault(node.name, set()).add((node.catalog, node.db))
+        if node.alias:
+            identities_by_name.setdefault(node.alias, set()).add(identity)
+
+    colliding = {name for name, idents in identities_by_name.items() if len(idents) > 1}
 
     if colliding:
-        column_qualifiers = {col.table for col in ast.find_all(exp.Column) if col.table}
-        for node in qualified:
-            if (
-                node.name in colliding
-                and not node.args.get("alias")
-                and node.name in column_qualifiers
-            ):
-                sources = identifier_sources[node.name]
+        # Resolve each qualified column reference to its actual source within
+        # its own scope (CTE/subquery-aware), rather than a flat textual match
+        # across the whole query -- an alias in one CTE must not be confused
+        # with an unrelated bare-name collision in another.
+        for scope in traverse_scope(ast):
+            for col in scope.columns:
+                if col.table not in colliding:
+                    continue
+                source = scope.sources.get(col.table)
+                if isinstance(source, Scope):
+                    continue  # resolves to a CTE/derived table, not a physical one
+                if isinstance(source, exp.Table) and source.args.get("alias"):
+                    continue  # bound through its own alias; the rename below
+                    # only touches the bare identifier, so this is unaffected
+
+                # Either this is the colliding table's own bare identifier, or
+                # the qualifier couldn't be resolved within this scope (e.g. a
+                # correlated reference into an outer scope). Don't risk
+                # silently mis-binding it -- require the user to disambiguate.
+                name = source.name if isinstance(source, exp.Table) else col.table
+                sources = identifier_sources.get(name, set())
+                if len(sources) > 1:
+                    detail = (
+                        "exists in multiple schemas "
+                        f"({', '.join(f'{c}.{s}' for c, s in sources)})"
+                    )
+                else:
+                    detail = "is also used as an alias for a different table"
                 raise DbtRuntimeError(
-                    f"Identifier '{node.name}' exists in multiple schemas "
-                    f"({', '.join(f'{c}.{s}' for c, s in sources)}) and is used as a "
-                    f"column qualifier (e.g. {node.name}.<col>) without a table alias. "
+                    f"Identifier '{name}' {detail} and is used as a "
+                    f"column qualifier (e.g. {name}.<col>) without a table alias. "
                     f"Add an explicit alias to each occurrence to disambiguate."
                 )
 
