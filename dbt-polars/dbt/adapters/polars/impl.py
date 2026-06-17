@@ -12,7 +12,7 @@ from dbt.adapters.base.relation import RelationType
 from dbt.adapters.polars.catalogs import BaseCatalog, CATALOG_REGISTRY
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.contracts.connection import AdapterResponse
-from dbt_common.exceptions import DbtRuntimeError
+from dbt_common.exceptions import DbtRuntimeError, CompilationError
 from dbt_common.clients.agate_helper import (
     Number,
     Integer as DbtInteger,
@@ -101,7 +101,9 @@ def _resolve_polars_type(type_str: str) -> pl.PolarsDataType:
 logger = AdapterLogger("polars")
 
 
-def _parse_and_rewrite(sql: str) -> tuple[str, list[tuple[str | None, str | None, str]]]:
+def _parse_and_rewrite(
+    sql: str,
+) -> tuple[str, list[tuple[str | None, str | None, str]]]:
     """Parse SQL with sqlglot, strip catalog/schema qualifiers from table refs.
 
     dbt compiles {{ ref('x') }} to "catalog"."schema"."x". Polars SQLContext only
@@ -118,7 +120,9 @@ def _parse_and_rewrite(sql: str) -> tuple[str, list[tuple[str | None, str | None
             refs.append((node.catalog or None, node.db or None, node.name))
             if node.catalog or node.db:
                 return exp.Table(
-                    this=exp.Identifier(this=node.name, quoted=node.args["this"].quoted),
+                    this=exp.Identifier(
+                        this=node.name, quoted=node.args["this"].quoted
+                    ),
                     alias=node.args.get("alias"),
                 )
         return node
@@ -303,7 +307,9 @@ class PolarsAdapter(BaseAdapter):
     def _build_sql_context(
         self, refs: list[tuple[str | None, str | None, str]]
     ) -> pl.SQLContext:
-        credentials: PolarsCredentials = self.connections.get_thread_connection().credentials
+        credentials: PolarsCredentials = (
+            self.connections.get_thread_connection().credentials
+        )
         frames: dict[str, pl.LazyFrame] = {}
         for catalog_name, schema_name, identifier in refs:
             resolved_catalog = catalog_name or credentials.catalog
@@ -323,6 +329,106 @@ class PolarsAdapter(BaseAdapter):
         rewritten_sql, refs = _parse_and_rewrite(sql)
         return self._build_sql_context(refs).execute(rewritten_sql).collect()
 
+    def _apply_schema_change(
+        self,
+        catalog,
+        relation: PolarsRelation,
+        new_data: pl.DataFrame,
+        on_schema_change: str,
+    ) -> tuple[pl.DataFrame | None, bool]:
+        """Apply on_schema_change policy before an incremental write.
+
+        Returns (data, allow_evolution):
+          - data: the DataFrame to write, possibly column-filtered or None if
+            sync_all_columns already performed a full rewrite (caller should return early)
+          - allow_evolution: True when the catalog should enable schema evolution
+            on the append (new columns present and policy permits them)
+        """
+        existing = {
+            col.name: col.dtype for col in self.get_columns_in_relation(relation)
+        }
+        new_cols = new_data.columns
+        added = set(new_cols) - set(existing.keys())
+        removed = set(existing.keys()) - set(new_cols)
+
+        if on_schema_change == "fail":
+            type_changes = {
+                col: (existing[col], str(new_data.schema[col]))
+                for col in new_cols
+                if col in existing and existing[col] != str(new_data.schema[col])
+            }
+            if added or removed or type_changes:
+                raise CompilationError(
+                    f"Schema change detected with on_schema_change='fail'. "
+                    f"Added: {added or 'none'}. Removed: {removed or 'none'}. "
+                    f"Type changes: {type_changes or 'none'}."
+                )
+            return new_data, False
+
+        if on_schema_change == "ignore":
+            return new_data.select([c for c in new_cols if c in existing]), False
+
+        if on_schema_change == "append_new_columns":
+            return new_data, bool(added)
+
+        if on_schema_change == "sync_all_columns":
+            if not removed:
+                return new_data, bool(added)
+            existing_df = catalog.get_relation(relation).collect()
+            if added:
+                existing_df = existing_df.with_columns(
+                    [
+                        pl.lit(None).cast(new_data.schema[col]).alias(col)
+                        for col in added
+                    ]
+                )
+            existing_df = existing_df.select(new_cols)
+            catalog.write_relation(relation, pl.concat([existing_df, new_data]))
+            return None, False
+
+        return new_data, False
+
+    @available
+    def polars_execute_incremental_model(
+        self,
+        relation: PolarsRelation,
+        sql: str,
+        unique_key: Optional[str | list[str]],
+        strategy: str,
+        on_schema_change: str,
+    ) -> None:
+        new_data = self._run_sql(sql)
+        catalog = self.get_catalog(relation.catalog)
+
+        new_data, allow_evolution = self._apply_schema_change(
+            catalog, relation, new_data, on_schema_change
+        )
+
+        if new_data is None:
+            return  # sync_all_columns already performed a full rewrite
+
+        if strategy == "append":
+            catalog.append_relation(
+                relation, new_data, allow_schema_evolution=allow_evolution
+            )
+        elif strategy == "merge":
+            if not unique_key:
+                raise DbtRuntimeError("'merge' strategy requires a unique_key")
+            keys = [unique_key] if isinstance(unique_key, str) else unique_key
+            predicate = " AND ".join(f"s.{k} = t.{k}" for k in keys)
+            catalog.merge_relation(relation, new_data, predicate)
+        elif strategy == "delete+insert":
+            if not unique_key:
+                raise DbtRuntimeError("'delete+insert' strategy requires a unique_key")
+            keys = [unique_key] if isinstance(unique_key, str) else unique_key
+            predicate = " AND ".join(f"s.{k} = t.{k}" for k in keys)
+            catalog.delete_matched_relation(relation, new_data, predicate)
+            catalog.append_relation(
+                relation, new_data, allow_schema_evolution=allow_evolution
+            )
+        else:
+            raise DbtRuntimeError(f"Unknown incremental strategy: {strategy!r}")
+
     @available
     def polars_execute_model(self, relation: PolarsRelation, sql: str) -> None:
         result = self._run_sql(sql)
@@ -341,7 +447,9 @@ class PolarsAdapter(BaseAdapter):
         df = self._run_sql(sql)
         if limit is not None and limit >= 0:
             df = df.head(limit)
-        return AdapterResponse(_message="OK"), table_from_data(df.to_dicts(), df.columns)
+        return AdapterResponse(_message="OK"), table_from_data(
+            df.to_dicts(), df.columns
+        )
 
 
 # may require more build out to make more user friendly to confer with team and community.

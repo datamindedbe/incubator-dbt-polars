@@ -10,6 +10,7 @@ dependencies = [
     "dbt-core>=1.11.2, <1.11.9",
     "deltalake>=1.6.0",
     "polars>=1.41.2",
+    "pyarrow>=24.0.0",
     "sqlglot>=30.11.0",
 ]
 

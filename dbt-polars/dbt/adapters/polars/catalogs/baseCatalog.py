@@ -51,6 +51,15 @@ class BaseCatalog(abc.ABC):
         self, schema_relation: BaseRelation
     ) -> list[BaseRelation]: ...
 
+    @abstractmethod
+    def append_relation(self, relation: BaseRelation, df: pl.DataFrame, allow_schema_evolution: bool = False) -> None: ...
+
+    @abstractmethod
+    def merge_relation(self, relation: BaseRelation, df: pl.DataFrame, predicate: str) -> None: ...
+
+    @abstractmethod
+    def delete_matched_relation(self, relation: BaseRelation, df: pl.DataFrame, predicate: str) -> None: ...
+
     def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
         # TODO: Test if this function needs to be implemented for the local adapter
         # to enable adding columns in seeds

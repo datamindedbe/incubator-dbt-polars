@@ -90,6 +90,27 @@ class LocalCatalog(BaseCatalog):
         )
         DeltaTable(str(self._relation_path(relation))).delete()
 
+    def append_relation(self, relation: PolarsRelation, df: pl.DataFrame, allow_schema_evolution: bool = False) -> None:
+        delta_write_options = {"schema_mode": "merge"} if allow_schema_evolution else None
+        df.write_delta(str(self._relation_path(relation)), mode="append", delta_write_options=delta_write_options)
+
+    def merge_relation(self, relation: PolarsRelation, df: pl.DataFrame, predicate: str) -> None:
+        dt = DeltaTable(str(self._relation_path(relation)))
+        (
+            dt.merge(df.to_arrow(), predicate, source_alias="s", target_alias="t")
+            .when_matched_update_all()
+            .when_not_matched_insert_all()
+            .execute()
+        )
+
+    def delete_matched_relation(self, relation: PolarsRelation, df: pl.DataFrame, predicate: str) -> None:
+        dt = DeltaTable(str(self._relation_path(relation)))
+        (
+            dt.merge(df.to_arrow(), predicate, source_alias="s", target_alias="t")
+            .when_matched_delete()
+            .execute()
+        )
+
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
     ) -> list[PolarsRelation]:
