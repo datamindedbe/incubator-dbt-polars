@@ -114,7 +114,7 @@ class TestCrossSchemaCollisionWithColumnQualifier(PolarsTestMixin):
         run_dbt(["run", "--select", "orders_a orders_b"])
         results = run_dbt(["run", "--select", "bad_join"], expect_pass=False)
         assert results[0].status == RunStatus.Error
-        assert "exists in multiple schemas" in results[0].message
+        assert "is ambiguous" in results[0].message
 
 
 class TestCTESameNameAsModel(PolarsTestMixin):
@@ -240,11 +240,11 @@ class TestAliasShadowsUnrelatedModelColumn(PolarsTestMixin):
 
 class TestUnrelatedAliasDoesNotBlockCollisionResolution(PolarsTestMixin):
     """The collision check that guards against ambiguous bare-name column
-    qualifiers (see TestCrossSchemaCollisionWithColumnQualifier) collects
-    column qualifiers globally across the whole query with no scope
-    awareness. An alias named 'orders' used inside one CTE (for an unrelated
-    model) must not be mistaken for a qualifier on the genuinely colliding,
-    but otherwise unambiguous, 'orders' models defined below.
+    qualifiers (see TestCrossSchemaCollisionWithColumnQualifier) must resolve
+    each qualifier within its own scope. An alias named 'orders' used inside
+    one CTE (for an unrelated model) must not be mistaken for a qualifier on
+    the genuinely colliding, but otherwise unambiguous, 'orders' models
+    defined below.
     """
 
     orders_stg = """

@@ -3,15 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 import polars as pl
-import sqlglot
-import sqlglot.expressions as exp
-from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.base import BaseAdapter, BaseRelation, available, Column
-from dbt.adapters.base.relation import RelationType
 from dbt.adapters.polars.catalogs import BaseCatalog, CATALOG_REGISTRY
 from dbt.adapters.polars.relation import PolarsRelation
+from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
 from dbt.adapters.contracts.connection import AdapterResponse
 from dbt_common.exceptions import DbtRuntimeError, CompilationError
 from dbt_common.clients.agate_helper import (
@@ -100,109 +97,6 @@ def _resolve_polars_type(type_str: str) -> pl.PolarsDataType:
 
 
 logger = AdapterLogger("polars")
-
-
-def _parse_and_rewrite(
-    sql: str,
-) -> tuple[str, dict[str, PolarsRelation]]:
-    """Strip catalog/schema qualifiers from three-level dbt refs.
-
-    Every qualified table claims its bare name in the flat SQLContext namespace;
-    an explicit alias claims a second, query-local name for the same table. When
-    a name is claimed by more than one distinct (catalog, schema, identifier) --
-    either because the same bare identifier is sourced from multiple schemas, or
-    because one table's alias collides with a different table's bare name --
-    the affected tables are renamed to catalog__schema__identifier to avoid
-    collisions in SQLContext. Raises DbtRuntimeError when a collision cannot be
-    safely resolved because the bare table name is used as a column qualifier
-    (e.g. orders.id) without an alias of its own.
-
-    Returns the rewritten SQL and a dict mapping frame_name to PolarsRelation.
-    """
-    ast = sqlglot.parse_one(sql)
-
-    qualified = [n for n in ast.find_all(exp.Table) if n.name and (n.catalog or n.db)]
-
-    # Map every name a table claims in the flat namespace (its bare identifier,
-    # plus its alias if any) back to the (catalog, schema, identifier) tables
-    # claiming it, so a name claimed by more than one distinct table -- via
-    # either route -- is detected as colliding.
-    identities_by_name: dict[str, set[tuple[str, str, str]]] = {}
-    identifier_sources: dict[str, set[tuple[str, str]]] = {}
-    for node in qualified:
-        identity = (node.catalog, node.db, node.name)
-        identities_by_name.setdefault(node.name, set()).add(identity)
-        identifier_sources.setdefault(node.name, set()).add((node.catalog, node.db))
-        if node.alias:
-            identities_by_name.setdefault(node.alias, set()).add(identity)
-
-    colliding = {name for name, idents in identities_by_name.items() if len(idents) > 1}
-
-    if colliding:
-        # Resolve each qualified column reference to its actual source within
-        # its own scope (CTE/subquery-aware), rather than a flat textual match
-        # across the whole query -- an alias in one CTE must not be confused
-        # with an unrelated bare-name collision in another.
-        for scope in traverse_scope(ast):
-            for col in scope.columns:
-                if col.table not in colliding:
-                    continue
-                source = scope.sources.get(col.table)
-                if isinstance(source, Scope):
-                    continue  # resolves to a CTE/derived table, not a physical one
-                if isinstance(source, exp.Table) and source.args.get("alias"):
-                    continue  # bound through its own alias; the rename below
-                    # only touches the bare identifier, so this is unaffected
-
-                # Either this is the colliding table's own bare identifier, or
-                # the qualifier couldn't be resolved within this scope (e.g. a
-                # correlated reference into an outer scope). Don't risk
-                # silently mis-binding it -- require the user to disambiguate.
-                name = source.name if isinstance(source, exp.Table) else col.table
-                sources = identifier_sources.get(name, set())
-                if len(sources) > 1:
-                    detail = (
-                        "exists in multiple schemas "
-                        f"({', '.join(f'{c}.{s}' for c, s in sources)})"
-                    )
-                else:
-                    detail = "is also used as an alias for a different table"
-                raise DbtRuntimeError(
-                    f"Identifier '{name}' {detail} and is used as a "
-                    f"column qualifier (e.g. {name}.<col>) without a table alias. "
-                    f"Add an explicit alias to each occurrence to disambiguate."
-                )
-
-    rename_map: dict[tuple[str, str, str], str] = {
-        (node.catalog, node.db, node.name): (
-            f"{node.catalog.strip(chr(34))}"
-            f"__{node.db.strip(chr(34))}"
-            f"__{node.name}"
-        )
-        for node in qualified
-        if node.name in colliding
-    }
-
-    refs: dict[str, PolarsRelation] = {}
-
-    def strip_qualifiers(node: exp.Expression) -> exp.Expression:
-        if isinstance(node, exp.Table) and node.name and (node.catalog or node.db):
-            raw_key = (node.catalog, node.db, node.name)
-            frame_name = rename_map.get(raw_key, node.name)
-            refs[frame_name] = PolarsRelation.create(
-                database=node.catalog,
-                schema=node.db,
-                identifier=node.name,
-                type=RelationType.Table,
-            )
-            return exp.Table(
-                this=exp.Identifier(this=frame_name, quoted=False),
-                alias=node.args.get("alias"),
-            )
-        return node
-
-    rewritten = ast.transform(strip_qualifiers)
-    return rewritten.sql(), refs
 
 
 class PolarsAdapter(BaseAdapter):
@@ -385,7 +279,7 @@ class PolarsAdapter(BaseAdapter):
         })
 
     def _run_sql(self, sql: str) -> pl.DataFrame:
-        rewritten_sql, refs = _parse_and_rewrite(sql)
+        rewritten_sql, refs = parse_and_rewrite(sql)
         return self._build_sql_context(refs).execute(rewritten_sql).collect()
 
     def _apply_schema_change(
