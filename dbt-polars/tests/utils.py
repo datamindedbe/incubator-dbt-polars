@@ -1,4 +1,54 @@
+import polars as pl
 from dbt.tests.util import get_connection, relation_from_name
+
+
+def polars_relation_row_count(adapter, relation_name: str) -> int:
+    """Row count of a relation, read directly via the Polars catalog.
+
+    Substitute for `len(project.run_sql(f"select * from {schema}.{name}", fetch="all"))`.
+    """
+    with get_connection(adapter):
+        relation = relation_from_name(adapter, relation_name)
+        return len(adapter.get_catalog(relation.database).get_relation(relation).collect())
+
+
+def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
+    """Append literal rows to an existing relation directly via the catalog.
+
+    Substitute for executing a raw SQL `INSERT INTO ... VALUES (...)` statement:
+    Polars' SQLContext only supports SELECT-style queries, not DML, so there's no
+    SQL string this adapter could run for that. Rows are cast to the relation's
+    existing schema (e.g. date columns given as ISO strings) before appending.
+    """
+    with get_connection(adapter):
+        relation = relation_from_name(adapter, relation_name)
+        catalog = adapter.get_catalog(relation.database)
+        existing_schema = catalog.get_relation(relation).collect_schema()
+        df = pl.DataFrame(rows).cast(existing_schema)
+        catalog.append_relation(relation, df)
+
+
+def polars_read_relation(
+    adapter,
+    relation_name: str,
+    columns: list[str],
+    order_by: str | list[str] | None = None,
+) -> list[tuple]:
+    """Polars-native substitute for dbt's `project.run_sql(sql, fetch="all")`.
+
+    Reads selected columns from a relation directly via the catalog instead of
+    executing SQL (this adapter has no SQL engine, so `run_sql_for_tests` isn't
+    available). Returns rows as a list of tuples, like a DB-API cursor fetchall.
+    """
+    with get_connection(adapter):
+        relation = relation_from_name(adapter, relation_name)
+        df = adapter.get_catalog(relation.database).get_relation(relation).collect()
+
+    df = df.select(columns)
+    if order_by is not None:
+        df = df.sort(order_by)
+
+    return df.rows()
 
 
 def polars_check_relations_equal(adapter, relation_names: list[str]) -> None:

@@ -55,7 +55,13 @@ class BaseCatalog(abc.ABC):
     def append_relation(self, relation: BaseRelation, df: pl.DataFrame, allow_schema_evolution: bool = False) -> None: ...
 
     @abstractmethod
-    def merge_relation(self, relation: BaseRelation, df: pl.DataFrame, predicate: str) -> None: ...
+    def merge_relation(
+        self,
+        relation: BaseRelation,
+        df: pl.DataFrame,
+        predicate: str,
+        except_cols: list[str] | None = None,
+    ) -> None: ...
 
     @abstractmethod
     def delete_matched_relation(self, relation: BaseRelation, df: pl.DataFrame, predicate: str) -> None: ...

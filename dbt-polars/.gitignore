@@ -131,3 +131,6 @@ dmypy.json
 
 # dbt adapter logs
 logs/
+
+.claude/
+decisions.md

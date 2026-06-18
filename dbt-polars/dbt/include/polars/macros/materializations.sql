@@ -17,10 +17,13 @@
     {%- do adapter.drop_relation(existing_relation) -%}
     {%- do adapter.polars_execute_model(target_relation, sql) -%}
   {% else %}
-    {%- set strategy = config.get('incremental_strategy') or 'append' -%}
     {%- set unique_key = config.get('unique_key') -%}
+    {%- set strategy = config.get('incremental_strategy') or (unique_key and 'merge') or 'append' -%}
     {%- set on_schema_change = config.get('on_schema_change') or 'ignore' -%}
-    {%- do adapter.polars_execute_incremental_model(target_relation, sql, unique_key, strategy, on_schema_change) -%}
+    {%- set merge_update_columns = config.get('merge_update_columns') -%}
+    {%- set merge_exclude_columns = config.get('merge_exclude_columns') -%}
+    {%- set incremental_predicates = config.get('predicates') or config.get('incremental_predicates') -%}
+    {%- do adapter.polars_execute_incremental_model(target_relation, sql, unique_key, strategy, on_schema_change, merge_update_columns, merge_exclude_columns, incremental_predicates) -%}
   {% endif %}
 
   {% call statement('main') -%}

@@ -273,10 +273,12 @@ class PolarsAdapter(BaseAdapter):
         return f'"{identifier}"'
 
     def _build_sql_context(self, refs: dict[str, PolarsRelation]) -> pl.SQLContext:
-        return pl.SQLContext({
-            frame_name: self.get_catalog(rel.database).get_relation(rel)
-            for frame_name, rel in refs.items()
-        })
+        return pl.SQLContext(
+            {
+                frame_name: self.get_catalog(rel.database).get_relation(rel)
+                for frame_name, rel in refs.items()
+            }
+        )
 
     def _run_sql(self, sql: str) -> pl.DataFrame:
         rewritten_sql, refs = parse_and_rewrite(sql)
@@ -341,6 +343,49 @@ class PolarsAdapter(BaseAdapter):
 
         return new_data, False
 
+    def _resolve_merge_except_cols(
+        self,
+        new_data: pl.DataFrame,
+        merge_update_columns: Optional[str | list[str]],
+        merge_exclude_columns: Optional[str | list[str]],
+    ) -> Optional[list[str]]:
+        """Resolve merge_update_columns/merge_exclude_columns into an except_cols
+        list for deltalake's when_matched_update_all(except_cols=...).
+
+        Returns None when neither is set (update all columns - current
+        default). Dest columns are taken from new_data (the post
+        on_schema_change dataframe about to be written), which already
+        reflects the destination's post-write column set.
+        """
+        if merge_update_columns and merge_exclude_columns:
+            raise DbtRuntimeError(
+                "Model cannot specify merge_update_columns and merge_exclude_columns. "
+                "Please update model to use only one config"
+            )
+
+        if not merge_update_columns and not merge_exclude_columns:
+            return None
+
+        dest_cols = new_data.columns
+
+        if merge_exclude_columns:
+            exclude = (
+                [merge_exclude_columns]
+                if isinstance(merge_exclude_columns, str)
+                else merge_exclude_columns
+            )
+            exclude_lower = {c.lower() for c in exclude}
+            return [c for c in dest_cols if c.lower() in exclude_lower]
+
+        # merge_update_columns is an allow-list; except_cols is its complement
+        update = (
+            [merge_update_columns]
+            if isinstance(merge_update_columns, str)
+            else merge_update_columns
+        )
+        update_lower = {c.lower() for c in update}
+        return [c for c in dest_cols if c.lower() not in update_lower]
+
     @available
     def polars_execute_incremental_model(
         self,
@@ -349,6 +394,9 @@ class PolarsAdapter(BaseAdapter):
         unique_key: Optional[str | list[str]],
         strategy: str,
         on_schema_change: str,
+        merge_update_columns: Optional[str | list[str]] = None,
+        merge_exclude_columns: Optional[str | list[str]] = None,
+        incremental_predicates: Optional[str | list[str]] = None,
     ) -> None:
         new_data = self._run_sql(sql)
         catalog = self.get_catalog(relation.catalog)
@@ -368,13 +416,36 @@ class PolarsAdapter(BaseAdapter):
             if not unique_key:
                 raise DbtRuntimeError("'merge' strategy requires a unique_key")
             keys = [unique_key] if isinstance(unique_key, str) else unique_key
-            predicate = " AND ".join(f"s.{k} = t.{k}" for k in keys)
-            catalog.merge_relation(relation, new_data, predicate)
+            predicate = " AND ".join(
+                f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
+            )
+
+            if isinstance(incremental_predicates, str):
+                incremental_predicates = [incremental_predicates]
+
+            if incremental_predicates:
+                predicate += "AND " + " AND ".join(incremental_predicates)
+
+            except_cols = self._resolve_merge_except_cols(
+                new_data, merge_update_columns, merge_exclude_columns
+            )
+            catalog.merge_relation(
+                relation, new_data, predicate, except_cols=except_cols
+            )
         elif strategy == "delete+insert":
             if not unique_key:
                 raise DbtRuntimeError("'delete+insert' strategy requires a unique_key")
             keys = [unique_key] if isinstance(unique_key, str) else unique_key
-            predicate = " AND ".join(f"s.{k} = t.{k}" for k in keys)
+            predicate = " AND ".join(
+                f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
+            )
+
+            if isinstance(incremental_predicates, str):
+                incremental_predicates = [incremental_predicates]
+
+            if incremental_predicates:
+                predicate += " AND " + " AND ".join(incremental_predicates)
+
             catalog.delete_matched_relation(relation, new_data, predicate)
             catalog.append_relation(
                 relation, new_data, allow_schema_evolution=allow_evolution

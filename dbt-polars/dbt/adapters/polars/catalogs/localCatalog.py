@@ -90,23 +90,52 @@ class LocalCatalog(BaseCatalog):
         )
         DeltaTable(str(self._relation_path(relation))).delete()
 
-    def append_relation(self, relation: PolarsRelation, df: pl.DataFrame, allow_schema_evolution: bool = False) -> None:
-        delta_write_options = {"schema_mode": "merge"} if allow_schema_evolution else None
-        df.write_delta(str(self._relation_path(relation)), mode="append", delta_write_options=delta_write_options)
+    def append_relation(
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        allow_schema_evolution: bool = False,
+    ) -> None:
+        delta_write_options = (
+            {"schema_mode": "merge"} if allow_schema_evolution else None
+        )
+        df.write_delta(
+            str(self._relation_path(relation)),
+            mode="append",
+            delta_write_options=delta_write_options,
+        )
 
-    def merge_relation(self, relation: PolarsRelation, df: pl.DataFrame, predicate: str) -> None:
+    def merge_relation(
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        predicate: str,
+        except_cols: list[str] | None = None,
+    ) -> None:
         dt = DeltaTable(str(self._relation_path(relation)))
         (
-            dt.merge(df.to_arrow(), predicate, source_alias="s", target_alias="t")
-            .when_matched_update_all()
+            dt.merge(
+                df.to_arrow(),
+                predicate,
+                source_alias="DBT_INTERNAL_SOURCE",
+                target_alias="DBT_INTERNAL_DEST",
+            )
+            .when_matched_update_all(except_cols=except_cols)
             .when_not_matched_insert_all()
             .execute()
         )
 
-    def delete_matched_relation(self, relation: PolarsRelation, df: pl.DataFrame, predicate: str) -> None:
+    def delete_matched_relation(
+        self, relation: PolarsRelation, df: pl.DataFrame, predicate: str
+    ) -> None:
         dt = DeltaTable(str(self._relation_path(relation)))
         (
-            dt.merge(df.to_arrow(), predicate, source_alias="s", target_alias="t")
+            dt.merge(
+                df.to_arrow(),
+                predicate,
+                source_alias="DBT_INTERNAL_SOURCE",
+                target_alias="DBT_INTERNAL_DEST",
+            )
             .when_matched_delete()
             .execute()
         )
