@@ -9,7 +9,7 @@ def polars_relation_row_count(adapter, relation_name: str) -> int:
     """
     with get_connection(adapter):
         relation = relation_from_name(adapter, relation_name)
-        return len(adapter.get_catalog(relation.database).get_relation(relation).collect())
+        return len(adapter.get_storage_catalog(relation.database).get_relation(relation).collect())
 
 
 def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
@@ -22,7 +22,7 @@ def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
     """
     with get_connection(adapter):
         relation = relation_from_name(adapter, relation_name)
-        catalog = adapter.get_catalog(relation.database)
+        catalog = adapter.get_storage_catalog(relation.database)
         existing_schema = catalog.get_relation(relation).collect_schema()
         df = pl.DataFrame(rows).cast(existing_schema)
         catalog.append_relation(relation, df)
@@ -42,7 +42,7 @@ def polars_read_relation(
     """
     with get_connection(adapter):
         relation = relation_from_name(adapter, relation_name)
-        df = adapter.get_catalog(relation.database).get_relation(relation).collect()
+        df = adapter.get_storage_catalog(relation.database).get_relation(relation).collect()
 
     df = df.select(columns)
     if order_by is not None:
@@ -61,14 +61,14 @@ def polars_check_relations_equal(adapter, relation_names: list[str]) -> None:
         relations = [relation_from_name(adapter, name) for name in relation_names]
         basis, compares = relations[0], relations[1:]
 
-        basis_catalog = adapter.get_catalog(basis.database)
+        basis_catalog = adapter.get_storage_catalog(basis.database)
         basis_df = basis_catalog.get_relation(basis).collect()
         col_names = [c for c in basis_df.columns if not c.lower().startswith("dbt_")]
         basis_df = basis_df.select(col_names)
 
         for compare_rel in compares:
             compare_df = (
-                adapter.get_catalog(compare_rel.database)
+                adapter.get_storage_catalog(compare_rel.database)
                 .get_relation(compare_rel)
                 .collect()
                 .select(col_names)

@@ -1,32 +1,13 @@
-{{% macro polars__get_catalog(information_schema, schemas)-%}}
+{% macro polars__persist_docs(relation, model, for_relation, for_columns) %}
+  {% if for_relation and config.persist_relation_docs() and model.description %}
+    {% do adapter.polars_set_relation_comment(relation, model.description) %}
+  {% endif %}
 
-   {{%set msg -%}}
-    get_catalog not implemented for polars
-   -%}} endset {{%
-    /*
-      Your database likely has a way of accessing metadata about its objects,
-      whether by querying an information schema or by running `show` and `describe` commands.
-      dbt will use this macro to generate its catalog of objects it knows about. The catalog is one of
-      the artifacts powering the documentation site.
-      As an example, below is a simplified version of postgres__get_catalog
-    */
-
-    /*
-    
-      select {{database}} as TABLE,
-        "- set table type -"
-             when 'v' then 'VIEW'
-              else 'BASE TABLE'
-        "- set table/view names and descriptions -"
-      use several joins and search types for pulling info together, sorting etc..
-      where (
-        search if schema exists, else build
-          {%- for schema in schemas -%}
-            upper(sch.nspname) = upper('{{ schema }}'){%- if not loop.last %} or {% endif -%}
-          {%- endfor -%}
-      )
-      define any shortcut keys
-    
-    */
-  {{{{ exceptions.raise_compiler_error(msg) }}}}
- {{% endmacro %}}
+  {% if for_columns and config.persist_column_docs() and model.columns %}
+    {% set existing_columns = adapter.get_columns_in_relation(relation) | map(attribute="name") | list %}
+    {% set filtered_columns = validate_doc_columns(relation, model.columns, existing_columns) %}
+    {% if filtered_columns %}
+      {% do adapter.polars_set_column_comments(relation, filtered_columns) %}
+    {% endif %}
+  {% endif %}
+{% endmacro %}
