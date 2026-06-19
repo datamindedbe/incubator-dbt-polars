@@ -47,7 +47,7 @@ def _read_relation(project, name: str):
     with get_connection(project.adapter):
         rel = relation_from_name(project.adapter, name)
         return (
-            project.adapter.get_catalog(rel.database)
+            project.adapter.get_storage_catalog(rel.database)
             .get_relation(rel)
             .collect()
             .sort("id")

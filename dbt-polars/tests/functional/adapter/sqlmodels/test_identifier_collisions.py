@@ -33,7 +33,7 @@ class TestCteNameCollision(PolarsTestMixin):
 
         with get_connection(project.adapter):
             rel = relation_from_name(project.adapter, "cte_collision")
-            df = project.adapter.get_catalog(rel.database).get_relation(rel).collect()
+            df = project.adapter.get_storage_catalog(rel.database).get_relation(rel).collect()
 
         assert df["source"].to_list() == ["cte"], (
             f"Expected CTE data ('cte') but got {df['source'].to_list()!r}. "
@@ -73,7 +73,7 @@ class TestCrossSchemaIdentifierCollision(PolarsTestMixin):
 
         with get_connection(project.adapter):
             rel = relation_from_name(project.adapter, "combined")
-            df = project.adapter.get_catalog(rel.database).get_relation(rel).collect()
+            df = project.adapter.get_storage_catalog(rel.database).get_relation(rel).collect()
 
         assert df["a_source"].to_list() == ["a"], (
             f"Expected a_source='a' but got {df['a_source'].to_list()!r}. "
@@ -184,7 +184,7 @@ class TestAliasShadowsUnrelatedModelWildcard(PolarsTestMixin):
 
         with get_connection(project.adapter):
             rel = relation_from_name(project.adapter, "combined")
-            df = project.adapter.get_catalog(rel.database).get_relation(rel).collect()
+            df = project.adapter.get_storage_catalog(rel.database).get_relation(rel).collect()
 
         assert set(df.columns) == {"id", "note"}, (
             f"Expected columns from 'orders_stg' (id, note) via the 'orders' "
@@ -232,7 +232,7 @@ class TestAliasShadowsUnrelatedModelColumn(PolarsTestMixin):
 
         with get_connection(project.adapter):
             rel = relation_from_name(project.adapter, "combined")
-            df = project.adapter.get_catalog(rel.database).get_relation(rel).collect()
+            df = project.adapter.get_storage_catalog(rel.database).get_relation(rel).collect()
 
         assert df["note"].to_list() == ["stg"]
         assert df["amount"].to_list() == [100]
@@ -302,7 +302,7 @@ class TestUnrelatedAliasDoesNotBlockCollisionResolution(PolarsTestMixin):
 
         with get_connection(project.adapter):
             rel = relation_from_name(project.adapter, "combined")
-            df = project.adapter.get_catalog(rel.database).get_relation(rel).collect()
+            df = project.adapter.get_storage_catalog(rel.database).get_relation(rel).collect()
 
         assert df["a_source"].to_list() == ["a"]
         assert df["b_source"].to_list() == ["b"]

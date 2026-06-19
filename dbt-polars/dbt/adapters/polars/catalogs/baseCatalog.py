@@ -1,5 +1,6 @@
 import abc
 from abc import abstractmethod
+from typing import Optional
 
 import polars as pl
 
@@ -65,6 +66,18 @@ class BaseCatalog(abc.ABC):
 
     @abstractmethod
     def delete_matched_relation(self, relation: BaseRelation, df: pl.DataFrame, predicate: str) -> None: ...
+
+    @abstractmethod
+    def set_relation_comment(self, relation: BaseRelation, comment: str) -> None: ...
+
+    @abstractmethod
+    def set_column_comments(self, relation: BaseRelation, comments: dict[str, str]) -> None: ...
+
+    @abstractmethod
+    def get_relation_comment(self, relation: BaseRelation) -> Optional[str]: ...
+
+    @abstractmethod
+    def get_column_comments(self, relation: BaseRelation) -> dict[str, str]: ...
 
     def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
         # TODO: Test if this function needs to be implemented for the local adapter

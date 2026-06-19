@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path, PosixPath
 from dataclasses import dataclass
+from typing import Optional
 from dbt.adapters.base import BaseRelation
 from dbt.adapters.exceptions.connection import DbtRuntimeError
 from dbt.adapters.events.logging import AdapterLogger
@@ -42,6 +43,15 @@ class LocalCatalog(BaseCatalog):
     config: LocalCatalogConfig
 
     def __init__(self, config: LocalCatalogConfig):
+        absolute_root = str(Path(config.root).resolve())
+        if " " in absolute_root:
+            raise DbtRuntimeError(
+                f"LocalCatalog root resolves to '{absolute_root}', which contains "
+                "a space. polars' Delta scanner (pl.scan_delta) cannot read tables "
+                "whose path contains a space, see "
+                "https://github.com/pola-rs/polars/issues/20944. Use a root path "
+                "that resolves to an absolute path without spaces."
+            )
         super().__init__(config)
 
     def _schema_path(self, schema: str) -> PosixPath:
@@ -140,6 +150,27 @@ class LocalCatalog(BaseCatalog):
             .execute()
         )
 
+    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
+        DeltaTable(str(self._relation_path(relation))).alter.set_table_description(comment)
+
+    def set_column_comments(
+        self, relation: PolarsRelation, comments: dict[str, str]
+    ) -> None:
+        dt = DeltaTable(str(self._relation_path(relation)))
+        for column, comment in comments.items():
+            dt.alter.set_column_metadata(column, {"comment": comment})
+
+    def get_relation_comment(self, relation: PolarsRelation) -> Optional[str]:
+        return DeltaTable(str(self._relation_path(relation))).metadata().description
+
+    def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
+        dt = DeltaTable(str(self._relation_path(relation)))
+        return {
+            field.name: field.metadata["comment"]
+            for field in dt.schema().fields
+            if field.metadata.get("comment")
+        }
+
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
     ) -> list[PolarsRelation]:
@@ -153,6 +184,7 @@ class LocalCatalog(BaseCatalog):
                 identifier=p.name,
                 type=RelationType.Table,
                 format=_identify_table_format(p),
+                catalog=schema_relation.catalog,
             )
             for p in schema_path.iterdir()
             if p.is_dir()

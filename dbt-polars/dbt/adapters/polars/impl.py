@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 import polars as pl
 
@@ -10,6 +10,7 @@ from dbt.adapters.polars.catalogs import BaseCatalog, CATALOG_REGISTRY
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
 from dbt.adapters.contracts.connection import AdapterResponse
+from dbt.adapters.contracts.relation import RelationConfig
 from dbt_common.exceptions import DbtRuntimeError, CompilationError
 from dbt_common.clients.agate_helper import (
     Number,
@@ -108,7 +109,7 @@ class PolarsAdapter(BaseAdapter):
     Relation = PolarsRelation
     CatalogAdapters: dict[str, BaseCatalog] = {}
 
-    def get_catalog(self, name: Optional[str]) -> BaseCatalog:
+    def get_storage_catalog(self, name: Optional[str]) -> BaseCatalog:
         connection = self.connections.get_thread_connection()
         credentials: PolarsCredentials = connection.credentials
 
@@ -143,13 +144,13 @@ class PolarsAdapter(BaseAdapter):
 
     # --- Catalog operations ---
     def create_schema(self, relation: BaseRelation) -> None:
-        self.get_catalog(relation.catalog).create_schema(relation)
+        self.get_storage_catalog(relation.catalog).create_schema(relation)
 
     def drop_schema(self, relation: BaseRelation) -> None:
-        self.get_catalog(relation.catalog).drop_schema(relation)
+        self.get_storage_catalog(relation.catalog).drop_schema(relation)
 
     def list_schemas(self, database: str) -> list[str]:
-        return self.get_catalog(database).list_schemas()
+        return self.get_storage_catalog(database).list_schemas()
 
     def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
         if goal.catalog != current.catalog:
@@ -158,10 +159,10 @@ class PolarsAdapter(BaseAdapter):
                 f"The provider currently doesn't support expanding column types across catalogs. {current.catalog}.{current.schema}.{current.table} to {goal.catalog}.{goal.schema}.{goal.table} "
             )
 
-        self.get_catalog(goal.catalog).expand_column_types(goal, current)
+        self.get_storage_catalog(goal.catalog).expand_column_types(goal, current)
 
     def get_columns_in_relation(self, relation: BaseRelation) -> list[Column]:
-        catalog = self.get_catalog(relation.catalog)
+        catalog = self.get_storage_catalog(relation.catalog)
         if not catalog.table_exists(relation):
             return []
         schema = catalog.get_relation(relation).collect_schema()
@@ -170,7 +171,7 @@ class PolarsAdapter(BaseAdapter):
     def list_relations_without_caching(
         self, schema_relation: BaseRelation
     ) -> list[BaseRelation]:
-        return self.get_catalog(schema_relation.catalog).list_relations_without_caching(
+        return self.get_storage_catalog(schema_relation.catalog).list_relations_without_caching(
             schema_relation
         )
 
@@ -182,15 +183,98 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(
                 f"The provider currently doesn't support renaming tables across catalogs. {from_relation.catalog}.{from_relation.schema}.{from_relation.table} to {to_relation.catalog}.{to_relation.schema}.{to_relation.table} "
             )
-        return self.get_catalog(from_relation.catalog).rename_relation(
+        return self.get_storage_catalog(from_relation.catalog).rename_relation(
             from_relation, to_relation
         )
 
     def drop_relation(self, relation: PolarsRelation) -> None:
-        self.get_catalog(relation.catalog).drop_relation(relation)
+        self.get_storage_catalog(relation.catalog).drop_relation(relation)
 
     def truncate_relation(self, relation: BaseRelation) -> None:
-        self.get_catalog(relation.catalog).truncate_relation(relation)
+        self.get_storage_catalog(relation.catalog).truncate_relation(relation)
+
+    # --- persist_docs ---
+    @available
+    def polars_set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
+        self.get_storage_catalog(relation.catalog).set_relation_comment(relation, comment)
+
+    @available
+    def polars_set_column_comments(
+        self, relation: PolarsRelation, columns: dict[str, Any]
+    ) -> None:
+        comments = {
+            name: info["description"]
+            for name, info in columns.items()
+            if info.get("description")
+        }
+        if comments:
+            self.get_storage_catalog(relation.catalog).set_column_comments(
+                relation, comments
+            )
+
+    # --- docs generate / catalog.json ---
+    def get_catalog(
+        self,
+        relation_configs: Iterable[RelationConfig],
+        used_schemas: frozenset[tuple[Optional[str], str]],
+    ) -> tuple["agate.Table", list[Exception]]:
+        """Builds the catalog.json data directly from the filesystem/Delta metadata.
+
+        Polars has no information_schema to query via SQL, so unlike most adapters this
+        bypasses macro execution (the `get_catalog` macro) entirely and is implemented
+        in pure Python.
+        """
+
+        # TODO: When adding more catalogs (like Databricks) see if this method has to pushed
+        # partially to the catalog and make a union over the tables found in each catalog.
+
+        column_names = [
+            "table_database",
+            "table_schema",
+            "table_name",
+            "table_type",
+            "table_comment",
+            "table_owner",
+            "column_name",
+            "column_index",
+            "column_type",
+            "column_comment",
+        ]
+        rows: list[dict[str, Any]] = []
+        exceptions: list[Exception] = []
+
+        for database, schema in used_schemas:
+            try:
+                storage_catalog = self.get_storage_catalog(database)
+                schema_relation = self.Relation.create(
+                    database=database, schema=schema, catalog=database
+                )
+                for relation in storage_catalog.list_relations_without_caching(
+                    schema_relation
+                ):
+                    table_comment = storage_catalog.get_relation_comment(relation)
+                    column_comments = storage_catalog.get_column_comments(relation)
+                    for index, column in enumerate(
+                        self.get_columns_in_relation(relation)
+                    ):
+                        rows.append(
+                            {
+                                "table_database": database,
+                                "table_schema": schema,
+                                "table_name": relation.identifier,
+                                "table_type": "BASE TABLE",
+                                "table_comment": table_comment,
+                                "table_owner": None,
+                                "column_name": column.name,
+                                "column_index": index,
+                                "column_type": column.dtype,
+                                "column_comment": column_comments.get(column.name),
+                            }
+                        )
+            except Exception as e:
+                exceptions.append(e)
+
+        return table_from_data(rows, column_names), exceptions
 
     # --- Type conversions ---
     @classmethod
@@ -266,7 +350,7 @@ class PolarsAdapter(BaseAdapter):
         if casts:
             df = df.with_columns(casts)
 
-        self.get_catalog(relation.catalog).write_relation(relation, df)
+        self.get_storage_catalog(relation.catalog).write_relation(relation, df)
 
     @classmethod
     def quote(cls, identifier: str) -> str:
@@ -275,7 +359,7 @@ class PolarsAdapter(BaseAdapter):
     def _build_sql_context(self, refs: dict[str, PolarsRelation]) -> pl.SQLContext:
         return pl.SQLContext(
             {
-                frame_name: self.get_catalog(rel.database).get_relation(rel)
+                frame_name: self.get_storage_catalog(rel.database).get_relation(rel)
                 for frame_name, rel in refs.items()
             }
         )
@@ -399,7 +483,7 @@ class PolarsAdapter(BaseAdapter):
         incremental_predicates: Optional[str | list[str]] = None,
     ) -> None:
         new_data = self._run_sql(sql)
-        catalog = self.get_catalog(relation.catalog)
+        catalog = self.get_storage_catalog(relation.catalog)
 
         new_data, allow_evolution = self._apply_schema_change(
             catalog, relation, new_data, on_schema_change
@@ -456,7 +540,7 @@ class PolarsAdapter(BaseAdapter):
     @available
     def polars_execute_model(self, relation: PolarsRelation, sql: str) -> None:
         result = self._run_sql(sql)
-        self.get_catalog(relation.catalog).write_relation(relation, result)
+        self.get_storage_catalog(relation.catalog).write_relation(relation, result)
 
     def execute(
         self,
