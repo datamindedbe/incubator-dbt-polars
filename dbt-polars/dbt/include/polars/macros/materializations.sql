@@ -58,3 +58,8 @@
 
   {{ return({'relations': [target_relation]}) }}
 {% endmaterialization %}
+
+{# TODO: review whether dbt clone can be supported for the polars adapter #}
+{% materialization clone, adapter='polars' %}
+  {{ exceptions.raise_compiler_error("The polars adapter does not support dbt clone.") }}
+{% endmaterialization %}
