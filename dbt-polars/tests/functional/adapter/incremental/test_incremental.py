@@ -4,7 +4,6 @@ from dbt.tests.util import get_connection, relation_from_name, run_dbt
 
 from tests.conftest import PolarsTestMixin
 
-
 # First run: 1 row. Incremental run: 1 new row (different id → append grows table).
 _APPEND_MODEL = """
 {{ config(materialized='incremental') }}
@@ -82,6 +81,24 @@ class TestIncrementalFullRefresh(PolarsTestMixin):
         df = _read_relation(project, "append_model")
         # full-refresh re-runs the non-incremental branch → back to 1 row
         assert df["id"].to_list() == [1]
+
+    def test_drop_relation_updates_cache(self, project):
+        run_dbt(["run"])
+        adapter = project.adapter
+        relation = relation_from_name(adapter, "append_model")
+
+        with get_connection(adapter):
+            found = adapter.get_relation(
+                relation.database, relation.schema, relation.identifier
+            )
+            assert found is not None
+
+            adapter.drop_relation(relation)
+
+            found_after_drop = adapter.get_relation(
+                relation.database, relation.schema, relation.identifier
+            )
+            assert found_after_drop is None
 
 
 class TestIncrementalMerge(PolarsTestMixin):
