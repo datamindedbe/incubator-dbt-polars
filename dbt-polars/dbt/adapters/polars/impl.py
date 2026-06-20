@@ -171,32 +171,33 @@ class PolarsAdapter(BaseAdapter):
     def list_relations_without_caching(
         self, schema_relation: BaseRelation
     ) -> list[BaseRelation]:
-        return self.get_storage_catalog(schema_relation.catalog).list_relations_without_caching(
-            schema_relation
-        )
+        return self.get_storage_catalog(
+            schema_relation.catalog
+        ).list_relations_without_caching(schema_relation)
 
     def rename_relation(
         self, from_relation: BaseRelation, to_relation: BaseRelation
     ) -> None:
-        if from_relation.catalog != to_relation.catalog:
-            # TODO: is this relevant, does dbt support this?
-            raise DbtRuntimeError(
-                f"The provider currently doesn't support renaming tables across catalogs. {from_relation.catalog}.{from_relation.schema}.{from_relation.table} to {to_relation.catalog}.{to_relation.schema}.{to_relation.table} "
-            )
-        return self.get_storage_catalog(from_relation.catalog).rename_relation(
-            from_relation, to_relation
-        )
+        # TODO: Do we need this
+        # Normally this is used in dbt to write data first to a temp location and
+        # then swap, but this is not necessary when using delta
+        raise DbtRuntimeError(f"dbt-polars doesn't support renaming relations.")
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         self.get_storage_catalog(relation.catalog).drop_relation(relation)
+        self.cache_dropped(relation)
 
     def truncate_relation(self, relation: BaseRelation) -> None:
         self.get_storage_catalog(relation.catalog).truncate_relation(relation)
 
     # --- persist_docs ---
     @available
-    def polars_set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        self.get_storage_catalog(relation.catalog).set_relation_comment(relation, comment)
+    def polars_set_relation_comment(
+        self, relation: PolarsRelation, comment: str
+    ) -> None:
+        self.get_storage_catalog(relation.catalog).set_relation_comment(
+            relation, comment
+        )
 
     @available
     def polars_set_column_comments(
