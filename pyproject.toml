@@ -1,0 +1,36 @@
+[tool.uv.workspace]
+members = ["dbt-polars"]
+
+[dependency-groups]
+dev = [
+    "ruff==0.15.19",
+    # mypy>=2 requires pathspec>=1.0.0, which conflicts with dbt-core 1.11.x (pathspec<0.13)
+    "mypy>=1.10.0,<2",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+namespace_packages = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-n auto"
+filterwarnings = [
+    "ignore:.*'soft_unicode' has been renamed to 'soft_str'*:DeprecationWarning",
+    "ignore:unclosed file .*:ResourceWarning",
+    # dbt-tests-adapter uses class-scoped fixtures as instance methods; fixed upstream eventually
+    "ignore:Class-scoped fixture defined as instance method is deprecated:pytest.PytestRemovedIn10Warning",
+    # Polars SQL engine internally casts date literals; not fixable from our side until Polars 2.0 drops support
+    "ignore:Casting from String to Date is deprecated.*:DeprecationWarning",
+]
+testpaths = [
+    "dbt-polars/tests/unit",
+    "dbt-polars/tests/functional",
+]
