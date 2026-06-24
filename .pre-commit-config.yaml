@@ -11,13 +11,20 @@ repos:
 - repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.15.19
   hooks:
-  - id: ruff
+  - id: ruff-check
     args: [--fix]
   - id: ruff-format
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: v2.1.0
+- repo: local
   hooks:
-  - id: mypy
-    args: [--show-error-codes, --ignore-missing-imports]
-    files: ^dbt/adapters/.*
+  - id: uv-sync
+    name: uv sync
+    entry: uv sync
     language: system
+    pass_filenames: false
+    always_run: true
+  - id: mypy
+    name: mypy
+    entry: .venv/bin/mypy
+    language: system
+    pass_filenames: false
+    files: ^dbt-polars/dbt/
