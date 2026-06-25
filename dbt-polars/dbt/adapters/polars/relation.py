@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from dbt.adapters.base import BaseRelation
+from dbt.adapters.base.relation import BaseRelation
 from dbt.adapters.contracts.relation import HasQuoting, RelationConfig
 
 

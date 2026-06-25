@@ -1,10 +1,10 @@
-from dbt.adapters.base import AdapterPlugin
-from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
+from dbt.adapters.base.plugin import AdapterPlugin
+from dbt.adapters.polars.connections import PolarsCredentials
 from dbt.adapters.polars.impl import PolarsAdapter
-from dbt.include import polars
+from dbt.include.polars import PACKAGE_PATH
 
 Plugin = AdapterPlugin(
-    adapter=PolarsAdapter,
+    adapter=PolarsAdapter,  # type: ignore[arg-type]
     credentials=PolarsCredentials,
-    include_path=polars.PACKAGE_PATH,
+    include_path=PACKAGE_PATH,
 )

@@ -1,12 +1,12 @@
 import shutil
 from dataclasses import dataclass
-from pathlib import Path, PosixPath
+from pathlib import Path
 
-from dbt.adapters.base.relation import RelationType
+from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt.adapters.exceptions.connection import DbtRuntimeError
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
 from dbt.adapters.polars.relation import PolarsRelation, TableFormat
+from dbt_common.exceptions import DbtRuntimeError
 from deltalake import DeltaTable
 
 import polars as pl
@@ -21,9 +21,9 @@ class LocalCatalogConfig(CatalogConfig):
     root: str
 
     def unique_field(self) -> str:
-        return self.root_folder
+        return self.root
 
-    def connection_keys(self) -> tuple:
+    def connection_keys(self) -> tuple[str, ...]:
         return ("name", "root")
 
 
@@ -37,7 +37,7 @@ def _identify_table_format(path: Path) -> TableFormat:
     raise DbtRuntimeError(f"Unable to identify format of table {path}.")
 
 
-class LocalCatalog(BaseCatalog):
+class LocalCatalog(BaseCatalog[PolarsRelation]):
     config: LocalCatalogConfig
 
     def __init__(self, config: LocalCatalogConfig):
@@ -52,18 +52,22 @@ class LocalCatalog(BaseCatalog):
             )
         super().__init__(config)
 
-    def _schema_path(self, schema: str) -> PosixPath:
+    def _schema_path(self, schema: str) -> Path:
         return Path(self.config.root) / schema
 
     def _relation_path(self, relation: PolarsRelation) -> Path:
+        assert relation.schema is not None
+        assert relation.identifier is not None
         return self._schema_path(relation.schema) / relation.identifier
 
     def create_schema(self, relation: PolarsRelation) -> None:
         logger.debug(f"Creating schema {relation.catalog}/{relation.schema}")
+        assert relation.schema is not None
         self._schema_path(relation.schema).mkdir(parents=True, exist_ok=True)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
         logger.debug(f"Dropping schema {relation.catalog}/{relation.schema}")
+        assert relation.schema is not None
         shutil.rmtree(self._schema_path(relation.schema), ignore_errors=True)
 
     def list_schemas(self) -> list[str]:
@@ -88,13 +92,15 @@ class LocalCatalog(BaseCatalog):
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
-            f"Dropping table if exists {relation.catalog}/{relation.schema}/{relation.identifier}"
+            f"Dropping table if exists {relation.catalog}/"
+            f"{relation.schema}/{relation.identifier}"
         )
         shutil.rmtree(self._relation_path(relation), ignore_errors=True)
 
     def truncate_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
-            f"Truncating table {relation.catalog}/{relation.schema}/{relation.identifier}"
+            f"Truncating table {relation.catalog}/"
+            f"{relation.schema}/{relation.identifier}"
         )
         DeltaTable(str(self._relation_path(relation))).delete()
 
@@ -174,6 +180,7 @@ class LocalCatalog(BaseCatalog):
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
     ) -> list[PolarsRelation]:
+        assert schema_relation.schema is not None
         schema_path = self._schema_path(schema_relation.schema)
         if not schema_path.exists():
             return []

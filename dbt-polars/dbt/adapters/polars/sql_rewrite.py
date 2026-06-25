@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import TypeGuard
+
 import sqlglot
 import sqlglot.expressions as exp
-from dbt.adapters.base.relation import RelationType
+from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
 from sqlglot.optimizer.scope import Scope, traverse_scope
@@ -21,17 +23,18 @@ def parse_and_rewrite(sql: str) -> tuple[str, dict[str, PolarsRelation]]:
     PolarsRelation.
     """
     ast = sqlglot.parse_one(sql)
+    parsed: exp.Expr = ast
 
-    qualified_tables = _find_qualified_tables(ast)
+    qualified_tables = _find_qualified_tables(parsed)
     colliding_names = _names_claimed_by_multiple_identities(qualified_tables)
 
-    _raise_if_a_column_unsafely_qualifies_a_colliding_name(ast, colliding_names)
+    _raise_if_a_column_unsafely_qualifies_a_colliding_name(parsed, colliding_names)
 
     flat_name_by_key = _assign_flat_names(qualified_tables, colliding_names)
-    return _replace_qualified_tables_with_flat_names(ast, flat_name_by_key)
+    return _replace_qualified_tables_with_flat_names(parsed, flat_name_by_key)
 
 
-def _is_qualified_table(node: exp.Expression) -> bool:
+def _is_qualified_table(node: exp.Expr) -> TypeGuard[exp.Table]:
     return (
         isinstance(node, exp.Table)
         and bool(node.name)
@@ -39,7 +42,7 @@ def _is_qualified_table(node: exp.Expression) -> bool:
     )
 
 
-def _find_qualified_tables(ast: exp.Expression) -> list[exp.Table]:
+def _find_qualified_tables(ast: exp.Expr) -> list[exp.Table]:
     return [table for table in ast.find_all(exp.Table) if _is_qualified_table(table)]
 
 
@@ -90,12 +93,12 @@ def _assign_flat_names(
 
 
 def _replace_qualified_tables_with_flat_names(
-    ast: exp.Expression,
+    ast: exp.Expr,
     flat_name_by_key: dict[RelationKey, str],
 ) -> tuple[str, dict[str, PolarsRelation]]:
     relation_by_flat_name: dict[str, PolarsRelation] = {}
 
-    def replace_table(node: exp.Expression) -> exp.Expression:
+    def replace_table(node: exp.Expr) -> exp.Expr:
         if not _is_qualified_table(node):
             return node
 
@@ -116,7 +119,7 @@ def _replace_qualified_tables_with_flat_names(
 
 
 def _raise_if_a_column_unsafely_qualifies_a_colliding_name(
-    ast: exp.Expression, colliding_names: set[str]
+    ast: exp.Expr, colliding_names: set[str]
 ) -> None:
     for scope in traverse_scope(ast):
         for column in scope.columns:

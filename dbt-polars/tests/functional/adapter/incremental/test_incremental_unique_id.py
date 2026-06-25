@@ -320,15 +320,35 @@ select
     'Hartford' as city,
     cast('2022-02-14' as date) as last_visit_date
 union all
-select 'MA' as state, 'Suffolk' as county, 'Boston' as city, cast('2020-02-12' as date) as last_visit_date
+select
+    'MA' as state,
+    'Suffolk' as county,
+    'Boston' as city,
+    cast('2020-02-12' as date) as last_visit_date
 union all
-select 'NJ' as state, 'Mercer' as county, 'Trenton' as city, cast('2022-01-01' as date) as last_visit_date
+select
+    'NJ' as state,
+    'Mercer' as county,
+    'Trenton' as city,
+    cast('2022-01-01' as date) as last_visit_date
 union all
-select 'NY' as state, 'Kings' as county, 'Brooklyn' as city, cast('2021-04-02' as date) as last_visit_date
+select
+    'NY' as state,
+    'Kings' as county,
+    'Brooklyn' as city,
+    cast('2021-04-02' as date) as last_visit_date
 union all
-select 'NY' as state, 'New York' as county, 'Manhattan' as city, cast('2021-04-01' as date) as last_visit_date
+select
+    'NY' as state,
+    'New York' as county,
+    'Manhattan' as city,
+    cast('2021-04-01' as date) as last_visit_date
 union all
-select 'PA' as state, 'Philadelphia' as county, 'Philadelphia' as city, cast('2021-05-21' as date) as last_visit_date
+select
+    'PA' as state,
+    'Philadelphia' as county,
+    'Philadelphia' as city,
+    cast('2021-05-21' as date) as last_visit_date
 
 """
 
@@ -345,15 +365,35 @@ select
     'Hartford' as city,
     cast('2022-02-14' as date) as last_visit_date
 union all
-select 'MA' as state, 'Suffolk' as county, 'Boston' as city, cast('2020-02-12' as date) as last_visit_date
+select
+    'MA' as state,
+    'Suffolk' as county,
+    'Boston' as city,
+    cast('2020-02-12' as date) as last_visit_date
 union all
-select 'NJ' as state, 'Mercer' as county, 'Trenton' as city, cast('2022-01-01' as date) as last_visit_date
+select
+    'NJ' as state,
+    'Mercer' as county,
+    'Trenton' as city,
+    cast('2022-01-01' as date) as last_visit_date
 union all
-select 'NY' as state, 'Kings' as county, 'Brooklyn' as city, cast('2021-04-02' as date) as last_visit_date
+select
+    'NY' as state,
+    'Kings' as county,
+    'Brooklyn' as city,
+    cast('2021-04-02' as date) as last_visit_date
 union all
-select 'NY' as state, 'New York' as county, 'Manhattan' as city, cast('2021-04-01' as date) as last_visit_date
+select
+    'NY' as state,
+    'New York' as county,
+    'Manhattan' as city,
+    cast('2021-04-01' as date) as last_visit_date
 union all
-select 'PA' as state, 'Philadelphia' as county, 'Philadelphia' as city, cast('2021-05-21' as date) as last_visit_date
+select
+    'PA' as state,
+    'Philadelphia' as county,
+    'Philadelphia' as city,
+    cast('2021-05-21' as date) as last_visit_date
 
 """
 
@@ -385,18 +425,24 @@ class BaseIncrementalUniqueKey:
     def models(self):
         return {
             "trinary_unique_key_list.sql": models__trinary_unique_key_list_sql,
-            "nontyped_trinary_unique_key_list.sql": models__nontyped_trinary_unique_key_list_sql,
+            "nontyped_trinary_unique_key_list.sql": (
+                models__nontyped_trinary_unique_key_list_sql
+            ),
             "unary_unique_key_list.sql": models__unary_unique_key_list_sql,
             "not_found_unique_key.sql": models__not_found_unique_key_sql,
             "empty_unique_key_list.sql": models__empty_unique_key_list_sql,
             "no_unique_key.sql": models__no_unique_key_sql,
             "empty_str_unique_key.sql": models__empty_str_unique_key_sql,
             "str_unique_key.sql": models__str_unique_key_sql,
-            "duplicated_unary_unique_key_list.sql": models__duplicated_unary_unique_key_list_sql,
+            "duplicated_unary_unique_key_list.sql": (
+                models__duplicated_unary_unique_key_list_sql
+            ),
             "not_found_unique_key_list.sql": models__not_found_unique_key_list_sql,
             "expected": {
                 "one_str__overwrite.sql": models__expected__one_str__overwrite_sql,
-                "unique_key_list__inplace_overwrite.sql": models__expected__unique_key_list__inplace_overwrite_sql,
+                "unique_key_list__inplace_overwrite.sql": (
+                    models__expected__unique_key_list__inplace_overwrite_sql
+                ),
             },
         }
 

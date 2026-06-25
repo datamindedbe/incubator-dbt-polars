@@ -95,7 +95,8 @@ class TestSimpleSeedWithBOM(BaseSimpleSeedWithBOM):
 
 
 class TestSeedWithExplicitCatalog:
-    """Verify that a seed with an explicit catalog config is written to the correct catalog."""
+    """Verify that a seed with an explicit catalog config is written
+    to the correct catalog."""
 
     @pytest.fixture(scope="class")
     def seeds(self):

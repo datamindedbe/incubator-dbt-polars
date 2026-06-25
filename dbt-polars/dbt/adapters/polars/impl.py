@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from dbt.adapters.base import BaseAdapter, BaseRelation, Column, available
+from dbt.adapters.base.column import Column
+from dbt.adapters.base.impl import BaseAdapter
+from dbt.adapters.base.meta import available
+from dbt.adapters.base.relation import BaseRelation
 from dbt.adapters.contracts.connection import AdapterResponse
 from dbt.adapters.contracts.relation import RelationConfig
 from dbt.adapters.events.logging import AdapterLogger
@@ -26,7 +29,7 @@ import polars as pl
 if TYPE_CHECKING:
     import agate
 
-_POLARS_TYPE_MAP: dict[str, pl.PolarsDataType] = {
+_POLARS_TYPE_MAP: dict[str, type[pl.DataType]] = {
     # Polars-native names
     "Int8": pl.Int8,
     "Int16": pl.Int16,
@@ -92,7 +95,7 @@ _POLARS_TYPE_MAP: dict[str, pl.PolarsDataType] = {
 }
 
 
-def _resolve_polars_type(type_str: str) -> pl.PolarsDataType:
+def _resolve_polars_type(type_str: str) -> type[pl.DataType]:
     key = type_str.split("(")[0].strip()
     dtype = _POLARS_TYPE_MAP.get(key) or _POLARS_TYPE_MAP.get(key.lower())
     if dtype is None:
@@ -110,11 +113,11 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
-    CatalogAdapters: dict[str, BaseCatalog] = {}
+    CatalogAdapters: dict[str, BaseCatalog[Any]] = {}
 
-    def get_storage_catalog(self, name: str | None) -> BaseCatalog:
+    def get_storage_catalog(self, name: str | None) -> BaseCatalog[Any]:
         connection = self.connections.get_thread_connection()
-        credentials: PolarsCredentials = connection.credentials
+        credentials = cast(PolarsCredentials, connection.credentials)
 
         # Unquote the catalog name if it's quoted
         if name is not None:
@@ -130,6 +133,8 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(f"Unknown catalog {name}")
 
         config = credentials.catalog_configs.get(name)
+        if config is None:
+            raise DbtRuntimeError(f"Unknown catalog {name}")
         self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](config)
 
         return self.CatalogAdapters[name]
@@ -159,7 +164,10 @@ class PolarsAdapter(BaseAdapter):
         if goal.catalog != current.catalog:
             # TODO: test this
             raise DbtRuntimeError(
-                f"The provider currently doesn't support expanding column types across catalogs. {current.catalog}.{current.schema}.{current.table} to {goal.catalog}.{goal.schema}.{goal.table} "
+                f"The provider currently doesn't support expanding column "
+                f"types across catalogs. "
+                f"{current.catalog}.{current.schema}.{current.table} to "
+                f"{goal.catalog}.{goal.schema}.{goal.table} "
             )
 
         self.get_storage_catalog(goal.catalog).expand_column_types(goal, current)
@@ -229,8 +237,9 @@ class PolarsAdapter(BaseAdapter):
         in pure Python.
         """
 
-        # TODO: When adding more catalogs (like Databricks) see if this method has to pushed
-        # partially to the catalog and make a union over the tables found in each catalog.
+        # TODO: When adding more catalogs (like Databricks) see if this method
+        # has to be pushed partially to the catalog and make a union over the
+        # tables found in each catalog.
 
         column_names = [
             "table_database",
@@ -293,7 +302,7 @@ class PolarsAdapter(BaseAdapter):
     def convert_number_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         import agate
 
-        decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))
+        decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))  # type: ignore[attr-defined]
         return "Float64" if decimals else "Int64"
 
     @classmethod
@@ -370,7 +379,8 @@ class PolarsAdapter(BaseAdapter):
 
     def _run_sql(self, sql: str) -> pl.DataFrame:
         rewritten_sql, refs = parse_and_rewrite(sql)
-        return self._build_sql_context(refs).execute(rewritten_sql).collect()
+        result = self._build_sql_context(refs).execute(rewritten_sql, eager=True)
+        return cast(pl.DataFrame, result)
 
     def _apply_schema_change(
         self,
@@ -383,9 +393,10 @@ class PolarsAdapter(BaseAdapter):
 
         Returns (data, allow_evolution):
           - data: the DataFrame to write, possibly column-filtered or None if
-            sync_all_columns already performed a full rewrite (caller should return early)
-          - allow_evolution: True when the catalog should enable schema evolution
-            on the append (new columns present and policy permits them)
+            sync_all_columns already performed a full rewrite (caller
+            should return early)
+          - allow_evolution: True when the catalog should enable schema
+            evolution on the append (new columns present and policy permits)
         """
         existing = {
             col.name: col.dtype for col in self.get_columns_in_relation(relation)
@@ -469,7 +480,7 @@ class PolarsAdapter(BaseAdapter):
         update = (
             [merge_update_columns]
             if isinstance(merge_update_columns, str)
-            else merge_update_columns
+            else (merge_update_columns or [])
         )
         update_lower = {c.lower() for c in update}
         return [c for c in dest_cols if c.lower() not in update_lower]
@@ -489,12 +500,14 @@ class PolarsAdapter(BaseAdapter):
         new_data = self._run_sql(sql)
         catalog = self.get_storage_catalog(relation.catalog)
 
-        new_data, allow_evolution = self._apply_schema_change(
+        schema_result, allow_evolution = self._apply_schema_change(
             catalog, relation, new_data, on_schema_change
         )
 
-        if new_data is None:
+        if schema_result is None:
             return  # sync_all_columns already performed a full rewrite
+
+        new_data = schema_result
 
         if strategy == "append":
             catalog.append_relation(
@@ -564,4 +577,5 @@ class PolarsAdapter(BaseAdapter):
         )
 
 
-# may require more build out to make more user friendly to confer with team and community.
+# may require more build out to make more user friendly to confer with team
+# and community.

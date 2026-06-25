@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from dbt.adapters.base import BaseConnectionManager
+from dbt.adapters.base.connections import BaseConnectionManager
 from dbt.adapters.contracts.connection import (
     AdapterResponse,
     ConnectionState,
@@ -71,9 +71,8 @@ class PolarsCredentials(Credentials):
         if catalog_type not in CATALOG_CONFIG_REGISTRY:
             raise DbtRuntimeError(f"Unknown catalog type: {catalog_type}")
 
-        return CATALOG_CONFIG_REGISTRY.get(catalog_type)(
-            **{k: v for k, v in entry.items()}
-        )
+        config_cls = CATALOG_CONFIG_REGISTRY[catalog_type]
+        return config_cls(**{k: v for k, v in entry.items()})
 
 
 class PolarsHandle:

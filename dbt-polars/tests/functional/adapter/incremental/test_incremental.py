@@ -27,7 +27,11 @@ _MERGE_MODEL = """
 
 # First run: 2 rows. Incremental run: replaces one existing row + inserts one new row.
 _DELETE_INSERT_MODEL = """
-{{ config(materialized='incremental', unique_key='id', incremental_strategy='delete+insert') }}
+{{ config(
+    materialized='incremental',
+    unique_key='id',
+    incremental_strategy='delete+insert'
+) }}
 
 {% if is_incremental() %}
     SELECT 1 AS id, 'updated' AS name

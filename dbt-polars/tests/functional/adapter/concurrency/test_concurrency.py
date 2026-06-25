@@ -274,7 +274,9 @@ class BaseConcurrency:
             "invalid.sql": models__invalid_sql,
             "table_a.sql": models__table_a_sql,
             "table_b.sql": models__table_b_sql,
-            "view_with_conflicting_cascade.sql": models__view_with_conflicting_cascade_sql,
+            "view_with_conflicting_cascade.sql": (
+                models__view_with_conflicting_cascade_sql
+            ),
             "skip.sql": models__skip_sql,
         }
 

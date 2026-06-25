@@ -10,7 +10,8 @@ from tests.functional.adapter.dbt_show.fixtures import (
 )
 
 
-# -- Below we define base classes for tests you import based on if your adapter supports dbt show or not --
+# -- Below we define base classes for tests you import based on if your
+# -- adapter supports dbt show or not --
 class TestShowLimit(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
@@ -36,7 +37,8 @@ class TestShowLimit(PolarsTestMixin):
         dbt_args = ["show", "--inline", models__second_ephemeral_model, *args]
         results = run_dbt(dbt_args)
         assert len(results.results[0].agate_table) == expected
-        # ensure limit was injected in compiled_code when limit specified in command args
+        # ensure limit was injected in compiled_code when limit
+        # specified in command args
         limit = results.args.get("limit")
         if limit > 0:
             assert f"limit {limit}" in results.results[0].node.compiled_code

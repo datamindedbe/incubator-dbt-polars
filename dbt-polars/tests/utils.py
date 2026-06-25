@@ -5,7 +5,8 @@ from dbt.tests.util import get_connection, relation_from_name
 def polars_relation_row_count(adapter, relation_name: str) -> int:
     """Row count of a relation, read directly via the Polars catalog.
 
-    Substitute for `len(project.run_sql(f"select * from {schema}.{name}", fetch="all"))`.
+    Substitute for
+    `len(project.run_sql(f"select * from {schema}.{name}", fetch="all"))`.
     """
     with get_connection(adapter):
         relation = relation_from_name(adapter, relation_name)
