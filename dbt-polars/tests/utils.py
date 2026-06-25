@@ -9,7 +9,11 @@ def polars_relation_row_count(adapter, relation_name: str) -> int:
     """
     with get_connection(adapter):
         relation = relation_from_name(adapter, relation_name)
-        return len(adapter.get_storage_catalog(relation.database).get_relation(relation).collect())
+        return len(
+            adapter.get_storage_catalog(relation.database)
+            .get_relation(relation)
+            .collect()
+        )
 
 
 def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
@@ -42,7 +46,11 @@ def polars_read_relation(
     """
     with get_connection(adapter):
         relation = relation_from_name(adapter, relation_name)
-        df = adapter.get_storage_catalog(relation.database).get_relation(relation).collect()
+        df = (
+            adapter.get_storage_catalog(relation.database)
+            .get_relation(relation)
+            .collect()
+        )
 
     df = df.select(columns)
     if order_by is not None:
@@ -75,13 +83,13 @@ def polars_check_relations_equal(adapter, relation_names: list[str]) -> None:
             )
 
             row_diff = len(basis_df) - len(compare_df)
-            assert (
-                row_diff == 0
-            ), f"Row count differs by {row_diff} between {basis} and {compare_rel}"
+            assert row_diff == 0, (
+                f"Row count differs by {row_diff} between {basis} and {compare_rel}"
+            )
 
             mismatched = len(
                 basis_df.join(compare_df, on=col_names, how="anti", nulls_equal=True)
             )
-            assert (
-                mismatched == 0
-            ), f"Got {mismatched} different rows between {basis} and {compare_rel}"
+            assert mismatched == 0, (
+                f"Got {mismatched} different rows between {basis} and {compare_rel}"
+            )

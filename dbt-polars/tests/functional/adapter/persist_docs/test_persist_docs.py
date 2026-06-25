@@ -2,7 +2,6 @@ import json
 import os
 
 import pytest
-
 from dbt.tests.util import run_dbt
 from tests.functional.adapter.persist_docs.fixtures import (
     _DOCS__MY_FUN_DOCS,

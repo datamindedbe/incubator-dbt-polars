@@ -1,7 +1,5 @@
 import pytest
-
 from dbt.tests.util import run_dbt
-
 from tests.conftest import PolarsTestMixin
 from tests.functional.adapter.dbt_show.fixtures import (
     models__ephemeral_model,

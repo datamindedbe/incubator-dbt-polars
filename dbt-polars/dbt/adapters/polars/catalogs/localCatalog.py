@@ -1,17 +1,15 @@
 import shutil
-from pathlib import Path, PosixPath
 from dataclasses import dataclass
-from typing import Optional
-from dbt.adapters.base import BaseRelation
-from dbt.adapters.exceptions.connection import DbtRuntimeError
-from dbt.adapters.events.logging import AdapterLogger
-
-import polars as pl
-from deltalake import DeltaTable
+from pathlib import Path, PosixPath
 
 from dbt.adapters.base.relation import RelationType
-from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig, BaseCatalog
+from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.exceptions.connection import DbtRuntimeError
+from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
 from dbt.adapters.polars.relation import PolarsRelation, TableFormat
+from deltalake import DeltaTable
+
+import polars as pl
 
 logger = AdapterLogger("polars")
 
@@ -151,7 +149,9 @@ class LocalCatalog(BaseCatalog):
         )
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        DeltaTable(str(self._relation_path(relation))).alter.set_table_description(comment)
+        DeltaTable(str(self._relation_path(relation))).alter.set_table_description(
+            comment
+        )
 
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
@@ -160,7 +160,7 @@ class LocalCatalog(BaseCatalog):
         for column, comment in comments.items():
             dt.alter.set_column_metadata(column, {"comment": comment})
 
-    def get_relation_comment(self, relation: PolarsRelation) -> Optional[str]:
+    def get_relation_comment(self, relation: PolarsRelation) -> str | None:
         return DeltaTable(str(self._relation_path(relation))).metadata().description
 
     def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:

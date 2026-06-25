@@ -1,9 +1,7 @@
 from collections import namedtuple
 
 import pytest
-
 from dbt.tests.util import check_relations_equal, run_dbt
-
 from tests.conftest import PolarsTestMixin
 from tests.utils import polars_relation_row_count
 

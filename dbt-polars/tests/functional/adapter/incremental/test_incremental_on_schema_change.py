@@ -3,7 +3,6 @@ from dbt.tests.adapter.incremental import fixtures
 from dbt.tests.adapter.incremental.test_incremental_on_schema_change import (
     BaseIncrementalOnSchemaChange,
 )
-
 from tests.conftest import PolarsTestMixin
 from tests.functional.adapter.incremental import fixtures as fixture_overrides
 

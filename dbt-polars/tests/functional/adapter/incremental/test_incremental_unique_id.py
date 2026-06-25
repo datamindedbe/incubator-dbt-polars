@@ -1,10 +1,8 @@
 from collections import namedtuple
 
 import pytest
-
 from dbt.artifacts.schemas.results import RunStatus
 from dbt.tests.util import check_relations_equal, run_dbt
-
 from tests.conftest import PolarsTestMixin
 from tests.utils import polars_append_rows, polars_relation_row_count
 
@@ -494,9 +492,7 @@ class BaseIncrementalUniqueKey:
         """should pass back error state when trying build an incremental
         model whose unique key or keylist includes a column missing
         from the incremental model"""
-        seed_count = len(
-            run_dbt(["seed", "--select", "seed", "--full-refresh"])
-        )  # noqa:F841
+        seed_count = len(run_dbt(["seed", "--select", "seed", "--full-refresh"]))  # noqa:F841
         # unique keys are not applied on first run, so two are needed
         run_dbt(
             ["run", "--select", incremental_model_name, "--full-refresh"],

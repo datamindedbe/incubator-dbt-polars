@@ -3,7 +3,6 @@ import re
 
 import pytest
 import yaml
-
 from dbt.cli.exceptions import DbtUsageException
 from dbt.tests.adapter.dbt_debug.test_dbt_debug import (
     BaseDebug,

@@ -1,7 +1,6 @@
 import pytest
 from dbt.artifacts.schemas.results import RunStatus
 from dbt.tests.util import get_connection, relation_from_name, run_dbt
-
 from tests.conftest import PolarsTestMixin
 
 # First run: 1 row. Incremental run: 1 new row (different id → append grows table).

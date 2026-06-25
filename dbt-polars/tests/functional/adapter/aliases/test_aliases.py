@@ -1,8 +1,5 @@
 import pytest
-
 from dbt.tests.util import run_dbt
-
-from tests.conftest import PolarsTestMixin
 from tests.functional.adapter.aliases.fixtures import (
     MACROS__CAST_SQL,
     MACROS__EXPECT_VALUE_SQL,

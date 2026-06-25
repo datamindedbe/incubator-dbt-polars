@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Type
+from typing import Any
 
 from dbt.adapters.base import BaseRelation
-from dbt.adapters.contracts.relation import HasQuoting, RelationConfig  
+from dbt.adapters.contracts.relation import HasQuoting, RelationConfig
 
 
 class TableFormat(str, Enum):
@@ -19,7 +19,7 @@ class PolarsRelation(BaseRelation):
 
     @classmethod
     def create_from(
-        cls: Type[PolarsRelation],
+        cls: type[PolarsRelation],
         quoting: HasQuoting,
         relation_config: RelationConfig,
         **kwargs: Any,
@@ -28,10 +28,12 @@ class PolarsRelation(BaseRelation):
         # property on all relations
 
         relation = super().create_from(quoting, relation_config, **kwargs)
-    
+
         if not relation.catalog:
             config = relation_config.config
-            catalog = (config.get("catalog") if config else None) or relation_config.database
+            catalog = (
+                config.get("catalog") if config else None
+            ) or relation_config.database
             if catalog:
                 return relation.replace(catalog=catalog)
         return relation

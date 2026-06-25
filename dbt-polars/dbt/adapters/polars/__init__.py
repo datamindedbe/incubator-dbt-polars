@@ -1,9 +1,7 @@
-from dbt.adapters.polars.connections import PolarsConnectionManager
-from dbt.adapters.polars.impl import PolarsAdapter
-from dbt.adapters.polars.connections import PolarsCredentials
-from dbt.include import polars
-
 from dbt.adapters.base import AdapterPlugin
+from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
+from dbt.adapters.polars.impl import PolarsAdapter
+from dbt.include import polars
 
 Plugin = AdapterPlugin(
     adapter=PolarsAdapter,

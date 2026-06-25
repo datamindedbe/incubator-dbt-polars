@@ -1,5 +1,4 @@
 import pytest
-
 from dbt.tests.util import (
     check_relations_equal,
     check_table_does_not_exist,
@@ -8,7 +7,6 @@ from dbt.tests.util import (
     run_dbt_and_capture,
     write_file,
 )
-
 from tests.conftest import PolarsTestMixin
 
 models__invalid_sql = """

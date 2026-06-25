@@ -36,4 +36,3 @@ data "databricks_user" "human" {
   for_each  = local.unique_human_users
   user_name = each.value
 }
-

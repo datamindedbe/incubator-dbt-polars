@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import sqlglot
 import sqlglot.expressions as exp
-from sqlglot.optimizer.scope import Scope, traverse_scope
-
 from dbt.adapters.base.relation import RelationType
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
+from sqlglot.optimizer.scope import Scope, traverse_scope
 
 RelationKey = tuple[str, str, str]
 
@@ -33,7 +32,11 @@ def parse_and_rewrite(sql: str) -> tuple[str, dict[str, PolarsRelation]]:
 
 
 def _is_qualified_table(node: exp.Expression) -> bool:
-    return isinstance(node, exp.Table) and bool(node.name) and bool(node.catalog or node.db)
+    return (
+        isinstance(node, exp.Table)
+        and bool(node.name)
+        and bool(node.catalog or node.db)
+    )
 
 
 def _find_qualified_tables(ast: exp.Expression) -> list[exp.Table]:
@@ -56,7 +59,9 @@ def _disambiguated_flat_name(table: exp.Table) -> str:
     return f"{catalog}__{schema}__{table.name}"
 
 
-def _names_claimed_by_multiple_identities(qualified_tables: list[exp.Table]) -> set[str]:
+def _names_claimed_by_multiple_identities(
+    qualified_tables: list[exp.Table],
+) -> set[str]:
     keys_by_claimed_name: dict[str, set[RelationKey]] = {}
     for table in qualified_tables:
         key = _relation_key(table)

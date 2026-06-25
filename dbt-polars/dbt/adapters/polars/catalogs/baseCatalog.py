@@ -1,10 +1,9 @@
 import abc
 from abc import abstractmethod
-from typing import Optional
-
-import polars as pl
 
 from dbt.adapters.base import BaseRelation
+
+import polars as pl
 
 
 class CatalogConfig(abc.ABC):
@@ -19,7 +18,6 @@ class CatalogConfig(abc.ABC):
 
 
 class BaseCatalog(abc.ABC):
-
     def __init__(self, config: CatalogConfig):
         self.config = config
 
@@ -53,7 +51,12 @@ class BaseCatalog(abc.ABC):
     ) -> list[BaseRelation]: ...
 
     @abstractmethod
-    def append_relation(self, relation: BaseRelation, df: pl.DataFrame, allow_schema_evolution: bool = False) -> None: ...
+    def append_relation(
+        self,
+        relation: BaseRelation,
+        df: pl.DataFrame,
+        allow_schema_evolution: bool = False,
+    ) -> None: ...
 
     @abstractmethod
     def merge_relation(
@@ -65,16 +68,20 @@ class BaseCatalog(abc.ABC):
     ) -> None: ...
 
     @abstractmethod
-    def delete_matched_relation(self, relation: BaseRelation, df: pl.DataFrame, predicate: str) -> None: ...
+    def delete_matched_relation(
+        self, relation: BaseRelation, df: pl.DataFrame, predicate: str
+    ) -> None: ...
 
     @abstractmethod
     def set_relation_comment(self, relation: BaseRelation, comment: str) -> None: ...
 
     @abstractmethod
-    def set_column_comments(self, relation: BaseRelation, comments: dict[str, str]) -> None: ...
+    def set_column_comments(
+        self, relation: BaseRelation, comments: dict[str, str]
+    ) -> None: ...
 
     @abstractmethod
-    def get_relation_comment(self, relation: BaseRelation) -> Optional[str]: ...
+    def get_relation_comment(self, relation: BaseRelation) -> str | None: ...
 
     @abstractmethod
     def get_column_comments(self, relation: BaseRelation) -> dict[str, str]: ...
