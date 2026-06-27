@@ -52,7 +52,9 @@ class LocalCatalog(BaseCatalog):
                 f"Unknown table_format {config.table_format!r}. "
                 f"Valid options: {list(FORMAT_REGISTRY)}"
             )
-        self._format = self._formats[config.table_format]  # default for new tables
+        self._default_format_in_catalog = self._formats[
+            config.table_format
+        ]  # default for new tables
 
     # ------------------------------------------------------------------
     # Storage topology

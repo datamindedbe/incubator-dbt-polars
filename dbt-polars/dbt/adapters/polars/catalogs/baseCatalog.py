@@ -73,7 +73,7 @@ class BaseCatalog(ABC):
     """
 
     #: Default format for new tables; set to ``_formats[config.table_format]``.
-    _format: BaseFormat
+    _default_format_in_catalog: BaseFormat
     #: All format instances keyed by registry string; populated in __init__.
     _formats: dict[str, BaseFormat]
 
@@ -114,17 +114,18 @@ class BaseCatalog(ABC):
         """Return the :class:`~BaseFormat` for *relation*.
 
         Uses the ``format`` tag stored on the relation (set during
-        ``list_relations_without_caching``).  Falls back to ``_format`` when
-        the relation is new (``TableFormat.empty``) or the tag is unknown.
+        ``list_relations_without_caching``).  Falls back to
+        ``_default_format_in_catalog`` when the relation is new
+        (``TableFormat.empty``) or the tag is unknown.
 
         This is the single place where per-table format routing happens —
         all data-I/O and comment methods call it rather than accessing
-        ``self._format`` directly.
+        ``_default_format_in_catalog`` directly.
         """
         fmt = relation.format
         if fmt is None or fmt == TableFormat.empty:
-            return self._format
-        return self._formats.get(fmt.value, self._format)
+            return self._default_format_in_catalog
+        return self._formats.get(fmt.value, self._default_format_in_catalog)
 
     # ------------------------------------------------------------------
     # Format-delegating defaults (override only for backend-specific reasons)

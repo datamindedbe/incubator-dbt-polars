@@ -62,16 +62,15 @@ class S3Catalog(BaseCatalog):
     def __init__(self, config: S3CatalogConfig) -> None:
         super().__init__(config)
         aws_opts = {"AWS_REGION": config.region}
-        # Instantiate ALL registered formats with AWS credentials.
-        # This enables per-table format detection during listing so that a
-        # schema may contain a mix of Delta, Parquet, and CSV tables.
         self._formats = {k: cls(aws_opts) for k, cls in FORMAT_REGISTRY.items()}
         if config.table_format not in self._formats:
             raise DbtRuntimeError(
                 f"Unknown table_format {config.table_format!r}. "
                 f"Valid options: {list(FORMAT_REGISTRY)}"
             )
-        self._format = self._formats[config.table_format]  # default for new tables
+        self._default_format_in_catalog = self._formats[
+            config.table_format
+        ]  # default for new tables
 
     # ------------------------------------------------------------------
     # S3 client
