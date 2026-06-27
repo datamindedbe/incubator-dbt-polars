@@ -44,3 +44,21 @@ include = ["dbt*"]
 
 [tool.uv]
 config-settings = { editable_mode = "compat" }
+
+[tool.pytest.ini_options]
+addopts = "-n auto"
+markers = [
+    "table_format_specific: run once per table format selected via --table-format (all other tests run once, against the default format)",
+]
+filterwarnings = [
+    "ignore:.*'soft_unicode' has been renamed to 'soft_str'*:DeprecationWarning",
+    "ignore:unclosed file .*:ResourceWarning",
+    # dbt-tests-adapter uses class-scoped fixtures as instance methods; fixed upstream eventually
+    "ignore:Class-scoped fixture defined as instance method is deprecated:pytest.PytestRemovedIn10Warning",
+    # Polars SQL engine internally casts date literals; not fixable from our side until Polars 2.0 drops support
+    "ignore:Casting from String to Date is deprecated.*:DeprecationWarning",
+]
+testpaths = [
+    "tests/unit",
+    "tests/functional",
+]
