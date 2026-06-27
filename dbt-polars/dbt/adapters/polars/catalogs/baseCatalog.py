@@ -1,11 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Generic, TypeVar
 
-from dbt.adapters.base.relation import BaseRelation
+from dbt.adapters.polars.relation import PolarsRelation
 
 import polars as pl
-
-R = TypeVar("R", bound=BaseRelation)
 
 
 class CatalogConfig(ABC):
@@ -19,7 +16,7 @@ class CatalogConfig(ABC):
     def connection_keys(self) -> tuple[str, ...]: ...
 
 
-class BaseCatalog(ABC, Generic[R]):
+class BaseCatalog(ABC):
     """Abstract base class for Polars catalog backends.
 
     Subclasses implement schema and relation management for a specific storage target.
@@ -29,36 +26,38 @@ class BaseCatalog(ABC, Generic[R]):
         self.config = config
 
     @abstractmethod
-    def create_schema(self, relation: R) -> None: ...
+    def create_schema(self, relation: PolarsRelation) -> None: ...
 
     @abstractmethod
-    def drop_schema(self, relation: R) -> None: ...
+    def drop_schema(self, relation: PolarsRelation) -> None: ...
 
     @abstractmethod
     def list_schemas(self) -> list[str]: ...
 
     @abstractmethod
-    def drop_relation(self, relation: R) -> None: ...
+    def drop_relation(self, relation: PolarsRelation) -> None: ...
 
     @abstractmethod
-    def get_relation(self, relation: R) -> pl.LazyFrame: ...
+    def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame: ...
 
     @abstractmethod
-    def table_exists(self, relation: R) -> bool: ...
+    def table_exists(self, relation: PolarsRelation) -> bool: ...
 
     @abstractmethod
-    def write_relation(self, relation: R, df: pl.DataFrame) -> None: ...
+    def write_relation(self, relation: PolarsRelation, df: pl.DataFrame) -> None: ...
 
     @abstractmethod
-    def truncate_relation(self, relation: R) -> None: ...
+    def truncate_relation(self, relation: PolarsRelation) -> None: ...
 
     @abstractmethod
-    def list_relations_without_caching(self, schema_relation: R) -> list[R]: ...
+    def list_relations_without_caching(
+        self, schema_relation: PolarsRelation
+    ) -> list[PolarsRelation]: ...
 
     @abstractmethod
     def append_relation(
         self,
-        relation: R,
+        relation: PolarsRelation,
         df: pl.DataFrame,
         allow_schema_evolution: bool = False,
     ) -> None: ...
@@ -66,7 +65,7 @@ class BaseCatalog(ABC, Generic[R]):
     @abstractmethod
     def merge_relation(
         self,
-        relation: R,
+        relation: PolarsRelation,
         df: pl.DataFrame,
         predicate: str,
         except_cols: list[str] | None = None,
@@ -74,22 +73,26 @@ class BaseCatalog(ABC, Generic[R]):
 
     @abstractmethod
     def delete_matched_relation(
-        self, relation: R, df: pl.DataFrame, predicate: str
+        self, relation: PolarsRelation, df: pl.DataFrame, predicate: str
     ) -> None: ...
 
     @abstractmethod
-    def set_relation_comment(self, relation: R, comment: str) -> None: ...
+    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None: ...
 
     @abstractmethod
-    def set_column_comments(self, relation: R, comments: dict[str, str]) -> None: ...
+    def set_column_comments(
+        self, relation: PolarsRelation, comments: dict[str, str]
+    ) -> None: ...
 
     @abstractmethod
-    def get_relation_comment(self, relation: R) -> str | None: ...
+    def get_relation_comment(self, relation: PolarsRelation) -> str | None: ...
 
     @abstractmethod
-    def get_column_comments(self, relation: R) -> dict[str, str]: ...
+    def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]: ...
 
-    def expand_column_types(self, goal: R, current: R) -> None:
+    def expand_column_types(
+        self, goal: PolarsRelation, current: PolarsRelation
+    ) -> None:
         # TODO: Test if this function needs to be implemented for the local adapter
         # to enable adding columns in seeds
         pass
