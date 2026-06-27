@@ -15,7 +15,7 @@ terraform {
     }
   }
 
-  backend "azurerm" {
+ backend "azurerm" {
     storage_account_name = "dbtpolarsstate"
     container_name       = "state"
     key                  = "dbt-polars.tfstate"

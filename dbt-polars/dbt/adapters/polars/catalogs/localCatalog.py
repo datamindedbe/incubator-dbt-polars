@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -5,11 +7,9 @@ from pathlib import Path
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.formats import FORMAT_REGISTRY, TableFormatStr
 from dbt.adapters.polars.relation import PolarsRelation, TableFormat
 from dbt_common.exceptions import DbtRuntimeError
-from deltalake import DeltaTable
-
-import polars as pl
 
 logger = AdapterLogger("polars")
 
@@ -18,23 +18,15 @@ logger = AdapterLogger("polars")
 class LocalCatalogConfig(CatalogConfig):
     name: str
     type: str
+
     root: str
+    table_format: TableFormatStr = "delta"  # default for new tables
 
     def unique_field(self) -> str:
         return self.root
 
-    def connection_keys(self) -> tuple[str, ...]:
+    def connection_keys(self) -> tuple[str, str]:
         return ("name", "root")
-
-
-def _identify_table_format(path: Path) -> TableFormat:
-    if not next(path.iterdir(), None):
-        return TableFormat.empty
-
-    if DeltaTable.is_deltatable(str(path)):
-        return TableFormat.delta
-
-    raise DbtRuntimeError(f"Unable to identify format of table {path}.")
 
 
 class LocalCatalog(BaseCatalog):
@@ -51,16 +43,34 @@ class LocalCatalog(BaseCatalog):
                 "that resolves to an absolute path without spaces."
             )
         super().__init__(config)
+        # Instantiate ALL registered formats (local paths need no storage_options).
+        # This enables per-table format detection during listing — a schema may
+        # contain Delta tables alongside Parquet or CSV tables written by other tools.
+        self._formats = {k: cls() for k, cls in FORMAT_REGISTRY.items()}
+        if config.table_format not in self._formats:
+            raise DbtRuntimeError(
+                f"Unknown table_format {config.table_format!r}. "
+                f"Valid options: {list(FORMAT_REGISTRY)}"
+            )
+        self._format = self._formats[config.table_format]  # default for new tables
+
+    # ------------------------------------------------------------------
+    # Storage topology
+    # ------------------------------------------------------------------
 
     def _schema_path(self, schema: str) -> Path:
         return Path(self.config.root) / schema
 
-    def _relation_path(self, relation: PolarsRelation) -> Path:
+    def _relation_uri(self, relation: PolarsRelation) -> str:
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
         if relation.identifier is None:
             raise DbtRuntimeError(f"Relation {relation} is missing an identifier")
-        return self._schema_path(relation.schema) / relation.identifier
+        return str(self._schema_path(relation.schema) / relation.identifier)
+
+    # ------------------------------------------------------------------
+    # Storage topology
+    # ------------------------------------------------------------------
 
     def create_schema(self, relation: PolarsRelation) -> None:
         if relation.schema is None:
@@ -80,106 +90,12 @@ class LocalCatalog(BaseCatalog):
             return []
         return [p.name for p in root.iterdir() if p.is_dir()]
 
-    def table_exists(self, relation: PolarsRelation) -> bool:
-        path = self._relation_path(relation)
-        result = path.is_dir()
-        return result
-
-    def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
-        return pl.scan_delta(str(self._relation_path(relation)))
-
-    def write_relation(self, relation: PolarsRelation, df: pl.DataFrame) -> None:
-        logger.debug(
-            f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
-        )
-        df.write_delta(str(self._relation_path(relation)), mode="overwrite")
-
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
             f"Dropping table if exists {relation.catalog}/"
             f"{relation.schema}/{relation.identifier}"
         )
-        shutil.rmtree(self._relation_path(relation), ignore_errors=True)
-
-    def truncate_relation(self, relation: PolarsRelation) -> None:
-        logger.debug(
-            f"Truncating table {relation.catalog}/"
-            f"{relation.schema}/{relation.identifier}"
-        )
-        DeltaTable(str(self._relation_path(relation))).delete()
-
-    def append_relation(
-        self,
-        relation: PolarsRelation,
-        df: pl.DataFrame,
-        allow_schema_evolution: bool = False,
-    ) -> None:
-        delta_write_options = (
-            {"schema_mode": "merge"} if allow_schema_evolution else None
-        )
-        df.write_delta(
-            str(self._relation_path(relation)),
-            mode="append",
-            delta_write_options=delta_write_options,
-        )
-
-    def merge_relation(
-        self,
-        relation: PolarsRelation,
-        df: pl.DataFrame,
-        predicate: str,
-        except_cols: list[str] | None = None,
-    ) -> None:
-        dt = DeltaTable(str(self._relation_path(relation)))
-        (
-            dt.merge(
-                df.to_arrow(),
-                predicate,
-                source_alias="DBT_INTERNAL_SOURCE",
-                target_alias="DBT_INTERNAL_DEST",
-            )
-            .when_matched_update_all(except_cols=except_cols)
-            .when_not_matched_insert_all()
-            .execute()
-        )
-
-    def delete_matched_relation(
-        self, relation: PolarsRelation, df: pl.DataFrame, predicate: str
-    ) -> None:
-        dt = DeltaTable(str(self._relation_path(relation)))
-        (
-            dt.merge(
-                df.to_arrow(),
-                predicate,
-                source_alias="DBT_INTERNAL_SOURCE",
-                target_alias="DBT_INTERNAL_DEST",
-            )
-            .when_matched_delete()
-            .execute()
-        )
-
-    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        DeltaTable(str(self._relation_path(relation))).alter.set_table_description(
-            comment
-        )
-
-    def set_column_comments(
-        self, relation: PolarsRelation, comments: dict[str, str]
-    ) -> None:
-        dt = DeltaTable(str(self._relation_path(relation)))
-        for column, comment in comments.items():
-            dt.alter.set_column_metadata(column, {"comment": comment})
-
-    def get_relation_comment(self, relation: PolarsRelation) -> str | None:
-        return DeltaTable(str(self._relation_path(relation))).metadata().description
-
-    def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
-        dt = DeltaTable(str(self._relation_path(relation)))
-        return {
-            field.name: field.metadata["comment"]
-            for field in dt.schema().fields
-            if field.metadata.get("comment")
-        }
+        shutil.rmtree(self._relation_uri(relation), ignore_errors=True)
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
@@ -189,15 +105,38 @@ class LocalCatalog(BaseCatalog):
         schema_path = self._schema_path(schema_relation.schema)
         if not schema_path.exists():
             return []
-        return [
-            schema_relation.create(
-                database=schema_relation.database,
-                schema=schema_relation.schema,
-                identifier=p.name,
-                type=RelationType.Table,
-                format=_identify_table_format(p),
-                catalog=schema_relation.catalog,
+        relations: list[PolarsRelation] = []
+        for p in schema_path.iterdir():
+            if not p.is_dir():
+                continue
+            if not next(p.iterdir(), None):
+                fmt = TableFormat.empty
+            else:
+                # Probe all registered formats to detect which one this table uses.
+                # This allows a single schema to hold mixed-format tables (e.g. some
+                # Delta, some Parquet) written by different tools or migrations.
+                detected = next(
+                    (
+                        f.table_format
+                        for f in self._formats.values()
+                        if f.is_table(str(p))
+                    ),
+                    None,
+                )
+                if detected is None:
+                    raise DbtRuntimeError(
+                        f"Unable to identify format of table {p}. "
+                        f"Registered formats: {list(self._formats)}"
+                    )
+                fmt = detected
+            relations.append(
+                schema_relation.create(
+                    database=schema_relation.database,
+                    schema=schema_relation.schema,
+                    identifier=p.name,
+                    type=RelationType.Table,
+                    format=fmt,
+                    catalog=schema_relation.catalog,
+                )
             )
-            for p in schema_path.iterdir()
-            if p.is_dir()
-        ]
+        return relations

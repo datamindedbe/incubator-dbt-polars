@@ -25,6 +25,7 @@ dependencies = [
     # polars<2: str->Date cast is deprecated in 2.0; pin until adapter is updated
     "polars[deltalake,pyarrow]>=0.19,<2",
     "sqlglot>=1.0.0",
+    "boto3>=1.26.0",
 ]
 
 [dependency-groups]
@@ -33,6 +34,8 @@ dev = [
     "pytest~=9.1.1",
     "pytest-xdist~=3.8.0",
     "types-pyyaml>=6.0.12.20260518",
+    "moto[s3]>=5.0.0",
+    "boto3-stubs[s3]>=1.26.0",
 ]
 
 [build-system]
