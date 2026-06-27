@@ -20,6 +20,11 @@ class CatalogConfig(ABC):
 
 
 class BaseCatalog(ABC, Generic[R]):
+    """Abstract base class for Polars catalog backends.
+
+    Subclasses implement schema and relation management for a specific storage target.
+    """
+
     def __init__(self, config: CatalogConfig):
         self.config = config
 
