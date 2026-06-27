@@ -1,10 +1,8 @@
 from collections import namedtuple
 
 import pytest
-
 from dbt.artifacts.schemas.results import RunStatus
 from dbt.tests.util import check_relations_equal, run_dbt
-
 from tests.conftest import PolarsTestMixin
 from tests.utils import polars_relation_row_count
 
@@ -109,7 +107,9 @@ class BaseMergeExcludeColumns:
     @pytest.fixture(scope="class")
     def seeds(self):
         return {
-            "expected_merge_exclude_columns.csv": seeds__expected_merge_exclude_columns_csv
+            "expected_merge_exclude_columns.csv": (
+                seeds__expected_merge_exclude_columns_csv
+            )
         }
 
     def update_incremental_model(self, incremental_model):
@@ -192,7 +192,9 @@ class TestMergeColumnsMutuallyExclusive(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
         return {
-            "merge_mutually_exclusive_columns.sql": models__merge_mutually_exclusive_columns_sql
+            "merge_mutually_exclusive_columns.sql": (
+                models__merge_mutually_exclusive_columns_sql
+            )
         }
 
     def test__merge_update_and_exclude_columns_conflict(self, project):

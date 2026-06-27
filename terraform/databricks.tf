@@ -23,4 +23,3 @@ resource "databricks_storage_credential" "this" {
     access_connector_id = azurerm_databricks_access_connector.this.id
   }
 }
-

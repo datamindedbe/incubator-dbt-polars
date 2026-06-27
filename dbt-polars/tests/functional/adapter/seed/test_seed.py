@@ -7,14 +7,8 @@ import pytest
 from dbt.tests import util
 from dbt.tests.adapter.simple_seed import seeds
 from dbt.tests.adapter.simple_seed.test_seed import (
-    BaseBasicSeedTests,
-    BaseSeedConfigFullRefreshOff,
     BaseSeedCustomSchema,
     BaseSeedParsing,
-    BaseSeedSpecificFormats,
-    BaseSeedWithEmptyDelimiter,
-    BaseSeedWithUniqueDelimiter,
-    BaseSeedWithWrongDelimiter,
     BaseSimpleSeedEnabledViaConfig,
     BaseSimpleSeedWithBOM,
     BaseTestEmptySeed,
@@ -101,7 +95,8 @@ class TestSimpleSeedWithBOM(BaseSimpleSeedWithBOM):
 
 
 class TestSeedWithExplicitCatalog:
-    """Verify that a seed with an explicit catalog config is written to the correct catalog."""
+    """Verify that a seed with an explicit catalog config is written
+    to the correct catalog."""
 
     @pytest.fixture(scope="class")
     def seeds(self):
@@ -137,9 +132,9 @@ class TestSeedWithExplicitCatalog:
             / "seed_actual"
         )
 
-        assert (
-            not seed_in_default.exists()
-        ), f"Seed incorrectly written to default catalog at {seed_in_default}"
-        assert (
-            seed_in_local2.exists()
-        ), f"Seed not found in local2 catalog at {seed_in_local2}"
+        assert not seed_in_default.exists(), (
+            f"Seed incorrectly written to default catalog at {seed_in_default}"
+        )
+        assert seed_in_local2.exists(), (
+            f"Seed not found in local2 catalog at {seed_in_local2}"
+        )

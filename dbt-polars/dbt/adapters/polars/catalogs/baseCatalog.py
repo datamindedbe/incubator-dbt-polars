@@ -1,85 +1,95 @@
-import abc
-from abc import abstractmethod
-from typing import Optional
+from abc import ABC, abstractmethod
+from typing import Generic, TypeVar
+
+from dbt.adapters.base.relation import BaseRelation
 
 import polars as pl
 
-from dbt.adapters.base import BaseRelation
+R = TypeVar("R", bound=BaseRelation)
 
 
-class CatalogConfig(abc.ABC):
+class CatalogConfig(ABC):
     name: str
     type: str
 
-    @abc.abstractmethod
+    @abstractmethod
     def unique_field(self) -> str: ...
 
-    @abc.abstractmethod
-    def connection_keys(self) -> str: ...
+    @abstractmethod
+    def connection_keys(self) -> tuple[str, ...]: ...
 
 
-class BaseCatalog(abc.ABC):
+class BaseCatalog(ABC, Generic[R]):
+    """Abstract base class for Polars catalog backends.
+
+    Subclasses implement schema and relation management for a specific storage target.
+    """
 
     def __init__(self, config: CatalogConfig):
         self.config = config
 
     @abstractmethod
-    def create_schema(self, relation: BaseRelation) -> None: ...
+    def create_schema(self, relation: R) -> None: ...
 
     @abstractmethod
-    def drop_schema(self, relation: BaseRelation) -> None: ...
+    def drop_schema(self, relation: R) -> None: ...
 
     @abstractmethod
     def list_schemas(self) -> list[str]: ...
 
     @abstractmethod
-    def drop_relation(self, relation: BaseRelation) -> None: ...
+    def drop_relation(self, relation: R) -> None: ...
 
     @abstractmethod
-    def get_relation(self, relation: BaseRelation) -> pl.LazyFrame: ...
+    def get_relation(self, relation: R) -> pl.LazyFrame: ...
 
     @abstractmethod
-    def table_exists(self, relation: BaseRelation) -> bool: ...
+    def table_exists(self, relation: R) -> bool: ...
 
     @abstractmethod
-    def write_relation(self, relation: BaseRelation, df: pl.DataFrame) -> None: ...
+    def write_relation(self, relation: R, df: pl.DataFrame) -> None: ...
 
     @abstractmethod
-    def truncate_relation(self, relation: BaseRelation) -> None: ...
+    def truncate_relation(self, relation: R) -> None: ...
 
     @abstractmethod
-    def list_relations_without_caching(
-        self, schema_relation: BaseRelation
-    ) -> list[BaseRelation]: ...
+    def list_relations_without_caching(self, schema_relation: R) -> list[R]: ...
 
     @abstractmethod
-    def append_relation(self, relation: BaseRelation, df: pl.DataFrame, allow_schema_evolution: bool = False) -> None: ...
+    def append_relation(
+        self,
+        relation: R,
+        df: pl.DataFrame,
+        allow_schema_evolution: bool = False,
+    ) -> None: ...
 
     @abstractmethod
     def merge_relation(
         self,
-        relation: BaseRelation,
+        relation: R,
         df: pl.DataFrame,
         predicate: str,
         except_cols: list[str] | None = None,
     ) -> None: ...
 
     @abstractmethod
-    def delete_matched_relation(self, relation: BaseRelation, df: pl.DataFrame, predicate: str) -> None: ...
+    def delete_matched_relation(
+        self, relation: R, df: pl.DataFrame, predicate: str
+    ) -> None: ...
 
     @abstractmethod
-    def set_relation_comment(self, relation: BaseRelation, comment: str) -> None: ...
+    def set_relation_comment(self, relation: R, comment: str) -> None: ...
 
     @abstractmethod
-    def set_column_comments(self, relation: BaseRelation, comments: dict[str, str]) -> None: ...
+    def set_column_comments(self, relation: R, comments: dict[str, str]) -> None: ...
 
     @abstractmethod
-    def get_relation_comment(self, relation: BaseRelation) -> Optional[str]: ...
+    def get_relation_comment(self, relation: R) -> str | None: ...
 
     @abstractmethod
-    def get_column_comments(self, relation: BaseRelation) -> dict[str, str]: ...
+    def get_column_comments(self, relation: R) -> dict[str, str]: ...
 
-    def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
+    def expand_column_types(self, goal: R, current: R) -> None:
         # TODO: Test if this function needs to be implemented for the local adapter
         # to enable adding columns in seeds
         pass

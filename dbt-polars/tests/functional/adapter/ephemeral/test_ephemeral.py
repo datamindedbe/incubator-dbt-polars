@@ -3,11 +3,11 @@ import re
 from unittest import mock
 
 import pytest
+from dbt.adapters.polars.impl import PolarsAdapter
 from dbt.tests import util
 from dbt.tests.adapter.ephemeral import test_ephemeral
-from tests.conftest import PolarsTestMixin
 from dbt.tests.adapter.ephemeral.test_ephemeral import BaseEphemeral, BaseEphemeralMulti
-from dbt.adapters.polars.impl import PolarsAdapter
+from tests.conftest import PolarsTestMixin
 
 
 class TestEphemeralMulti(BaseEphemeralMulti, PolarsTestMixin):

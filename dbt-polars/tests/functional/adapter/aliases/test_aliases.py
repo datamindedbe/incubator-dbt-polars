@@ -1,8 +1,5 @@
 import pytest
-
 from dbt.tests.util import run_dbt
-
-from tests.conftest import PolarsTestMixin
 from tests.functional.adapter.aliases.fixtures import (
     MACROS__CAST_SQL,
     MACROS__EXPECT_VALUE_SQL,
@@ -48,7 +45,9 @@ class BaseAliases:
             "schema.yml": MODELS__SCHEMA_YML,
             "foo_alias.sql": MODELS__FOO_ALIAS_SQL,
             "alias_in_project.sql": MODELS__ALIAS_IN_PROJECT_SQL,
-            "alias_in_project_with_override.sql": MODELS__ALIAS_IN_PROJECT_WITH_OVERRIDE_SQL,
+            "alias_in_project_with_override.sql": (
+                MODELS__ALIAS_IN_PROJECT_WITH_OVERRIDE_SQL
+            ),
             "ref_foo_alias.sql": MODELS__REF_FOO_ALIAS_SQL,
         }
 

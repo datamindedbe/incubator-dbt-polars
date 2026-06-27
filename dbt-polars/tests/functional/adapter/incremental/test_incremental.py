@@ -1,7 +1,6 @@
 import pytest
 from dbt.artifacts.schemas.results import RunStatus
 from dbt.tests.util import get_connection, relation_from_name, run_dbt
-
 from tests.conftest import PolarsTestMixin
 
 # First run: 1 row. Incremental run: 1 new row (different id → append grows table).
@@ -28,7 +27,11 @@ _MERGE_MODEL = """
 
 # First run: 2 rows. Incremental run: replaces one existing row + inserts one new row.
 _DELETE_INSERT_MODEL = """
-{{ config(materialized='incremental', unique_key='id', incremental_strategy='delete+insert') }}
+{{ config(
+    materialized='incremental',
+    unique_key='id',
+    incremental_strategy='delete+insert'
+) }}
 
 {% if is_incremental() %}
     SELECT 1 AS id, 'updated' AS name

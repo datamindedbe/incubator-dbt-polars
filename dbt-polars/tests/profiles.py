@@ -10,7 +10,7 @@ def default_target() -> dict:
     return {
         "type": "polars",
         "catalogs": [
-            local_catalog(name="local", root="test_root/"), 
-            local_catalog(name="local2", root="test_root2/")
+            local_catalog(name="local", root="test_root/"),
+            local_catalog(name="local2", root="test_root2/"),
         ],
     }

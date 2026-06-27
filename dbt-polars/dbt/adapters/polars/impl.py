@@ -1,29 +1,35 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any, cast
 
-import polars as pl
-
-from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
-from dbt.adapters.base import BaseAdapter, BaseRelation, available, Column
-from dbt.adapters.polars.catalogs import BaseCatalog, CATALOG_REGISTRY
-from dbt.adapters.polars.relation import PolarsRelation
-from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
+from dbt.adapters.base.column import Column
+from dbt.adapters.base.impl import BaseAdapter
+from dbt.adapters.base.meta import available
+from dbt.adapters.base.relation import BaseRelation
 from dbt.adapters.contracts.connection import AdapterResponse
 from dbt.adapters.contracts.relation import RelationConfig
-from dbt_common.exceptions import DbtRuntimeError, CompilationError
+from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.polars.catalogs import CATALOG_REGISTRY, BaseCatalog
+from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
+from dbt.adapters.polars.relation import PolarsRelation
+from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
+from dbt_common.clients.agate_helper import (
+    Integer as DbtInteger,
+)
 from dbt_common.clients.agate_helper import (
     Number,
-    Integer as DbtInteger,
     empty_table,
     table_from_data,
 )
-from dbt.adapters.events.logging import AdapterLogger
+from dbt_common.exceptions import CompilationError, DbtRuntimeError
+
+import polars as pl
 
 if TYPE_CHECKING:
     import agate
 
-_POLARS_TYPE_MAP: dict[str, pl.PolarsDataType] = {
+_POLARS_TYPE_MAP: dict[str, type[pl.DataType]] = {
     # Polars-native names
     "Int8": pl.Int8,
     "Int16": pl.Int16,
@@ -89,7 +95,7 @@ _POLARS_TYPE_MAP: dict[str, pl.PolarsDataType] = {
 }
 
 
-def _resolve_polars_type(type_str: str) -> pl.PolarsDataType:
+def _resolve_polars_type(type_str: str) -> type[pl.DataType]:
     key = type_str.split("(")[0].strip()
     dtype = _POLARS_TYPE_MAP.get(key) or _POLARS_TYPE_MAP.get(key.lower())
     if dtype is None:
@@ -107,11 +113,11 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
-    CatalogAdapters: dict[str, BaseCatalog] = {}
+    CatalogAdapters: dict[str, BaseCatalog[Any]] = {}
 
-    def get_storage_catalog(self, name: Optional[str]) -> BaseCatalog:
+    def get_storage_catalog(self, name: str | None) -> BaseCatalog[Any]:
         connection = self.connections.get_thread_connection()
-        credentials: PolarsCredentials = connection.credentials
+        credentials = cast(PolarsCredentials, connection.credentials)
 
         # Unquote the catalog name if it's quoted
         if name is not None:
@@ -127,6 +133,8 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(f"Unknown catalog {name}")
 
         config = credentials.catalog_configs.get(name)
+        if config is None:
+            raise DbtRuntimeError(f"Unknown catalog {name}")
         self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](config)
 
         return self.CatalogAdapters[name]
@@ -156,7 +164,10 @@ class PolarsAdapter(BaseAdapter):
         if goal.catalog != current.catalog:
             # TODO: test this
             raise DbtRuntimeError(
-                f"The provider currently doesn't support expanding column types across catalogs. {current.catalog}.{current.schema}.{current.table} to {goal.catalog}.{goal.schema}.{goal.table} "
+                f"The provider currently doesn't support expanding column "
+                f"types across catalogs. "
+                f"{current.catalog}.{current.schema}.{current.table} to "
+                f"{goal.catalog}.{goal.schema}.{goal.table} "
             )
 
         self.get_storage_catalog(goal.catalog).expand_column_types(goal, current)
@@ -181,7 +192,7 @@ class PolarsAdapter(BaseAdapter):
         # TODO: Do we need this
         # Normally this is used in dbt to write data first to a temp location and
         # then swap, but this is not necessary when using delta
-        raise DbtRuntimeError(f"dbt-polars doesn't support renaming relations.")
+        raise DbtRuntimeError("dbt-polars doesn't support renaming relations.")
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         self.get_storage_catalog(relation.catalog).drop_relation(relation)
@@ -217,8 +228,8 @@ class PolarsAdapter(BaseAdapter):
     def get_catalog(
         self,
         relation_configs: Iterable[RelationConfig],
-        used_schemas: frozenset[tuple[Optional[str], str]],
-    ) -> tuple["agate.Table", list[Exception]]:
+        used_schemas: frozenset[tuple[str | None, str]],
+    ) -> tuple[agate.Table, list[Exception]]:
         """Builds the catalog.json data directly from the filesystem/Delta metadata.
 
         Polars has no information_schema to query via SQL, so unlike most adapters this
@@ -226,8 +237,9 @@ class PolarsAdapter(BaseAdapter):
         in pure Python.
         """
 
-        # TODO: When adding more catalogs (like Databricks) see if this method has to pushed
-        # partially to the catalog and make a union over the tables found in each catalog.
+        # TODO: When adding more catalogs (like Databricks) see if this method
+        # has to be pushed partially to the catalog and make a union over the
+        # tables found in each catalog.
 
         column_names = [
             "table_database",
@@ -279,7 +291,7 @@ class PolarsAdapter(BaseAdapter):
 
     # --- Type conversions ---
     @classmethod
-    def convert_dbt_integer_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+    def convert_dbt_integer_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         return "Int64"
 
     @classmethod
@@ -290,30 +302,30 @@ class PolarsAdapter(BaseAdapter):
     def convert_number_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         import agate
 
-        decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))
+        decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))  # type: ignore[attr-defined]
         return "Float64" if decimals else "Int64"
 
     @classmethod
-    def convert_boolean_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+    def convert_boolean_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         return "Boolean"
 
     @classmethod
-    def convert_datetime_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+    def convert_datetime_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         return "Datetime"
 
     @classmethod
-    def convert_date_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+    def convert_date_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         return "Date"
 
     @classmethod
-    def convert_time_type(cls, agate_table: "agate.Table", col_idx: int) -> str:
+    def convert_time_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         return "Duration"
 
     @available
     def polars_load_csv_rows(
         self,
         relation: PolarsRelation,
-        agate_table: "agate.Table",
+        agate_table: agate.Table,
         column_types: dict[str, str],
     ) -> None:
         import agate
@@ -367,7 +379,8 @@ class PolarsAdapter(BaseAdapter):
 
     def _run_sql(self, sql: str) -> pl.DataFrame:
         rewritten_sql, refs = parse_and_rewrite(sql)
-        return self._build_sql_context(refs).execute(rewritten_sql).collect()
+        result = self._build_sql_context(refs).execute(rewritten_sql, eager=True)
+        return cast(pl.DataFrame, result)
 
     def _apply_schema_change(
         self,
@@ -380,9 +393,10 @@ class PolarsAdapter(BaseAdapter):
 
         Returns (data, allow_evolution):
           - data: the DataFrame to write, possibly column-filtered or None if
-            sync_all_columns already performed a full rewrite (caller should return early)
-          - allow_evolution: True when the catalog should enable schema evolution
-            on the append (new columns present and policy permits them)
+            sync_all_columns already performed a full rewrite (caller
+            should return early)
+          - allow_evolution: True when the catalog should enable schema
+            evolution on the append (new columns present and policy permits)
         """
         existing = {
             col.name: col.dtype for col in self.get_columns_in_relation(relation)
@@ -431,9 +445,9 @@ class PolarsAdapter(BaseAdapter):
     def _resolve_merge_except_cols(
         self,
         new_data: pl.DataFrame,
-        merge_update_columns: Optional[str | list[str]],
-        merge_exclude_columns: Optional[str | list[str]],
-    ) -> Optional[list[str]]:
+        merge_update_columns: str | list[str] | None,
+        merge_exclude_columns: str | list[str] | None,
+    ) -> list[str] | None:
         """Resolve merge_update_columns/merge_exclude_columns into an except_cols
         list for deltalake's when_matched_update_all(except_cols=...).
 
@@ -466,7 +480,7 @@ class PolarsAdapter(BaseAdapter):
         update = (
             [merge_update_columns]
             if isinstance(merge_update_columns, str)
-            else merge_update_columns
+            else (merge_update_columns or [])
         )
         update_lower = {c.lower() for c in update}
         return [c for c in dest_cols if c.lower() not in update_lower]
@@ -476,22 +490,24 @@ class PolarsAdapter(BaseAdapter):
         self,
         relation: PolarsRelation,
         sql: str,
-        unique_key: Optional[str | list[str]],
+        unique_key: str | list[str] | None,
         strategy: str,
         on_schema_change: str,
-        merge_update_columns: Optional[str | list[str]] = None,
-        merge_exclude_columns: Optional[str | list[str]] = None,
-        incremental_predicates: Optional[str | list[str]] = None,
+        merge_update_columns: str | list[str] | None = None,
+        merge_exclude_columns: str | list[str] | None = None,
+        incremental_predicates: str | list[str] | None = None,
     ) -> None:
         new_data = self._run_sql(sql)
         catalog = self.get_storage_catalog(relation.catalog)
 
-        new_data, allow_evolution = self._apply_schema_change(
+        schema_result, allow_evolution = self._apply_schema_change(
             catalog, relation, new_data, on_schema_change
         )
 
-        if new_data is None:
+        if schema_result is None:
             return  # sync_all_columns already performed a full rewrite
+
+        new_data = schema_result
 
         if strategy == "append":
             catalog.append_relation(
@@ -548,7 +564,7 @@ class PolarsAdapter(BaseAdapter):
         sql: str,
         auto_begin: bool = False,
         fetch: bool = False,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> tuple[AdapterResponse, agate.Table]:
         if not fetch:
             return AdapterResponse(_message="OK"), empty_table()
@@ -561,4 +577,5 @@ class PolarsAdapter(BaseAdapter):
         )
 
 
-# may require more build out to make more user friendly to confer with team and community.
+# may require more build out to make more user friendly to confer with team
+# and community.

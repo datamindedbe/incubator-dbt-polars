@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-import abc
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, Optional, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from dbt.adapters.base import BaseConnectionManager
-from dbt_common.dataclass_schema import StrEnum
-from dbt_common.exceptions import DbtRuntimeError, DbtDatabaseError
-from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.base.connections import BaseConnectionManager
 from dbt.adapters.contracts.connection import (
+    AdapterResponse,
     ConnectionState,
     Credentials,
-    AdapterResponse,
 )
-from dbt.adapters.polars.catalogs import CatalogConfig, CATALOG_CONFIG_REGISTRY
+from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.polars.catalogs import CATALOG_CONFIG_REGISTRY, CatalogConfig
 from dbt_common.clients.agate_helper import empty_table
+from dbt_common.exceptions import DbtDatabaseError, DbtRuntimeError
 
 if TYPE_CHECKING:
     import agate
@@ -27,9 +25,9 @@ logger = AdapterLogger("polars")
 class PolarsCredentials(Credentials):
     database: str = ""
     schema: str = ""
-    catalogs: list[Dict[str, Any]] = field(default_factory=list)
+    catalogs: list[dict[str, Any]] = field(default_factory=list)
 
-    _ALIASES: ClassVar[Dict[str, str]] = {}
+    _ALIASES: ClassVar[dict[str, str]] = {}
 
     @property
     def type(self) -> str:
@@ -67,15 +65,14 @@ class PolarsCredentials(Credentials):
                 f"Default catalog '{self.database}' not found in catalogs"
             )
 
-    def _parse_catalog(self, entry: Dict[str, Any]) -> CatalogConfig:
+    def _parse_catalog(self, entry: dict[str, Any]) -> CatalogConfig:
         catalog_type = entry.get("type")
 
         if catalog_type not in CATALOG_CONFIG_REGISTRY:
             raise DbtRuntimeError(f"Unknown catalog type: {catalog_type}")
 
-        return CATALOG_CONFIG_REGISTRY.get(catalog_type)(
-            **{k: v for k, v in entry.items()}
-        )
+        config_cls = CATALOG_CONFIG_REGISTRY[catalog_type]
+        return config_cls(**{k: v for k, v in entry.items()})
 
 
 class PolarsHandle:
@@ -98,7 +95,7 @@ class PolarsCursor:
         self.description = []
         self._rows = []
 
-    def execute(self, sql: str, bindings: Optional[Any] = None):
+    def execute(self, sql: str, bindings: Any | None = None):
         pass
 
     def fetchone(self):
@@ -144,7 +141,7 @@ class PolarsConnectionManager(BaseConnectionManager):
         sql: str,
         auto_begin: bool = False,
         fetch: bool = False,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> tuple[AdapterResponse, agate.Table]:
         return AdapterResponse(_message="OK"), empty_table()
 
@@ -155,5 +152,5 @@ class PolarsConnectionManager(BaseConnectionManager):
     def cancel(self, connection):
         pass
 
-    def cancel_open(self) -> Optional[list[str]]:
+    def cancel_open(self) -> list[str] | None:
         return []

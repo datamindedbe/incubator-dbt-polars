@@ -3,7 +3,6 @@ import re
 
 import pytest
 import yaml
-
 from dbt.cli.exceptions import DbtUsageException
 from dbt.tests.adapter.dbt_debug.test_dbt_debug import (
     BaseDebug,
@@ -18,7 +17,8 @@ class TestDebugPolars(BaseDebug):
         assert "ERROR" not in self.capsys.readouterr().out
 
     def test_connection_flag(self, project):
-        """Testing that the --connection flag works as expected, including that output is not lost"""
+        """Testing that the --connection flag works as expected,
+        including that output is not lost"""
         _, out = run_dbt_and_capture(["debug", "--connection"])
         assert "Skipping steps before connection verification" in out
 

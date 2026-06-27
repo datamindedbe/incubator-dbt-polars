@@ -1,23 +1,22 @@
 import pytest
 import sqlglot
 import sqlglot.expressions as exp
-from sqlglot.optimizer.scope import traverse_scope
-from dbt_common.exceptions import DbtRuntimeError
-
 from dbt.adapters.polars.sql_rewrite import (
-    parse_and_rewrite,
-    _is_qualified_table,
-    _find_qualified_tables,
-    _relation_key,
-    _names_claimed_by_table,
-    _disambiguated_flat_name,
-    _names_claimed_by_multiple_identities,
     _assign_flat_names,
-    _replace_qualified_tables_with_flat_names,
-    _raise_if_a_column_unsafely_qualifies_a_colliding_name,
-    _resolve_qualifier_in_enclosing_scopes,
+    _disambiguated_flat_name,
+    _find_qualified_tables,
+    _is_qualified_table,
+    _names_claimed_by_multiple_identities,
+    _names_claimed_by_table,
     _qualifier_source_is_safe,
+    _raise_if_a_column_unsafely_qualifies_a_colliding_name,
+    _relation_key,
+    _replace_qualified_tables_with_flat_names,
+    _resolve_qualifier_in_enclosing_scopes,
+    parse_and_rewrite,
 )
+from dbt_common.exceptions import DbtRuntimeError
+from sqlglot.optimizer.scope import traverse_scope
 
 
 def _first_table(sql: str) -> exp.Table:
@@ -30,7 +29,11 @@ def test_strips_catalog_and_schema_from_a_qualified_table():
     assert sql == "SELECT * FROM orders"
     assert list(refs.keys()) == ["orders"]
     relation = refs["orders"]
-    assert (relation.database, relation.schema, relation.identifier) == ("db", "sch", "orders")
+    assert (relation.database, relation.schema, relation.identifier) == (
+        "db",
+        "sch",
+        "orders",
+    )
 
 
 def test_keeps_an_explicit_alias_on_the_rewritten_table():
@@ -318,7 +321,9 @@ def test_raise_if_unsafe_qualifier_does_nothing_when_nothing_collides():
     ast = sqlglot.parse_one('SELECT orders.id FROM "db"."sch"."orders"')
 
     assert (
-        _raise_if_a_column_unsafely_qualifies_a_colliding_name(ast, colliding_names=set())
+        _raise_if_a_column_unsafely_qualifies_a_colliding_name(
+            ast, colliding_names=set()
+        )
         is None
     )
 
@@ -350,7 +355,9 @@ def test_raise_if_unsafe_qualifier_allows_a_colliding_name_resolved_via_an_alias
 
 
 def test_raise_if_unsafe_qualifier_allows_a_colliding_name_resolved_via_a_cte():
-    ast = sqlglot.parse_one('WITH orders AS (SELECT 1 AS id) SELECT orders.id FROM orders')
+    ast = sqlglot.parse_one(
+        "WITH orders AS (SELECT 1 AS id) SELECT orders.id FROM orders"
+    )
 
     assert (
         _raise_if_a_column_unsafely_qualifies_a_colliding_name(
