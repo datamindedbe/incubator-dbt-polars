@@ -37,7 +37,7 @@ def _identify_table_format(path: Path) -> TableFormat:
     raise DbtRuntimeError(f"Unable to identify format of table {path}.")
 
 
-class LocalCatalog(BaseCatalog[PolarsRelation]):
+class LocalCatalog(BaseCatalog):
     config: LocalCatalogConfig
 
     def __init__(self, config: LocalCatalogConfig):
@@ -56,18 +56,22 @@ class LocalCatalog(BaseCatalog[PolarsRelation]):
         return Path(self.config.root) / schema
 
     def _relation_path(self, relation: PolarsRelation) -> Path:
-        assert relation.schema is not None
-        assert relation.identifier is not None
+        if relation.schema is None:
+            raise DbtRuntimeError(f"Relation {relation} is missing a schema")
+        if relation.identifier is None:
+            raise DbtRuntimeError(f"Relation {relation} is missing an identifier")
         return self._schema_path(relation.schema) / relation.identifier
 
     def create_schema(self, relation: PolarsRelation) -> None:
+        if relation.schema is None:
+            raise DbtRuntimeError(f"Relation {relation} is missing a schema")
         logger.debug(f"Creating schema {relation.catalog}/{relation.schema}")
-        assert relation.schema is not None
         self._schema_path(relation.schema).mkdir(parents=True, exist_ok=True)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
+        if relation.schema is None:
+            raise DbtRuntimeError(f"Relation {relation} is missing a schema")
         logger.debug(f"Dropping schema {relation.catalog}/{relation.schema}")
-        assert relation.schema is not None
         shutil.rmtree(self._schema_path(relation.schema), ignore_errors=True)
 
     def list_schemas(self) -> list[str]:
@@ -180,7 +184,8 @@ class LocalCatalog(BaseCatalog[PolarsRelation]):
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
     ) -> list[PolarsRelation]:
-        assert schema_relation.schema is not None
+        if schema_relation.schema is None:
+            raise DbtRuntimeError(f"Relation {schema_relation} is missing a schema")
         schema_path = self._schema_path(schema_relation.schema)
         if not schema_path.exists():
             return []

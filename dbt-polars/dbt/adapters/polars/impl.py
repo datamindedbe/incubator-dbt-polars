@@ -113,9 +113,9 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
-    CatalogAdapters: dict[str, BaseCatalog[Any]] = {}
+    CatalogAdapters: dict[str, BaseCatalog] = {}
 
-    def get_storage_catalog(self, name: str | None) -> BaseCatalog[Any]:
+    def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         connection = self.connections.get_thread_connection()
         credentials = cast(PolarsCredentials, connection.credentials)
 
@@ -151,28 +151,33 @@ class PolarsAdapter(BaseAdapter):
         return False
 
     # --- Catalog operations ---
-    def create_schema(self, relation: BaseRelation) -> None:
+    def create_schema(self, relation: PolarsRelation) -> None:  # type: ignore[override]
         self.get_storage_catalog(relation.catalog).create_schema(relation)
 
-    def drop_schema(self, relation: BaseRelation) -> None:
+    def drop_schema(self, relation: PolarsRelation) -> None:  # type: ignore[override]
         self.get_storage_catalog(relation.catalog).drop_schema(relation)
 
     def list_schemas(self, database: str) -> list[str]:
         return self.get_storage_catalog(database).list_schemas()
 
     def expand_column_types(self, goal: BaseRelation, current: BaseRelation) -> None:
-        if goal.catalog != current.catalog:
+        polars_goal = cast(PolarsRelation, goal)
+        polars_current = cast(PolarsRelation, current)
+        if polars_goal.catalog != polars_current.catalog:
             # TODO: test this
             raise DbtRuntimeError(
                 f"The provider currently doesn't support expanding column "
                 f"types across catalogs. "
-                f"{current.catalog}.{current.schema}.{current.table} to "
-                f"{goal.catalog}.{goal.schema}.{goal.table} "
+                f"{polars_current.catalog}.{polars_current.schema}"
+                f".{polars_current.table} to "
+                f"{polars_goal.catalog}.{polars_goal.schema}.{polars_goal.table} "
             )
 
-        self.get_storage_catalog(goal.catalog).expand_column_types(goal, current)
+        self.get_storage_catalog(polars_goal.catalog).expand_column_types(
+            polars_goal, polars_current
+        )
 
-    def get_columns_in_relation(self, relation: BaseRelation) -> list[Column]:
+    def get_columns_in_relation(self, relation: PolarsRelation) -> list[Column]:  # type: ignore[override]
         catalog = self.get_storage_catalog(relation.catalog)
         if not catalog.table_exists(relation):
             return []
@@ -180,11 +185,15 @@ class PolarsAdapter(BaseAdapter):
         return [Column(col, str(type)) for col, type in schema.items()]
 
     def list_relations_without_caching(
-        self, schema_relation: BaseRelation
+        self,
+        schema_relation: PolarsRelation,  # type: ignore[override]
     ) -> list[BaseRelation]:
-        return self.get_storage_catalog(
-            schema_relation.catalog
-        ).list_relations_without_caching(schema_relation)
+        return cast(
+            list[BaseRelation],
+            self.get_storage_catalog(
+                schema_relation.catalog
+            ).list_relations_without_caching(schema_relation),
+        )
 
     def rename_relation(
         self, from_relation: BaseRelation, to_relation: BaseRelation
@@ -198,7 +207,7 @@ class PolarsAdapter(BaseAdapter):
         self.get_storage_catalog(relation.catalog).drop_relation(relation)
         self.cache_dropped(relation)
 
-    def truncate_relation(self, relation: BaseRelation) -> None:
+    def truncate_relation(self, relation: PolarsRelation) -> None:  # type: ignore[override]
         self.get_storage_catalog(relation.catalog).truncate_relation(relation)
 
     # --- persist_docs ---
