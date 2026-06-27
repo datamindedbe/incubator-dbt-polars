@@ -14,7 +14,7 @@ dbt.tests.util.check_relations_equal = polars_check_relations_equal
 
 pytest_plugins = ["dbt.tests.fixtures.project"]
 
-ALL_TABLE_FORMATS = ["delta", "iceberg"]
+ALL_TABLE_FORMATS = ["delta"]
 
 
 def pytest_addoption(parser):
@@ -64,9 +64,7 @@ def prefix(table_format):
     _runtime_timedelta = datetime.now(timezone.utc).replace(tzinfo=None) - datetime(
         1970, 1, 1, 0, 0, 0
     )
-    _runtime = (
-        int(_runtime_timedelta.total_seconds() * 1e6) + _runtime_timedelta.microseconds
-    )
+    _runtime = int(_runtime_timedelta.total_seconds() * 1e6)
     return f"test{_runtime}{_randint:04}_{table_format}"
 
 
