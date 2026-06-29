@@ -5,7 +5,7 @@ from pathlib import Path
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
-from dbt.adapters.polars.relation import PolarsRelation, TableFormat
+from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
 from deltalake import DeltaTable
 
@@ -25,16 +25,6 @@ class LocalCatalogConfig(CatalogConfig):
 
     def connection_keys(self) -> tuple[str, ...]:
         return ("name", "root")
-
-
-def _identify_table_format(path: Path) -> TableFormat:
-    if not next(path.iterdir(), None):
-        return TableFormat.empty
-
-    if DeltaTable.is_deltatable(str(path)):
-        return TableFormat.delta
-
-    raise DbtRuntimeError(f"Unable to identify format of table {path}.")
 
 
 class LocalCatalog(BaseCatalog):
@@ -81,9 +71,7 @@ class LocalCatalog(BaseCatalog):
         return [p.name for p in root.iterdir() if p.is_dir()]
 
     def table_exists(self, relation: PolarsRelation) -> bool:
-        path = self._relation_path(relation)
-        result = path.is_dir()
-        return result
+        return DeltaTable.is_deltatable(str(self._relation_path(relation)))
 
     def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
         return pl.scan_delta(str(self._relation_path(relation)))
@@ -127,9 +115,16 @@ class LocalCatalog(BaseCatalog):
         self,
         relation: PolarsRelation,
         df: pl.DataFrame,
-        predicate: str,
+        keys: list[str],
         except_cols: list[str] | None = None,
+        incremental_predicates: list[str] | None = None,
+        allow_schema_evolution: bool = False,
     ) -> None:
+        predicate = " AND ".join(
+            f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
+        )
+        if incremental_predicates:
+            predicate += " AND " + " AND ".join(incremental_predicates)
         dt = DeltaTable(str(self._relation_path(relation)))
         (
             dt.merge(
@@ -144,8 +139,17 @@ class LocalCatalog(BaseCatalog):
         )
 
     def delete_matched_relation(
-        self, relation: PolarsRelation, df: pl.DataFrame, predicate: str
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        keys: list[str],
+        incremental_predicates: list[str] | None = None,
     ) -> None:
+        predicate = " AND ".join(
+            f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
+        )
+        if incremental_predicates:
+            predicate += " AND " + " AND ".join(incremental_predicates)
         dt = DeltaTable(str(self._relation_path(relation)))
         (
             dt.merge(
@@ -195,9 +199,8 @@ class LocalCatalog(BaseCatalog):
                 schema=schema_relation.schema,
                 identifier=p.name,
                 type=RelationType.Table,
-                format=_identify_table_format(p),
                 catalog=schema_relation.catalog,
             )
             for p in schema_path.iterdir()
-            if p.is_dir()
+            if p.is_dir() and DeltaTable.is_deltatable(str(p))
         ]

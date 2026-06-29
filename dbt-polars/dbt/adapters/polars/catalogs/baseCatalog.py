@@ -67,13 +67,19 @@ class BaseCatalog(ABC):
         self,
         relation: PolarsRelation,
         df: pl.DataFrame,
-        predicate: str,
+        keys: list[str],
         except_cols: list[str] | None = None,
+        incremental_predicates: list[str] | None = None,
+        allow_schema_evolution: bool = False,
     ) -> None: ...
 
     @abstractmethod
     def delete_matched_relation(
-        self, relation: PolarsRelation, df: pl.DataFrame, predicate: str
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        keys: list[str],
+        incremental_predicates: list[str] | None = None,
     ) -> None: ...
 
     @abstractmethod

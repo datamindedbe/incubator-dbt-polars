@@ -35,6 +35,9 @@ dev = [
     "types-pyyaml>=6.0.12.20260518",
 ]
 
+[project.optional-dependencies]
+iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.7"]
+
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
@@ -48,7 +51,8 @@ config-settings = { editable_mode = "compat" }
 [tool.pytest.ini_options]
 addopts = "-n auto"
 markers = [
-    "table_format_specific: run once per table format selected via --table-format (all other tests run once, against the default format)",
+    "require_profiles(...): only run this test when --profile matches one of the listed names",
+    "skip_profiles(...): skip this test when --profile matches one of the listed names",
 ]
 filterwarnings = [
     "ignore:.*'soft_unicode' has been renamed to 'soft_str'*:DeprecationWarning",
