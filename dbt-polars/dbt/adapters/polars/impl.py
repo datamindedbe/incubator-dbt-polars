@@ -522,7 +522,6 @@ class PolarsAdapter(BaseAdapter):
             incremental_predicates = [incremental_predicates]
 
         if strategy == "append":
-            logger.warning("strategy append")
             catalog.append_relation(
                 relation, new_data, allow_schema_evolution=allow_evolution
             )
@@ -551,7 +550,7 @@ class PolarsAdapter(BaseAdapter):
                 keys,
                 incremental_predicates=incremental_predicates or None,
             )
-            logger.warning("strategy delete+insert")
+
             catalog.append_relation(
                 relation, new_data, allow_schema_evolution=allow_evolution
             )

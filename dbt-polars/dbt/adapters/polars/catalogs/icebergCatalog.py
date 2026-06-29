@@ -220,7 +220,7 @@ class IcebergCatalog(BaseCatalog):
         ]
 
     def truncate_relation(self, relation: PolarsRelation) -> None:
-        logger.warning("truncate_relation")
+
         logger.debug(
             f"Truncating table {relation.catalog}/"
             f"{relation.schema}/{relation.identifier}"
@@ -254,7 +254,7 @@ class IcebergCatalog(BaseCatalog):
             raise DbtRuntimeError(
                 f"Unique key column(s) not found in model: {', '.join(missing_keys)}"
             )
-        logger.warning("merge_relation")
+
         if incremental_predicates:
             raise NotImplementedError(
                 "merge_relation with incremental_predicates is not supported "
@@ -270,8 +270,6 @@ class IcebergCatalog(BaseCatalog):
                 tbl.delete(_build_key_delete_filter(keys, df))
                 df.write_iceberg(tbl, mode="append")
             return
-
-        logger.warning("merge_relation2")
 
         except_set = set(except_cols)
         update_cols = [c for c in df.columns if c not in keys and c not in except_set]
@@ -311,7 +309,6 @@ class IcebergCatalog(BaseCatalog):
         keys: list[str],
         incremental_predicates: list[str] | None = None,
     ) -> None:
-        logger.warning("delete_matched_relation")
         if incremental_predicates:
             raise NotImplementedError(
                 "delete_matched_relation with incremental_predicates "
