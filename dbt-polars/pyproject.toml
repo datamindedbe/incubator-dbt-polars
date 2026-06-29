@@ -36,7 +36,7 @@ dev = [
 ]
 
 [project.optional-dependencies]
-iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.7"]
+iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.9"]
 
 [build-system]
 requires = ["setuptools>=64"]

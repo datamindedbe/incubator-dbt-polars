@@ -1,4 +1,5 @@
 import polars as pl
+import pytest
 from dbt.adapters.polars.catalogs.icebergCatalog import (
     _apply_partial_update,
     _build_key_delete_filter,
@@ -74,6 +75,7 @@ def test_apply_partial_update_output_columns_match_existing():
 
 
 def test_single_key_produces_in_expression():
+    pytest.importorskip("pyiceberg")
     from pyiceberg.expressions import In
 
     df = pl.DataFrame({"id": [1, 2, 3]})
@@ -83,6 +85,7 @@ def test_single_key_produces_in_expression():
 
 
 def test_composite_key_single_row_produces_and():
+    pytest.importorskip("pyiceberg")
     from pyiceberg.expressions import And as IcebergAnd
 
     df = pl.DataFrame({"k1": [1], "k2": ["a"]})
@@ -92,6 +95,7 @@ def test_composite_key_single_row_produces_and():
 
 
 def test_composite_key_multiple_rows_produces_or_of_ands():
+    pytest.importorskip("pyiceberg")
     from pyiceberg.expressions import Or
 
     df = pl.DataFrame({"k1": [1, 2], "k2": ["a", "b"]})
