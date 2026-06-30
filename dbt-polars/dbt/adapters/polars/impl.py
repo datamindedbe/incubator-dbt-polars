@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from dbt.adapters.base.column import Column
 from dbt.adapters.base.impl import BaseAdapter
 from dbt.adapters.base.meta import available
 from dbt.adapters.base.relation import BaseRelation
 from dbt.adapters.contracts.connection import AdapterResponse
-from dbt.adapters.contracts.relation import RelationConfig
+from dbt.adapters.contracts.relation import RelationConfig, RelationType
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.polars.catalogs import CATALOG_REGISTRY, BaseCatalog
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
@@ -378,18 +378,118 @@ class PolarsAdapter(BaseAdapter):
     def quote(cls, identifier: str) -> str:
         return f'"{identifier}"'
 
-    def _build_sql_context(self, refs: dict[str, PolarsRelation]) -> pl.SQLContext:
-        return pl.SQLContext(
-            {
-                frame_name: self.get_storage_catalog(rel.database).get_relation(rel)
-                for frame_name, rel in refs.items()
-            }
+    def _build_sql_context(
+        self,
+        refs: dict[str, PolarsRelation],
+        extra_frames: dict[str, pl.LazyFrame] | None = None,
+    ) -> pl.SQLContext:
+        frames = {
+            frame_name: self.get_storage_catalog(rel.database).get_relation(rel)
+            for frame_name, rel in refs.items()
+        }
+        if extra_frames:
+            frames.update(extra_frames)
+        return pl.SQLContext(frames)
+
+    @overload
+    def _run_sql(
+        self,
+        sql: str,
+        eager: Literal[True] = ...,
+        extra_frames: dict[str, pl.LazyFrame] | None = ...,
+    ) -> pl.DataFrame: ...
+
+    @overload
+    def _run_sql(
+        self,
+        sql: str,
+        eager: Literal[False],
+        extra_frames: dict[str, pl.LazyFrame] | None = ...,
+    ) -> pl.LazyFrame: ...
+
+    def _run_sql(
+        self,
+        sql: str,
+        eager: bool = True,
+        extra_frames: dict[str, pl.LazyFrame] | None = None,
+    ) -> pl.DataFrame | pl.LazyFrame:
+        rewritten_sql, refs = parse_and_rewrite(sql)
+        return self._build_sql_context(refs, extra_frames).execute(
+            rewritten_sql, eager=eager
         )
 
-    def _run_sql(self, sql: str) -> pl.DataFrame:
-        rewritten_sql, refs = parse_and_rewrite(sql)
-        result = self._build_sql_context(refs).execute(rewritten_sql, eager=True)
-        return cast(pl.DataFrame, result)
+    def _is_python_cte(self, cte: dict) -> bool:
+        return "def model(" in cte["sql"]
+
+    def _execute_python_cte(
+        self, cte: dict, cte_frames: dict[str, pl.LazyFrame] | None = None
+    ) -> pl.LazyFrame:
+        import re
+
+        body_match = re.search(r"\((.+)\)", cte["sql"], re.DOTALL)
+        if not body_match:
+            raise DbtRuntimeError(
+                f"Could not extract Python code from CTE: {cte['id']}"
+            )
+        python_code = body_match.group(1).strip()
+
+        namespace: dict[str, Any] = {}
+        exec(python_code, namespace)  # noqa: S102
+
+        def load_df_function(ref_key: str) -> pl.LazyFrame:
+            if cte_frames and ref_key in cte_frames:
+                return cte_frames[ref_key]
+            parts = re.findall(r'"([^"]+)"', ref_key)
+            if len(parts) != 3:
+                raise DbtRuntimeError(
+                    f"Could not parse relation '{ref_key}': expected"
+                    ' "catalog"."schema"."identifier"'
+                )
+            catalog, schema, identifier = parts
+            relation = PolarsRelation.create(
+                database=catalog,
+                schema=schema,
+                identifier=identifier,
+                type=RelationType.Table,
+                catalog=catalog,
+            )
+            return self.get_storage_catalog(catalog).get_relation(relation)
+
+        dbt_obj = namespace["dbtObj"](load_df_function)
+        result = namespace["model"](dbt_obj, pl)
+        if isinstance(result, pl.DataFrame):
+            return result.lazy()
+        return result
+
+    def _evaluate_ctes(self, extra_ctes: list) -> dict[str, pl.LazyFrame]:
+        import re
+
+        cte_frames: dict[str, pl.LazyFrame] = {}
+        for cte in extra_ctes:
+            cte_name = f"__dbt__cte__{cte['id'].split('.')[-1]}"
+            if self._is_python_cte(cte):
+                cte_frames[cte_name] = self._execute_python_cte(cte, cte_frames)
+            else:
+                body_match = re.search(r"\((.+)\)", cte["sql"], re.DOTALL)
+                if body_match:
+                    cte_frames[cte_name] = self._run_sql(
+                        body_match.group(1).strip(),
+                        eager=False,
+                        extra_frames=cte_frames or None,
+                    )
+        return cte_frames
+
+    def _strip_all_ctes(self, code: str, extra_ctes: list) -> str:
+        if not extra_ctes:
+            return code
+        prefix = "with" + ", ".join(cte["sql"] for cte in extra_ctes) + " "
+        stripped = code.lstrip()
+        if not stripped.startswith(prefix):
+            raise DbtRuntimeError(
+                "Could not locate expected CTE prefix in compiled code. "
+                "This is a dbt-polars bug — please report it."
+            )
+        return stripped[len(prefix) :]
 
     def _apply_schema_change(
         self,
@@ -495,10 +595,11 @@ class PolarsAdapter(BaseAdapter):
         return [c for c in dest_cols if c.lower() not in update_lower]
 
     @available
-    def polars_execute_incremental_model(
+    def _incremental_write(
         self,
+        catalog: BaseCatalog,
         relation: PolarsRelation,
-        sql: str,
+        new_data: pl.DataFrame,
         unique_key: str | list[str] | None,
         strategy: str,
         on_schema_change: str,
@@ -506,9 +607,6 @@ class PolarsAdapter(BaseAdapter):
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
     ) -> None:
-        new_data = self._run_sql(sql)
-        catalog = self.get_storage_catalog(relation.catalog)
-
         schema_result, allow_evolution = self._apply_schema_change(
             catalog, relation, new_data, on_schema_change
         )
@@ -550,7 +648,6 @@ class PolarsAdapter(BaseAdapter):
                 keys,
                 incremental_predicates=incremental_predicates or None,
             )
-
             catalog.append_relation(
                 relation, new_data, allow_schema_evolution=allow_evolution
             )
@@ -558,10 +655,123 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(f"Unknown incremental strategy: {strategy!r}")
 
     @available
-    def polars_execute_model(self, relation: PolarsRelation, sql: str) -> None:
+    def polars_execute_incremental_model(
+        self,
+        relation: PolarsRelation,
+        sql: str,
+        unique_key: str | list[str] | None,
+        strategy: str,
+        on_schema_change: str,
+        merge_update_columns: str | list[str] | None = None,
+        merge_exclude_columns: str | list[str] | None = None,
+        incremental_predicates: str | list[str] | None = None,
+        extra_ctes: list | None = None,
+    ) -> None:
+        ctes = extra_ctes or []
+        cte_frames = self._evaluate_ctes(ctes)
+        sql = self._strip_all_ctes(sql, ctes)
+        new_data = self._run_sql(sql, extra_frames=cte_frames or None)
+        catalog = self.get_storage_catalog(relation.catalog)
+        self._incremental_write(
+            catalog,
+            relation,
+            new_data,
+            unique_key,
+            strategy,
+            on_schema_change,
+            merge_update_columns,
+            merge_exclude_columns,
+            incremental_predicates,
+        )
 
-        result = self._run_sql(sql)
+    @available
+    def polars_execute_model(
+        self, relation: PolarsRelation, sql: str, extra_ctes: list | None = None
+    ) -> None:
+        ctes = extra_ctes or []
+        cte_frames = self._evaluate_ctes(ctes)
+        sql = self._strip_all_ctes(sql, ctes)
+        result = self._run_sql(sql, extra_frames=cte_frames or None)
         self.get_storage_catalog(relation.catalog).write_relation(relation, result)
+
+    def submit_python_job(
+        self, parsed_model: dict, compiled_code: str
+    ) -> AdapterResponse:
+        import re
+
+        extra_ctes = parsed_model.get("extra_ctes", [])
+        cte_frames = self._evaluate_ctes(extra_ctes)
+        python_code = self._strip_all_ctes(compiled_code, extra_ctes)
+
+        namespace: dict[str, Any] = {}
+        exec(python_code, namespace)  # noqa: S102
+
+        def load_df_function(ref_key: str) -> pl.LazyFrame:
+            if ref_key in cte_frames:
+                return cte_frames[ref_key]
+            parts = re.findall(r'"([^"]+)"', ref_key)
+            if len(parts) != 3:
+                raise DbtRuntimeError(
+                    f"Could not parse relation '{ref_key}': expected"
+                    ' "catalog"."schema"."identifier"'
+                )
+            catalog, schema, identifier = parts
+            relation = PolarsRelation.create(
+                database=catalog,
+                schema=schema,
+                identifier=identifier,
+                type=RelationType.Table,
+                catalog=catalog,
+            )
+            return self.get_storage_catalog(catalog).get_relation(relation)
+
+        dbt_obj = namespace["dbtObj"](load_df_function)
+        result = namespace["model"](dbt_obj, pl)
+
+        if isinstance(result, pl.LazyFrame):
+            result = result.collect()
+        elif not isinstance(result, pl.DataFrame):
+            raise DbtRuntimeError(
+                "Python model must return a polars "
+                + "LazyFrame or DataFrame, got {type(result)}"
+            )
+
+        target_relation = PolarsRelation.create(
+            database=parsed_model["database"],
+            schema=parsed_model["schema"],
+            identifier=parsed_model["alias"],
+            type=RelationType.Table,
+            catalog=parsed_model["database"],
+        )
+        catalog = self.get_storage_catalog(target_relation.catalog)
+        config = parsed_model.get("config", {})
+
+        if config.get("materialized") == "incremental" and catalog.table_exists(
+            target_relation
+        ):
+            unique_key = config.get("unique_key")
+            strategy = (
+                config.get("incremental_strategy")
+                or (unique_key and "merge")
+                or "append"
+            )
+            on_schema_change = config.get("on_schema_change") or "ignore"
+            self._incremental_write(
+                catalog,
+                target_relation,
+                result,
+                unique_key,
+                strategy,
+                on_schema_change,
+                merge_update_columns=config.get("merge_update_columns"),
+                merge_exclude_columns=config.get("merge_exclude_columns"),
+                incremental_predicates=config.get("predicates")
+                or config.get("incremental_predicates"),
+            )
+        else:
+            catalog.write_relation(target_relation, result)
+
+        return AdapterResponse(_message="OK")
 
     def execute(
         self,
