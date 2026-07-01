@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
@@ -421,18 +422,11 @@ class PolarsAdapter(BaseAdapter):
     def _is_python_cte(self, cte: dict) -> bool:
         return "def model(" in cte["sql"]
 
-    def _execute_python_cte(
-        self, cte: dict, cte_frames: dict[str, pl.LazyFrame] | None = None
+    def _run_python_model(
+        self,
+        python_code: str,
+        cte_frames: dict[str, pl.LazyFrame] | None = None,
     ) -> pl.LazyFrame:
-        import re
-
-        body_match = re.search(r"\((.+)\)", cte["sql"], re.DOTALL)
-        if not body_match:
-            raise DbtRuntimeError(
-                f"Could not extract Python code from CTE: {cte['id']}"
-            )
-        python_code = body_match.group(1).strip()
-
         namespace: dict[str, Any] = {}
         exec(python_code, namespace)  # noqa: S102
 
@@ -461,9 +455,17 @@ class PolarsAdapter(BaseAdapter):
             return result.lazy()
         return result
 
-    def _evaluate_ctes(self, extra_ctes: list) -> dict[str, pl.LazyFrame]:
-        import re
+    def _execute_python_cte(
+        self, cte: dict, cte_frames: dict[str, pl.LazyFrame] | None = None
+    ) -> pl.LazyFrame:
+        body_match = re.search(r"\((.+)\)", cte["sql"], re.DOTALL)
+        if not body_match:
+            raise DbtRuntimeError(
+                f"Could not extract Python code from CTE: {cte['id']}"
+            )
+        return self._run_python_model(body_match.group(1).strip(), cte_frames)
 
+    def _evaluate_ctes(self, extra_ctes: list) -> dict[str, pl.LazyFrame]:
         cte_frames: dict[str, pl.LazyFrame] = {}
         for cte in extra_ctes:
             cte_name = f"__dbt__cte__{cte['id'].split('.')[-1]}"
@@ -697,44 +699,11 @@ class PolarsAdapter(BaseAdapter):
     def submit_python_job(
         self, parsed_model: dict, compiled_code: str
     ) -> AdapterResponse:
-        import re
-
         extra_ctes = parsed_model.get("extra_ctes", [])
         cte_frames = self._evaluate_ctes(extra_ctes)
         python_code = self._strip_all_ctes(compiled_code, extra_ctes)
 
-        namespace: dict[str, Any] = {}
-        exec(python_code, namespace)  # noqa: S102
-
-        def load_df_function(ref_key: str) -> pl.LazyFrame:
-            if ref_key in cte_frames:
-                return cte_frames[ref_key]
-            parts = re.findall(r'"([^"]+)"', ref_key)
-            if len(parts) != 3:
-                raise DbtRuntimeError(
-                    f"Could not parse relation '{ref_key}': expected"
-                    ' "catalog"."schema"."identifier"'
-                )
-            catalog, schema, identifier = parts
-            relation = PolarsRelation.create(
-                database=catalog,
-                schema=schema,
-                identifier=identifier,
-                type=RelationType.Table,
-                catalog=catalog,
-            )
-            return self.get_storage_catalog(catalog).get_relation(relation)
-
-        dbt_obj = namespace["dbtObj"](load_df_function)
-        result = namespace["model"](dbt_obj, pl)
-
-        if isinstance(result, pl.LazyFrame):
-            result = result.collect()
-        elif not isinstance(result, pl.DataFrame):
-            raise DbtRuntimeError(
-                "Python model must return a polars "
-                + "LazyFrame or DataFrame, got {type(result)}"
-            )
+        result = self._run_python_model(python_code, cte_frames or None).collect()
 
         target_relation = PolarsRelation.create(
             database=parsed_model["database"],
