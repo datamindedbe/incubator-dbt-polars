@@ -157,10 +157,12 @@ class BaseIncrementalPredicates:
         self.check_scenario_correctness(expected_fields, test_case_fields, project)
 
 
+@pytest.mark.require_profiles("local")
 class TestIncrementalPredicatesDeleteInsert(BaseIncrementalPredicates, PolarsTestMixin):
     pass
 
 
+@pytest.mark.require_profiles("local")
 class TestPredicatesDeleteInsert(BaseIncrementalPredicates):
     @pytest.fixture(scope="class")
     def project_config_update(self):

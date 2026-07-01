@@ -1,22 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 from dbt.adapters.base.relation import BaseRelation
 from dbt.adapters.contracts.relation import HasQuoting, RelationConfig
 
 
-class TableFormat(str, Enum):
-    empty = "empty"
-    delta = "delta"
-
-
 @dataclass(frozen=True, eq=False, repr=False)
 class PolarsRelation(BaseRelation):
-    format: TableFormat = TableFormat.delta
-
     @classmethod
     def create_from(
         cls: type[PolarsRelation],

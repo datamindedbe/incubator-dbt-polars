@@ -31,7 +31,7 @@ class TestEphemeralNested(BaseEphemeral, PolarsTestMixin):
             "source_table.sql": test_ephemeral.models_n__source_table_sql,
         }
 
-    def test_ephemeral_nested(self, project, table_format):
+    def test_ephemeral_nested(self, project):
         results = util.run_dbt(["run"])
         assert len(results) == 2
         assert os.path.exists("./target/run/test/models/root_view.sql")
@@ -39,10 +39,11 @@ class TestEphemeralNested(BaseEphemeral, PolarsTestMixin):
             sql_file = fp.read()
 
         sql_file = re.sub(r"\d+", "", sql_file)
+        schema = re.sub(r"\d+", "", project.test_schema)
         expected_sql = (
             "with __dbt__cte__ephemeral_level_two as ("
             f'select * from "{project.database}"'
-            f'."test_{table_format}_test_ephemeral"."source_table"'
+            f'."{schema}"."source_table"'
             "),  __dbt__cte__ephemeral as ("
             "select * from __dbt__cte__ephemeral_level_two"
             ") select * from __dbt__cte__ephemeral"

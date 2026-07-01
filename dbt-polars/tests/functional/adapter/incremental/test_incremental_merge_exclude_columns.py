@@ -99,7 +99,6 @@ ResultHolder = namedtuple(
 )
 
 
-@pytest.mark.table_format_specific
 class BaseMergeExcludeColumns:
     @pytest.fixture(scope="class")
     def models(self):

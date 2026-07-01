@@ -518,6 +518,9 @@ class PolarsAdapter(BaseAdapter):
 
         new_data = schema_result
 
+        if isinstance(incremental_predicates, str):
+            incremental_predicates = [incremental_predicates]
+
         if strategy == "append":
             catalog.append_relation(
                 relation, new_data, allow_schema_evolution=allow_evolution
@@ -526,37 +529,28 @@ class PolarsAdapter(BaseAdapter):
             if not unique_key:
                 raise DbtRuntimeError("'merge' strategy requires a unique_key")
             keys = [unique_key] if isinstance(unique_key, str) else unique_key
-            predicate = " AND ".join(
-                f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
-            )
-
-            if isinstance(incremental_predicates, str):
-                incremental_predicates = [incremental_predicates]
-
-            if incremental_predicates:
-                predicate += "AND " + " AND ".join(incremental_predicates)
-
             except_cols = self._resolve_merge_except_cols(
                 new_data, merge_update_columns, merge_exclude_columns
             )
             catalog.merge_relation(
-                relation, new_data, predicate, except_cols=except_cols
+                relation,
+                new_data,
+                keys,
+                except_cols=except_cols,
+                incremental_predicates=incremental_predicates or None,
+                allow_schema_evolution=allow_evolution,
             )
         elif strategy == "delete+insert":
             if not unique_key:
                 raise DbtRuntimeError("'delete+insert' strategy requires a unique_key")
             keys = [unique_key] if isinstance(unique_key, str) else unique_key
-            predicate = " AND ".join(
-                f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
+            catalog.delete_matched_relation(
+                relation,
+                new_data,
+                keys,
+                incremental_predicates=incremental_predicates or None,
             )
 
-            if isinstance(incremental_predicates, str):
-                incremental_predicates = [incremental_predicates]
-
-            if incremental_predicates:
-                predicate += " AND " + " AND ".join(incremental_predicates)
-
-            catalog.delete_matched_relation(relation, new_data, predicate)
             catalog.append_relation(
                 relation, new_data, allow_schema_evolution=allow_evolution
             )
@@ -565,6 +559,7 @@ class PolarsAdapter(BaseAdapter):
 
     @available
     def polars_execute_model(self, relation: PolarsRelation, sql: str) -> None:
+
         result = self._run_sql(sql)
         self.get_storage_catalog(relation.catalog).write_relation(relation, result)
 
