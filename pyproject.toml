@@ -8,7 +8,6 @@ dev = [
     # but mypy>=1.20 requires pathspec>=1.0.0. Pinned to highest compatible version.
     "mypy==1.19.1",
     "prek>=0.4.5",
-    "azure-identity>=1.25.3",
 ]
 
 [tool.ruff]

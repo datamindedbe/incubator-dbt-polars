@@ -59,6 +59,7 @@ def _build_key_delete_filter(keys: list[str], df: pl.DataFrame):
 
     if len(keys) == 1:
         return In(keys[0], df[keys[0]].to_list())
+
     row_filters = [
         And(*[EqualTo(k, row[k]) for k in keys]) for row in df.select(keys).to_dicts()
     ]
@@ -144,6 +145,8 @@ class IcebergCatalog(BaseCatalog):
         self._known_namespaces.add(relation.schema)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
+        from pyiceberg.exceptions import NoSuchNamespaceError
+
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
         logger.debug(f"Dropping schema {relation.catalog}/{relation.schema}")
@@ -153,7 +156,7 @@ class IcebergCatalog(BaseCatalog):
                 self._catalog.purge_table(table_id)
                 self._invalidate_table_cache(table_id)
             self._catalog.drop_namespace(namespace)
-        except Exception:
+        except NoSuchNamespaceError:
             pass
         self._known_namespaces.discard(relation.schema)
 
@@ -256,9 +259,8 @@ class IcebergCatalog(BaseCatalog):
             )
 
         if incremental_predicates:
-            raise NotImplementedError(
-                "merge_relation with incremental_predicates is not supported "
-                + "for IcebergCatalog"
+            raise DbtRuntimeError(
+                "IcebergCatalog does not support incremental_predicates for merge"
             )
         keys = list(dict.fromkeys(keys))  # deduplicate, preserve order
         tbl = self._load_table(self._id(relation))
@@ -310,10 +312,12 @@ class IcebergCatalog(BaseCatalog):
         incremental_predicates: list[str] | None = None,
     ) -> None:
         if incremental_predicates:
-            raise NotImplementedError(
-                "delete_matched_relation with incremental_predicates "
-                + "is not supported for IcebergCatalog"
+            raise DbtRuntimeError(
+                "IcebergCatalog does not support incremental_predicates"
             )
+        if df.is_empty():
+            return
+
         tbl = self._load_table(self._id(relation))
         tbl.delete(_build_key_delete_filter(keys, df))
 
