@@ -129,6 +129,63 @@ class TestMixedSqlAndPythonEphemeralInSqlModel(PolarsTestMixin):
         assert rows == [(1, "sql"), (2, "python")]
 
 
+real_table_for_mix = """
+{{ config(materialized='table') }}
+select 1 as id, 'sql_table' as source
+"""
+
+python_ephemeral_for_mix = """
+import polars as pl
+
+def model(dbt, _):
+    dbt.config(materialized='ephemeral')
+    return pl.DataFrame({"id": [2], "source": ["python"]})
+"""
+
+sql_ephemeral_mixing_real_table_and_python_ephemeral = """
+{{ config(materialized='ephemeral') }}
+select * from {{ ref('real_table_for_mix') }}
+union all
+select * from {{ ref('python_ephemeral_for_mix') }}
+"""
+
+downstream_from_mixed_ephemeral = """
+{{ config(materialized='table') }}
+select * from {{ ref('sql_ephemeral_mixing_real_table_and_python_ephemeral') }}
+"""
+
+
+class TestSqlEphemeralMixesRealTableAndPythonEphemeral(PolarsTestMixin):
+    """A SQL ephemeral's own compiled body can reference both an already
+    materialized (non-ephemeral) table and a Python ephemeral in the same
+    query. The materialized ref is a qualified "db"."schema"."table" name
+    resolved by sql_rewrite.parse_and_rewrite, while the Python ephemeral ref
+    is a bare __dbt__cte__ name resolved via extra_frames/cte_frames. This
+    exercises parse_and_rewrite alongside a bare CTE name it must leave
+    untouched, rather than in isolation."""
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "real_table_for_mix.sql": real_table_for_mix,
+            "python_ephemeral_for_mix.py": python_ephemeral_for_mix,
+            "sql_ephemeral_mixing_real_table_and_python_ephemeral.sql": (
+                sql_ephemeral_mixing_real_table_and_python_ephemeral
+            ),
+            "downstream_from_mixed_ephemeral.sql": downstream_from_mixed_ephemeral,
+        }
+
+    def test_sql_ephemeral_mixes_real_table_and_python_ephemeral(self, project):
+        run_dbt(["run"])
+        rows = polars_read_relation(
+            project.adapter,
+            "downstream_from_mixed_ephemeral",
+            columns=["id", "source"],
+            order_by="id",
+        )
+        assert rows == [(1, "sql_table"), (2, "python")]
+
+
 base_sql_ephemeral = """
 {{ config(materialized='ephemeral') }}
 select 1 as id, 'alice' as name
