@@ -182,10 +182,24 @@ class IcebergCatalog(BaseCatalog):
             self._catalog.purge_table(identifier)
             self._invalidate_table_cache(identifier)
 
-    def write_relation(self, relation: PolarsRelation, df: pl.DataFrame) -> None:
+    def get_partition_columns(self, relation: PolarsRelation) -> list[str]:
+        tbl = self._load_table(self._id(relation))
+        return [f.name for f in tbl.spec().fields]
+
+    def write_relation(
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        partition_by: list[str],
+    ) -> None:
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
+        missing = [c for c in partition_by if c not in df.columns]
+        if missing:
+            raise DbtRuntimeError(
+                f"partition_by column(s) not found in model: {', '.join(missing)}"
+            )
 
         identifier = self._id(relation)
         from pyiceberg.exceptions import NoSuchTableError
@@ -196,6 +210,10 @@ class IcebergCatalog(BaseCatalog):
         except NoSuchTableError:
             self.create_schema(relation)
         tbl = self._catalog.create_table(identifier, schema=df.to_arrow().schema)
+        if partition_by:
+            with tbl.update_spec() as update:
+                for col in partition_by:
+                    update.add_identity(col)
         self._table_cache[identifier] = tbl
         df.write_iceberg(tbl, mode="append")
 

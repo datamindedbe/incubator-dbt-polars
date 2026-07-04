@@ -8,20 +8,24 @@
   {%- set target_relation = this.incorporate(type='table') -%}
   {%- set full_refresh_mode = (should_full_refresh()) -%}
   {%- set language = model['language'] -%}
+  {%- set partition_by = config.get('partition_by') -%}
 
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
 
   {% if language == 'python' %}
+    {% if existing_relation is not none and full_refresh_mode %}
+      {%- do adapter.drop_relation(existing_relation) -%}
+    {% endif %}
     {% call statement('main', language='python') -%}
       {{ compiled_code }}
     {%- endcall %}
   {% else %}
     {% if existing_relation is none %}
-      {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes']) -%}
-    {% elif full_refresh_mode or existing_relation.is_view %}
+      {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes'], partition_by) -%}
+    {% elif full_refresh_mode %}
       {%- do adapter.drop_relation(existing_relation) -%}
-      {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes']) -%}
+      {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes'], partition_by) -%}
     {% else %}
       {%- set unique_key = config.get('unique_key') -%}
       {%- set strategy = config.get('incremental_strategy') or (unique_key and 'merge') or 'append' -%}
@@ -29,7 +33,7 @@
       {%- set merge_update_columns = config.get('merge_update_columns') -%}
       {%- set merge_exclude_columns = config.get('merge_exclude_columns') -%}
       {%- set incremental_predicates = config.get('predicates') or config.get('incremental_predicates') -%}
-      {%- do adapter.polars_execute_incremental_model(target_relation, sql, unique_key, strategy, on_schema_change, merge_update_columns, merge_exclude_columns, incremental_predicates, model['extra_ctes']) -%}
+      {%- do adapter.polars_execute_incremental_model(target_relation, sql, unique_key, strategy, on_schema_change, merge_update_columns, merge_exclude_columns, incremental_predicates, model['extra_ctes'], partition_by) -%}
     {% endif %}
     {% call statement('main') -%}
       {{ sql }}
@@ -48,6 +52,7 @@
 {% materialization table, adapter='polars', supported_languages=['sql', 'python'] %}
   {%- set target_relation = this.incorporate(type='table') -%}
   {%- set language = model['language'] -%}
+  {%- set partition_by = config.get('partition_by') -%}
 
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
@@ -57,7 +62,7 @@
       {{ compiled_code }}
     {%- endcall %}
   {% else %}
-    {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes']) -%}
+    {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes'], partition_by) -%}
     {% call statement('main') -%}
       {{ sql }}
     {%- endcall %}

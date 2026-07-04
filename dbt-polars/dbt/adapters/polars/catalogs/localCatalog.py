@@ -76,11 +76,26 @@ class LocalCatalog(BaseCatalog):
     def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
         return pl.scan_delta(str(self._relation_path(relation)))
 
-    def write_relation(self, relation: PolarsRelation, df: pl.DataFrame) -> None:
+    def get_partition_columns(self, relation: PolarsRelation) -> list[str]:
+        dt = DeltaTable(str(self._relation_path(relation)))
+        return dt.metadata().partition_columns
+
+    def write_relation(
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        partition_by: list[str],
+    ) -> None:
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
-        df.write_delta(str(self._relation_path(relation)), mode="overwrite")
+        self.drop_relation(relation)
+        delta_write_options = {"partition_by": partition_by} if partition_by else None
+        df.write_delta(
+            str(self._relation_path(relation)),
+            mode="overwrite",
+            delta_write_options=delta_write_options,
+        )
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(

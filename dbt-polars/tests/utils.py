@@ -33,6 +33,15 @@ def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
         catalog.append_relation(relation, df)
 
 
+def polars_relation_partition_columns(adapter, relation_name: str) -> list[str]:
+    """Partition columns of a relation, read directly via the Polars catalog."""
+    with get_connection(adapter):
+        relation = relation_from_name(adapter, relation_name)
+        return adapter.get_storage_catalog(relation.database).get_partition_columns(
+            relation
+        )
+
+
 def polars_read_relation(
     adapter,
     relation_name: str,

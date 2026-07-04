@@ -104,6 +104,12 @@ def _resolve_polars_type(type_str: str) -> type[pl.DataType]:
     return dtype
 
 
+def _normalize_partition_by(partition_by: str | list[str] | None) -> list[str]:
+    if partition_by is None:
+        return []
+    return [partition_by] if isinstance(partition_by, str) else list(partition_by)
+
+
 logger = AdapterLogger("polars")
 
 
@@ -337,6 +343,7 @@ class PolarsAdapter(BaseAdapter):
         relation: PolarsRelation,
         agate_table: agate.Table,
         column_types: dict[str, str],
+        partition_by: str | list[str] | None = None,
     ) -> None:
         import agate
 
@@ -373,7 +380,9 @@ class PolarsAdapter(BaseAdapter):
         if casts:
             df = df.with_columns(casts)
 
-        self.get_storage_catalog(relation.catalog).write_relation(relation, df)
+        self.get_storage_catalog(relation.catalog).write_relation(
+            relation, df, _normalize_partition_by(partition_by)
+        )
 
     @classmethod
     def quote(cls, identifier: str) -> str:
@@ -473,12 +482,15 @@ class PolarsAdapter(BaseAdapter):
                 cte_frames[cte_name] = self._execute_python_cte(cte, cte_frames)
             else:
                 body_match = re.search(r"\((.+)\)", cte["sql"], re.DOTALL)
-                if body_match:
-                    cte_frames[cte_name] = self._run_sql(
-                        body_match.group(1).strip(),
-                        eager=False,
-                        extra_frames=cte_frames or None,
+                if not body_match:
+                    raise DbtRuntimeError(
+                        f"Could not extract SQL from CTE: {cte['id']}"
                     )
+                cte_frames[cte_name] = self._run_sql(
+                    body_match.group(1).strip(),
+                    eager=False,
+                    extra_frames=cte_frames or None,
+                )
         return cte_frames
 
     def _strip_all_ctes(self, code: str, extra_ctes: list) -> str:
@@ -499,6 +511,7 @@ class PolarsAdapter(BaseAdapter):
         relation: PolarsRelation,
         new_data: pl.DataFrame,
         on_schema_change: str,
+        partition_by: list[str],
     ) -> tuple[pl.DataFrame | None, bool]:
         """Apply on_schema_change policy before an incremental write.
 
@@ -548,7 +561,9 @@ class PolarsAdapter(BaseAdapter):
                     ]
                 )
             existing_df = existing_df.select(new_cols)
-            catalog.write_relation(relation, pl.concat([existing_df, new_data]))
+            catalog.write_relation(
+                relation, pl.concat([existing_df, new_data]), partition_by
+            )
             return None, False
 
         return new_data, False
@@ -608,9 +623,20 @@ class PolarsAdapter(BaseAdapter):
         merge_update_columns: str | list[str] | None = None,
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
+        partition_by: str | list[str] | None = None,
     ) -> None:
+        partition_by = _normalize_partition_by(partition_by)
+        current_partitions = catalog.get_partition_columns(relation)
+        if current_partitions != partition_by:
+            raise DbtRuntimeError(
+                f"Relation {relation} is partitioned by {current_partitions!r}, but "
+                f"the model is configured with partition_by={partition_by!r}. "
+                "Changing partitioning on an existing incremental model requires "
+                "`--full-refresh`."
+            )
+
         schema_result, allow_evolution = self._apply_schema_change(
-            catalog, relation, new_data, on_schema_change
+            catalog, relation, new_data, on_schema_change, partition_by
         )
 
         if schema_result is None:
@@ -668,6 +694,7 @@ class PolarsAdapter(BaseAdapter):
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
         extra_ctes: list | None = None,
+        partition_by: str | list[str] | None = None,
     ) -> None:
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
@@ -684,17 +711,24 @@ class PolarsAdapter(BaseAdapter):
             merge_update_columns,
             merge_exclude_columns,
             incremental_predicates,
+            partition_by,
         )
 
     @available
     def polars_execute_model(
-        self, relation: PolarsRelation, sql: str, extra_ctes: list | None = None
+        self,
+        relation: PolarsRelation,
+        sql: str,
+        extra_ctes: list | None = None,
+        partition_by: str | list[str] | None = None,
     ) -> None:
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
         result = self._run_sql(sql, extra_frames=cte_frames or None)
-        self.get_storage_catalog(relation.catalog).write_relation(relation, result)
+        self.get_storage_catalog(relation.catalog).write_relation(
+            relation, result, _normalize_partition_by(partition_by)
+        )
 
     def submit_python_job(
         self, parsed_model: dict, compiled_code: str
@@ -714,6 +748,8 @@ class PolarsAdapter(BaseAdapter):
         )
         catalog = self.get_storage_catalog(target_relation.catalog)
         config = parsed_model.get("config", {})
+
+        partition_by = _normalize_partition_by(config.get("partition_by"))
 
         if config.get("materialized") == "incremental" and catalog.table_exists(
             target_relation
@@ -736,9 +772,10 @@ class PolarsAdapter(BaseAdapter):
                 merge_exclude_columns=config.get("merge_exclude_columns"),
                 incremental_predicates=config.get("predicates")
                 or config.get("incremental_predicates"),
+                partition_by=partition_by,
             )
         else:
-            catalog.write_relation(target_relation, result)
+            catalog.write_relation(target_relation, result, partition_by)
 
         return AdapterResponse(_message="OK")
 

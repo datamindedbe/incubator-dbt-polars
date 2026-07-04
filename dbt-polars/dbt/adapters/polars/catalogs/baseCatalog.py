@@ -44,7 +44,15 @@ class BaseCatalog(ABC):
     def table_exists(self, relation: PolarsRelation) -> bool: ...
 
     @abstractmethod
-    def write_relation(self, relation: PolarsRelation, df: pl.DataFrame) -> None: ...
+    def write_relation(
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        partition_by: list[str],
+    ) -> None: ...
+
+    @abstractmethod
+    def get_partition_columns(self, relation: PolarsRelation) -> list[str]: ...
 
     @abstractmethod
     def truncate_relation(self, relation: PolarsRelation) -> None: ...
