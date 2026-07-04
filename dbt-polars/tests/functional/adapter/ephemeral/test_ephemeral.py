@@ -78,12 +78,13 @@ class TestEphemeralModelIsInlinedNotExecuted(PolarsTestMixin):
         }
 
     def test_ephemeral_model_never_reaches_run_sql(self, project):
-        executed_sql = []
+        lazy_sql = []
+        eager_sql = []
         original_run_sql = PolarsAdapter._run_sql
 
-        def spy(self, sql):
-            executed_sql.append(sql)
-            return original_run_sql(self, sql)
+        def spy(self, sql, eager=True, **kwargs):
+            (eager_sql if eager else lazy_sql).append(sql)
+            return original_run_sql(self, sql, eager=eager, **kwargs)
 
         with mock.patch.object(PolarsAdapter, "_run_sql", spy):
             results = util.run_dbt(["run"])
@@ -92,14 +93,17 @@ class TestEphemeralModelIsInlinedNotExecuted(PolarsTestMixin):
             "Ephemeral models don't produce their own run result; only "
             f"'dependent_model' should, got {len(results)} results."
         )
-        assert len(executed_sql) == 1, (
-            f"Expected exactly one call to _run_sql, got {len(executed_sql)}. "
-            "An ephemeral model must never be executed directly -- it should "
-            "only appear inlined as a CTE in the SQL of models that ref() it."
+        assert len(lazy_sql) == 1, (
+            f"Expected exactly one lazy _run_sql call for the ephemeral CTE, "
+            f"got {len(lazy_sql)}: {lazy_sql!r}"
         )
-        assert "__dbt__cte__ephemeral_model" in executed_sql[0], (
-            "Expected the ephemeral model's body to be inlined as a CTE in "
-            f"the executed SQL, got: {executed_sql[0]!r}"
+        assert len(eager_sql) == 1, (
+            f"Expected exactly one eager _run_sql call for the downstream model, "
+            f"got {len(eager_sql)}: {eager_sql!r}"
+        )
+        assert "__dbt__cte__ephemeral_model" in eager_sql[0], (
+            "Expected the downstream SQL to reference the ephemeral model by its "
+            f"CTE frame name, got: {eager_sql[0]!r}"
         )
 
 

@@ -78,36 +78,8 @@ def prefix(request):
 
 @pytest.fixture(scope="class")
 def unique_schema(request, prefix) -> str:
-    if request.config.option.profile == "iceberg-databricks":
-        return "test_dbt_polars_iceberg"
     test_file = request.module.__name__.split(".")[-1]
     return f"{prefix}_{test_file}"
-
-
-@pytest.fixture(scope="session", autouse=True)
-def patch_drop_schema_keep_namespace(request):
-    if request.config.option.profile != "iceberg-databricks":
-        yield
-        return
-
-    from dbt.adapters.polars.catalogs.icebergCatalog import IcebergCatalog
-
-    original = IcebergCatalog.drop_schema
-
-    def drop_tables_only(self, relation):
-        if relation.schema is None:
-            return
-        namespace = (relation.schema,)
-        try:
-            for table_id in self._catalog.list_tables(namespace):
-                self._catalog.purge_table(table_id)
-                self._invalidate_table_cache(table_id)
-        except Exception:
-            pass
-
-    IcebergCatalog.drop_schema = drop_tables_only
-    yield
-    IcebergCatalog.drop_schema = original
 
 
 @pytest.fixture(scope="class")
