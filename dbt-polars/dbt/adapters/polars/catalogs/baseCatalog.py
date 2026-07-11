@@ -1,8 +1,41 @@
+import inspect
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 from dbt.adapters.polars.relation import PolarsRelation
 
 import polars as pl
+
+
+def get_write_options(
+    method: Callable,
+    model_config: dict,
+    *,
+    ignore: set[str] | None = None,
+    merge: dict[str, dict] | None = None,
+) -> dict:
+    """Return kwargs for `method` sourced from model_config["write_options"].
+
+    ignore: param names to always exclude (e.g. "mode", "target")
+    merge:  params whose value is a dict merged with adapter-supplied values;
+            adapter values win on conflict. Included even if user omits the key,
+            as long as the adapter dict is non-empty.
+    """
+    ignore = set() if ignore is None else ignore
+    merge = {} if merge is None else merge
+
+    params = frozenset(inspect.signature(method).parameters) - {"self"} - ignore
+    write_opts = model_config.get("write_options", {})
+
+    result = {}
+    for key in params:
+        if key in merge:
+            combined = {**(write_opts.get(key) or {}), **merge[key]}
+            if combined:
+                result[key] = combined
+        elif key in write_opts:
+            result[key] = write_opts[key]
+    return result
 
 
 class CatalogConfig(ABC):
@@ -47,8 +80,9 @@ class BaseCatalog(ABC):
     def write_relation(
         self,
         relation: PolarsRelation,
-        df: pl.DataFrame,
+        data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
+        model_config: dict = {},
     ) -> None: ...
 
     @abstractmethod
@@ -66,8 +100,9 @@ class BaseCatalog(ABC):
     def append_relation(
         self,
         relation: PolarsRelation,
-        df: pl.DataFrame,
+        data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
+        model_config: dict = {},
     ) -> None: ...
 
     @abstractmethod

@@ -4,7 +4,11 @@ from pathlib import Path
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.catalogs.baseCatalog import (
+    BaseCatalog,
+    CatalogConfig,
+    get_write_options,
+)
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
 from deltalake import DeltaTable
@@ -83,19 +87,36 @@ class LocalCatalog(BaseCatalog):
     def write_relation(
         self,
         relation: PolarsRelation,
-        df: pl.DataFrame,
+        data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
+        model_config: dict = {},
     ) -> None:
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
-        self.drop_relation(relation)
-        delta_write_options = {"partition_by": partition_by} if partition_by else None
-        df.write_delta(
-            str(self._relation_path(relation)),
-            mode="overwrite",
-            delta_write_options=delta_write_options,
-        )
+        path = str(self._relation_path(relation))
+
+        adapter_delta_opts: dict = {"schema_mode": "overwrite"}
+        if partition_by:
+            adapter_delta_opts["partition_by"] = partition_by
+        write_mode = model_config.get("write_mode", "lazy")
+        if isinstance(data, pl.LazyFrame) and write_mode == "lazy":
+            kwargs = get_write_options(
+                pl.LazyFrame.sink_delta,
+                model_config,
+                ignore={"mode", "target"},
+                merge={"delta_write_options": adapter_delta_opts},
+            )
+            data.sink_delta(path, mode="overwrite", **kwargs)
+        else:
+            df = data.collect() if isinstance(data, pl.LazyFrame) else data
+            kwargs = get_write_options(
+                pl.DataFrame.write_delta,
+                model_config,
+                ignore={"mode", "target"},
+                merge={"delta_write_options": adapter_delta_opts},
+            )
+            df.write_delta(path, mode="overwrite", overwrite_schema=True, **kwargs)
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
@@ -114,17 +135,30 @@ class LocalCatalog(BaseCatalog):
     def append_relation(
         self,
         relation: PolarsRelation,
-        df: pl.DataFrame,
+        data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
+        model_config: dict = {},
     ) -> None:
-        delta_write_options = (
-            {"schema_mode": "merge"} if allow_schema_evolution else None
-        )
-        df.write_delta(
-            str(self._relation_path(relation)),
-            mode="append",
-            delta_write_options=delta_write_options,
-        )
+        path = str(self._relation_path(relation))
+        adapter_delta_opts = {"schema_mode": "merge"} if allow_schema_evolution else {}
+        write_mode = model_config.get("write_mode", "lazy")
+        if isinstance(data, pl.LazyFrame) and write_mode == "lazy":
+            kwargs = get_write_options(
+                pl.LazyFrame.sink_delta,
+                model_config,
+                ignore={"mode", "target"},
+                merge={"delta_write_options": adapter_delta_opts},
+            )
+            data.sink_delta(path, mode="append", **kwargs)
+        else:
+            df = data.collect() if isinstance(data, pl.LazyFrame) else data
+            kwargs = get_write_options(
+                pl.DataFrame.write_delta,
+                model_config,
+                ignore={"mode", "target"},
+                merge={"delta_write_options": adapter_delta_opts},
+            )
+            df.write_delta(path, mode="append", **kwargs)
 
     def merge_relation(
         self,

@@ -22,15 +22,18 @@ _ICEBERG_TO_POLARS_STORAGE_OPTIONS: dict[str, str] = {
 }
 
 
-def _scan_iceberg(tbl: Any) -> pl.LazyFrame:
-    """Scan an iceberg table, forwarding vended credentials to Polars' storage layer."""
+def _storage_options(tbl: Any) -> dict[str, str] | None:
     io_props: dict[str, str] = getattr(getattr(tbl, "io", None), "properties", {})
-    storage_options = {
+    opts = {
         polars_key: io_props[iceberg_key]
         for iceberg_key, polars_key in _ICEBERG_TO_POLARS_STORAGE_OPTIONS.items()
         if iceberg_key in io_props
     }
-    return pl.scan_iceberg(tbl, storage_options=storage_options or None)
+    return opts or None
+
+
+def _scan_iceberg(tbl: Any) -> pl.LazyFrame:
+    return pl.scan_iceberg(tbl, storage_options=_storage_options(tbl))
 
 
 def _apply_partial_update(
@@ -93,6 +96,9 @@ class IcebergCatalogConfig(CatalogConfig):
 
     def connection_keys(self) -> tuple[str, ...]:
         return ("name",) + tuple(self._catalog_properties.keys())
+
+
+_DEFAULT_BATCH_SIZE = 50_000_000
 
 
 class IcebergCatalog(BaseCatalog):
@@ -189,33 +195,72 @@ class IcebergCatalog(BaseCatalog):
     def write_relation(
         self,
         relation: PolarsRelation,
-        df: pl.DataFrame,
+        data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
+        model_config: dict = {},
     ) -> None:
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
-        missing = [c for c in partition_by if c not in df.columns]
+        arrow_schema = (
+            data.collect_schema().to_arrow()
+            if isinstance(data, pl.LazyFrame)
+            else data.to_arrow().schema
+        )
+        missing = [c for c in partition_by if c not in arrow_schema.names]
         if missing:
             raise DbtRuntimeError(
                 f"partition_by column(s) not found in model: {', '.join(missing)}"
             )
 
-        identifier = self._id(relation)
-        from pyiceberg.exceptions import NoSuchTableError
+        if not relation.identifier:
+            raise DbtRuntimeError("relation identifier cannot be empty")
 
-        try:
-            self._catalog.purge_table(identifier)
-            self._invalidate_table_cache(identifier)
-        except NoSuchTableError:
-            self.create_schema(relation)
-        tbl = self._catalog.create_table(identifier, schema=df.to_arrow().schema)
+        tmp_relation = PolarsRelation.create(
+            database=relation.database,
+            schema=relation.schema,
+            identifier=relation.identifier + "__dbt_tmp",
+            catalog=relation.catalog,
+        )
+        tmp_id = self._id(tmp_relation)
+        target_id = self._id(relation)
+
+        self.create_schema(relation)
+
+        if self._catalog.table_exists(tmp_id):
+            self._catalog.purge_table(tmp_id)
+            self._invalidate_table_cache(tmp_id)
+
+        tbl = self._catalog.create_table(tmp_id, schema=arrow_schema)
         if partition_by:
             with tbl.update_spec() as update:
                 for col in partition_by:
                     update.add_identity(col)
-        self._table_cache[identifier] = tbl
-        df.write_iceberg(tbl, mode="append")
+        self._table_cache[tmp_id] = tbl
+
+        if isinstance(data, pl.LazyFrame):
+            write_mode = model_config.get("write_mode", "lazy")
+            if write_mode == "lazy":
+                batch_size = model_config.get("write_options", {}).get(
+                    "batch_size", _DEFAULT_BATCH_SIZE
+                )
+                for batch in data.collect_batches(
+                    chunk_size=batch_size, engine="streaming", maintain_order=False
+                ):
+                    tbl.append(batch.to_arrow())
+            else:
+                tbl.append(data.collect().to_arrow())
+        else:
+            tbl.append(data.to_arrow())
+
+        # Swap: drop old target then rename temp into its place.
+        # Gap = two sequential catalog metadata operations (microseconds–milliseconds).
+        if self._catalog.table_exists(target_id):
+            self._catalog.purge_table(target_id)
+            self._invalidate_table_cache(target_id)
+        self._catalog.rename_table(tmp_id, target_id)
+        self._invalidate_table_cache(tmp_id)
+        self._table_cache[target_id] = self._catalog.load_table(target_id)
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
@@ -251,15 +296,33 @@ class IcebergCatalog(BaseCatalog):
     def append_relation(
         self,
         relation: PolarsRelation,
-        df: pl.DataFrame,
+        data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
+        model_config: dict = {},
     ) -> None:
         tbl = self._load_table(self._id(relation))
         if allow_schema_evolution:
+            arrow_schema = (
+                data.collect_schema().to_arrow()
+                if isinstance(data, pl.LazyFrame)
+                else data.to_arrow().schema
+            )
             with tbl.update_schema() as update:
-                update.union_by_name(df.to_arrow().schema)
-
-        df.write_iceberg(tbl, mode="append")
+                update.union_by_name(arrow_schema)
+        if isinstance(data, pl.LazyFrame):
+            write_mode = model_config.get("write_mode", "lazy")
+            if write_mode == "lazy":
+                batch_size = model_config.get("write_options", {}).get(
+                    "batch_size", _DEFAULT_BATCH_SIZE
+                )
+                for batch in data.collect_batches(
+                    chunk_size=batch_size, engine="streaming", maintain_order=False
+                ):
+                    tbl.append(batch.to_arrow())
+            else:
+                tbl.append(data.collect().to_arrow())
+        else:
+            tbl.append(data.to_arrow())
 
     def merge_relation(
         self,

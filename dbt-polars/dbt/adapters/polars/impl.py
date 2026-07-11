@@ -512,6 +512,7 @@ class PolarsAdapter(BaseAdapter):
         new_data: pl.DataFrame,
         on_schema_change: str,
         partition_by: list[str],
+        model_config: dict = {},
     ) -> tuple[pl.DataFrame | None, bool]:
         """Apply on_schema_change policy before an incremental write.
 
@@ -562,7 +563,7 @@ class PolarsAdapter(BaseAdapter):
                 )
             existing_df = existing_df.select(new_cols)
             catalog.write_relation(
-                relation, pl.concat([existing_df, new_data]), partition_by
+                relation, pl.concat([existing_df, new_data]), partition_by, model_config
             )
             return None, False
 
@@ -624,6 +625,7 @@ class PolarsAdapter(BaseAdapter):
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
         partition_by: str | list[str] | None = None,
+        model_config: dict = {},
     ) -> None:
         partition_by = _normalize_partition_by(partition_by)
         current_partitions = catalog.get_partition_columns(relation)
@@ -636,7 +638,7 @@ class PolarsAdapter(BaseAdapter):
             )
 
         schema_result, allow_evolution = self._apply_schema_change(
-            catalog, relation, new_data, on_schema_change, partition_by
+            catalog, relation, new_data, on_schema_change, partition_by, model_config
         )
 
         if schema_result is None:
@@ -649,7 +651,10 @@ class PolarsAdapter(BaseAdapter):
 
         if strategy == "append":
             catalog.append_relation(
-                relation, new_data, allow_schema_evolution=allow_evolution
+                relation,
+                new_data,
+                allow_schema_evolution=allow_evolution,
+                model_config=model_config,
             )
         elif strategy == "merge":
             if not unique_key:
@@ -677,7 +682,10 @@ class PolarsAdapter(BaseAdapter):
                 incremental_predicates=incremental_predicates or None,
             )
             catalog.append_relation(
-                relation, new_data, allow_schema_evolution=allow_evolution
+                relation,
+                new_data,
+                allow_schema_evolution=allow_evolution,
+                model_config=model_config,
             )
         else:
             raise DbtRuntimeError(f"Unknown incremental strategy: {strategy!r}")
@@ -695,6 +703,7 @@ class PolarsAdapter(BaseAdapter):
         incremental_predicates: str | list[str] | None = None,
         extra_ctes: list | None = None,
         partition_by: str | list[str] | None = None,
+        model_config: dict = {},
     ) -> None:
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
@@ -712,6 +721,7 @@ class PolarsAdapter(BaseAdapter):
             merge_exclude_columns,
             incremental_predicates,
             partition_by,
+            model_config,
         )
 
     @available
@@ -721,13 +731,15 @@ class PolarsAdapter(BaseAdapter):
         sql: str,
         extra_ctes: list | None = None,
         partition_by: str | list[str] | None = None,
+        model_config: dict = {},
     ) -> None:
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
-        result = self._run_sql(sql, extra_frames=cte_frames or None)
-        self.get_storage_catalog(relation.catalog).write_relation(
-            relation, result, _normalize_partition_by(partition_by)
+        result = self._run_sql(sql, eager=False, extra_frames=cte_frames or None)
+        catalog = self.get_storage_catalog(relation.catalog)
+        catalog.write_relation(
+            relation, result, _normalize_partition_by(partition_by), model_config
         )
 
     def submit_python_job(
@@ -737,7 +749,7 @@ class PolarsAdapter(BaseAdapter):
         cte_frames = self._evaluate_ctes(extra_ctes)
         python_code = self._strip_all_ctes(compiled_code, extra_ctes)
 
-        result = self._run_python_model(python_code, cte_frames or None).collect()
+        lazy_result = self._run_python_model(python_code, cte_frames or None)
 
         target_relation = PolarsRelation.create(
             database=parsed_model["database"],
@@ -747,35 +759,38 @@ class PolarsAdapter(BaseAdapter):
             catalog=parsed_model["database"],
         )
         catalog = self.get_storage_catalog(target_relation.catalog)
-        config = parsed_model.get("config", {})
+        model_config = parsed_model.get("config", {})
 
-        partition_by = _normalize_partition_by(config.get("partition_by"))
+        partition_by = _normalize_partition_by(model_config.get("partition_by"))
 
-        if config.get("materialized") == "incremental" and catalog.table_exists(
+        if model_config.get("materialized") == "incremental" and catalog.table_exists(
             target_relation
         ):
-            unique_key = config.get("unique_key")
+            unique_key = model_config.get("unique_key")
             strategy = (
-                config.get("incremental_strategy")
+                model_config.get("incremental_strategy")
                 or (unique_key and "merge")
                 or "append"
             )
-            on_schema_change = config.get("on_schema_change") or "ignore"
+            on_schema_change = model_config.get("on_schema_change") or "ignore"
             self._incremental_write(
                 catalog,
                 target_relation,
-                result,
+                lazy_result.collect(),
                 unique_key,
                 strategy,
                 on_schema_change,
-                merge_update_columns=config.get("merge_update_columns"),
-                merge_exclude_columns=config.get("merge_exclude_columns"),
-                incremental_predicates=config.get("predicates")
-                or config.get("incremental_predicates"),
+                merge_update_columns=model_config.get("merge_update_columns"),
+                merge_exclude_columns=model_config.get("merge_exclude_columns"),
+                incremental_predicates=model_config.get("predicates")
+                or model_config.get("incremental_predicates"),
                 partition_by=partition_by,
+                model_config=model_config,
             )
         else:
-            catalog.write_relation(target_relation, result, partition_by)
+            catalog.write_relation(
+                target_relation, lazy_result, partition_by, model_config
+            )
 
         return AdapterResponse(_message="OK")
 

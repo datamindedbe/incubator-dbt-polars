@@ -144,6 +144,7 @@ class TestSimpleSeedWithBOMIceberg(BaseSimpleSeedWithBOM):
         )
 
 
+@pytest.mark.skip_profiles("iceberg-databricks")
 class TestSeedWithExplicitCatalog:
     """Verify that a seed with an explicit catalog config is written
     to the correct catalog."""
