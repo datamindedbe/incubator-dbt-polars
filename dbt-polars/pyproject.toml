@@ -50,7 +50,7 @@ include = ["dbt*"]
 config-settings = { editable_mode = "compat" }
 
 [tool.pytest.ini_options]
-addopts = "-n auto"
+addopts = "-n 0"
 markers = [
     "require_profiles(...): only run this test when --profile matches one of the listed names",
     "skip_profiles(...): skip this test when --profile matches one of the listed names",

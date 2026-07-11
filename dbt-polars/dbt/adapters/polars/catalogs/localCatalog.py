@@ -35,8 +35,8 @@ class LocalCatalog(BaseCatalog):
     config: LocalCatalogConfig
 
     def __init__(self, config: LocalCatalogConfig):
-        absolute_root = str(Path(config.root).resolve())
-        if " " in absolute_root:
+        absolute_root = Path(config.root).resolve()
+        if " " in str(absolute_root):
             raise DbtRuntimeError(
                 f"LocalCatalog root resolves to '{absolute_root}', which contains "
                 "a space. polars' Delta scanner (pl.scan_delta) cannot read tables "
@@ -45,9 +45,10 @@ class LocalCatalog(BaseCatalog):
                 "that resolves to an absolute path without spaces."
             )
         super().__init__(config)
+        self.absolute_root = absolute_root
 
     def _schema_path(self, schema: str) -> Path:
-        return Path(self.config.root) / schema
+        return self.absolute_root / schema
 
     def _relation_path(self, relation: PolarsRelation) -> Path:
         if relation.schema is None:
@@ -69,10 +70,9 @@ class LocalCatalog(BaseCatalog):
         shutil.rmtree(self._schema_path(relation.schema), ignore_errors=True)
 
     def list_schemas(self) -> list[str]:
-        root = Path(self.config.root)
-        if not root.exists():
+        if not self.absolute_root.exists():
             return []
-        return [p.name for p in root.iterdir() if p.is_dir()]
+        return [p.name for p in self.absolute_root.iterdir() if p.is_dir()]
 
     def table_exists(self, relation: PolarsRelation) -> bool:
         return DeltaTable.is_deltatable(str(self._relation_path(relation)))

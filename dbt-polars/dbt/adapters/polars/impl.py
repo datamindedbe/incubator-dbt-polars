@@ -163,6 +163,7 @@ class PolarsAdapter(BaseAdapter):
 
     def drop_schema(self, relation: PolarsRelation) -> None:  # type: ignore[override]
         self.get_storage_catalog(relation.catalog).drop_schema(relation)
+        self.cache.drop_schema(relation.database, relation.schema)
 
     def list_schemas(self, database: str) -> list[str]:
         return self.get_storage_catalog(database).list_schemas()

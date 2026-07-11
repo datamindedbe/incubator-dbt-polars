@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, overload
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
@@ -9,6 +9,35 @@ from dbt_common.exceptions import DbtRuntimeError
 import polars as pl
 
 logger = AdapterLogger("polars")
+
+_UNSIGNED_TO_SIGNED: dict[type, type[pl.DataType]] = {
+    pl.UInt8: pl.Int8,
+    pl.UInt16: pl.Int16,
+    pl.UInt32: pl.Int32,
+    pl.UInt64: pl.Int64,
+}
+
+
+@overload
+def _cast_unsigned_to_signed(data: pl.DataFrame) -> pl.DataFrame: ...
+
+
+@overload
+def _cast_unsigned_to_signed(data: pl.LazyFrame) -> pl.LazyFrame: ...
+
+
+def _cast_unsigned_to_signed(
+    data: pl.DataFrame | pl.LazyFrame,
+) -> pl.DataFrame | pl.LazyFrame:
+    # Iceberg has no unsigned integer types; cast to the corresponding signed type
+    schema = data.collect_schema() if isinstance(data, pl.LazyFrame) else data.schema
+    casts = [
+        pl.col(name).cast(_UNSIGNED_TO_SIGNED[type(dtype)])
+        for name, dtype in schema.items()
+        if type(dtype) in _UNSIGNED_TO_SIGNED
+    ]
+    return data.with_columns(casts) if casts else data
+
 
 # Maps pyiceberg FileIO property names to Polars/object_store storage option keys.
 # Populated by credential vending from REST catalogs (e.g. Unity Catalog, Polaris).
@@ -202,6 +231,7 @@ class IcebergCatalog(BaseCatalog):
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
+        data = _cast_unsigned_to_signed(data)
         arrow_schema = (
             data.collect_schema().to_arrow()
             if isinstance(data, pl.LazyFrame)
@@ -300,6 +330,7 @@ class IcebergCatalog(BaseCatalog):
         allow_schema_evolution: bool = False,
         model_config: dict = {},
     ) -> None:
+        data = _cast_unsigned_to_signed(data)
         tbl = self._load_table(self._id(relation))
         if allow_schema_evolution:
             arrow_schema = (
@@ -333,6 +364,7 @@ class IcebergCatalog(BaseCatalog):
         incremental_predicates: list[str] | None = None,
         allow_schema_evolution: bool = False,
     ) -> None:
+        df = _cast_unsigned_to_signed(df)
         missing_keys = [k for k in keys if k not in df.columns]
         if missing_keys:
             raise DbtRuntimeError(
