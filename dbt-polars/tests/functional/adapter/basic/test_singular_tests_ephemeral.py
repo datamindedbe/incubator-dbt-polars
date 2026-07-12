@@ -73,9 +73,9 @@ class BaseSingularTestsEphemeral:
         check_result_nodes_by_name(results, ["failing_model", "passing_model"])
 
 
-@pytest.mark.skip(
-    reason="Ephemeral models with their own CTEs produce nested WITH clauses that "
-    "Polars SQLContext cannot parse (relation not found). Needs upstream fix."
-)
+# @pytest.mark.skip(
+#     reason="Ephemeral models with their own CTEs produce nested WITH clauses that "
+#     "Polars SQLContext cannot parse (relation not found). Needs upstream fix."
+# )
 class TestSingularTestsEphemeral(BaseSingularTestsEphemeral):
     pass

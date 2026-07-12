@@ -544,14 +544,27 @@ class PolarsAdapter(BaseAdapter):
     def _strip_all_ctes(self, code: str, extra_ctes: list) -> str:
         if not extra_ctes:
             return code
-        prefix = "with" + ", ".join(cte["sql"] for cte in extra_ctes) + " "
+        prefix = "with" + ", ".join(cte["sql"] for cte in extra_ctes)
+        tokens = [re.escape(t) for t in re.split(r"\s+", prefix) if t]
+        prefix_pattern = r"\s+".join(tokens)
+
         stripped = code.lstrip()
-        if not stripped.startswith(prefix):
+        m = re.match(prefix_pattern, stripped, re.DOTALL | re.IGNORECASE)
+
+        if not m:
             raise DbtRuntimeError(
                 "Could not locate expected CTE prefix in compiled code. "
                 "This is a dbt-polars bug — please report it."
+                f"Code: {stripped}"
+                f"Prefix {prefix_pattern}"
             )
-        return stripped[len(prefix) :]
+
+        remainder = stripped[m.end() :].lstrip()
+        # Remainder is a CTE - inject a with statement
+        if remainder.startswith(","):
+            return "with " + remainder[1:]
+        else:
+            return remainder
 
     def _apply_schema_change(
         self,
