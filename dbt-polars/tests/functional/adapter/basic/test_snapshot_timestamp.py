@@ -1,22 +1,14 @@
 import pytest
-from dbt.tests.util import relation_from_name, run_dbt, update_rows
+from dbt.tests.util import run_dbt
 from tests.functional.adapter.basic.files import (
     seeds_added_csv,
     seeds_base_csv,
     seeds_newcolumns_csv,
     ts_snapshot_sql,
 )
+from tests.utils import polars_relation_row_count, polars_update_rows
 
 
-def check_relation_rows(project, snapshot_name, count):
-    relation = relation_from_name(project.adapter, snapshot_name)
-    result = project.run_sql(
-        f"select count(*) as num_rows from {relation}", fetch="one"
-    )
-    assert result[0] == count
-
-
-@pytest.mark.skip(reason="Snapshot materialization not yet supported by dbt-polars")
 class BaseSnapshotTimestamp:
     @pytest.fixture(scope="class")
     def seeds(self):
@@ -57,13 +49,13 @@ class BaseSnapshotTimestamp:
         assert len(results) == 1
 
         # snapshot has 10 rows
-        check_relation_rows(project, "ts_snapshot", 10)
+        assert polars_relation_row_count(project.adapter, "ts_snapshot") == 10
 
         # point at the "added" seed so the snapshot sees 10 new rows
         results = run_dbt(["snapshot", "--vars", "seed_name: added"])
 
         # snapshot now has 20 rows
-        check_relation_rows(project, "ts_snapshot", 20)
+        assert polars_relation_row_count(project.adapter, "ts_snapshot") == 20
 
         # update some timestamps in the "added" seed
         # so the snapshot sees 10 more new rows
@@ -76,12 +68,12 @@ class BaseSnapshotTimestamp:
             },
             "where": "id > 10 and id < 21",
         }
-        update_rows(project.adapter, update_rows_config)
+        polars_update_rows(project.adapter, update_rows_config)
 
         results = run_dbt(["snapshot", "--vars", "seed_name: added"])
 
         # snapshot now has 30 rows
-        check_relation_rows(project, "ts_snapshot", 30)
+        assert polars_relation_row_count(project.adapter, "ts_snapshot") == 30
 
         update_rows_config = {
             "name": "added",
@@ -93,12 +85,12 @@ class BaseSnapshotTimestamp:
             },
             "where": "id < 11",
         }
-        update_rows(project.adapter, update_rows_config)
+        polars_update_rows(project.adapter, update_rows_config)
 
         results = run_dbt(["snapshot", "--vars", "seed_name: added"])
 
         # snapshot still has 30 rows because timestamp not updated
-        check_relation_rows(project, "ts_snapshot", 30)
+        assert polars_relation_row_count(project.adapter, "ts_snapshot") == 30
 
 
 class TestSnapshotTimestamp(BaseSnapshotTimestamp):

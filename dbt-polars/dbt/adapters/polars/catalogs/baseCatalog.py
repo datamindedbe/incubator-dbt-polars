@@ -139,6 +139,14 @@ class BaseCatalog(ABC):
     @abstractmethod
     def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]: ...
 
+    @abstractmethod
+    def apply_snapshot_delta(
+        self,
+        relation: PolarsRelation,
+        rows_to_close: pl.DataFrame,
+        rows_to_insert: pl.DataFrame,
+    ) -> None: ...
+
     def expand_column_types(
         self, goal: PolarsRelation, current: PolarsRelation
     ) -> None:

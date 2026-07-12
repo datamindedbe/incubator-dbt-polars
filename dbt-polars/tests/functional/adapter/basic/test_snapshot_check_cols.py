@@ -1,5 +1,5 @@
 import pytest
-from dbt.tests.util import relation_from_name, run_dbt, update_rows
+from dbt.tests.util import run_dbt
 from tests.functional.adapter.basic.files import (
     cc_all_snapshot_sql,
     cc_date_snapshot_sql,
@@ -7,17 +7,9 @@ from tests.functional.adapter.basic.files import (
     seeds_added_csv,
     seeds_base_csv,
 )
+from tests.utils import polars_relation_row_count, polars_update_rows
 
 
-def check_relation_rows(project, snapshot_name, count):
-    relation = relation_from_name(project.adapter, snapshot_name)
-    result = project.run_sql(
-        f"select count(*) as num_rows from {relation}", fetch="one"
-    )
-    assert result[0] == count
-
-
-@pytest.mark.skip(reason="Snapshot materialization not yet supported by dbt-polars")
 class BaseSnapshotCheckCols:
     @pytest.fixture(scope="class")
     def project_config_update(self):
@@ -60,12 +52,9 @@ class BaseSnapshotCheckCols:
             assert result.status == "success"
 
         # check rowcounts for all snapshots
-        check_relation_rows(project, "cc_all_snapshot", 10)
-        check_relation_rows(project, "cc_name_snapshot", 10)
-        check_relation_rows(project, "cc_date_snapshot", 10)
-
-        relation = relation_from_name(project.adapter, "cc_all_snapshot")
-        result = project.run_sql(f"select * from {relation}", fetch="all")
+        assert polars_relation_row_count(project.adapter, "cc_all_snapshot") == 10
+        assert polars_relation_row_count(project.adapter, "cc_name_snapshot") == 10
+        assert polars_relation_row_count(project.adapter, "cc_date_snapshot") == 10
 
         # point at the "added" seed so the snapshot sees 10 new rows
         results = run_dbt(
@@ -75,9 +64,9 @@ class BaseSnapshotCheckCols:
             assert result.status == "success"
 
         # check rowcounts for all snapshots
-        check_relation_rows(project, "cc_all_snapshot", 20)
-        check_relation_rows(project, "cc_name_snapshot", 20)
-        check_relation_rows(project, "cc_date_snapshot", 20)
+        assert polars_relation_row_count(project.adapter, "cc_all_snapshot") == 20
+        assert polars_relation_row_count(project.adapter, "cc_name_snapshot") == 20
+        assert polars_relation_row_count(project.adapter, "cc_date_snapshot") == 20
 
         # update some timestamps in the "added" seed so
         # the snapshot sees 10 more new rows
@@ -87,7 +76,7 @@ class BaseSnapshotCheckCols:
             "clause": {"src_col": "some_date", "type": "add_timestamp"},
             "where": "id > 10 and id < 21",
         }
-        update_rows(project.adapter, update_rows_config)
+        polars_update_rows(project.adapter, update_rows_config)
 
         # re-run snapshots, using "added'
         results = run_dbt(["snapshot", "--vars", "seed_name: added"])
@@ -95,10 +84,10 @@ class BaseSnapshotCheckCols:
             assert result.status == "success"
 
         # check rowcounts for all snapshots
-        check_relation_rows(project, "cc_all_snapshot", 30)
-        check_relation_rows(project, "cc_date_snapshot", 30)
+        assert polars_relation_row_count(project.adapter, "cc_all_snapshot") == 30
+        assert polars_relation_row_count(project.adapter, "cc_date_snapshot") == 30
         # unchanged: only the timestamp changed
-        check_relation_rows(project, "cc_name_snapshot", 20)
+        assert polars_relation_row_count(project.adapter, "cc_name_snapshot") == 20
 
         # Update the name column
         update_rows_config = {
@@ -111,7 +100,7 @@ class BaseSnapshotCheckCols:
             },
             "where": "id < 11",
         }
-        update_rows(project.adapter, update_rows_config)
+        polars_update_rows(project.adapter, update_rows_config)
 
         # re-run snapshots, using "added'
         results = run_dbt(["snapshot", "--vars", "seed_name: added"])
@@ -119,10 +108,10 @@ class BaseSnapshotCheckCols:
             assert result.status == "success"
 
         # check rowcounts for all snapshots
-        check_relation_rows(project, "cc_all_snapshot", 40)
-        check_relation_rows(project, "cc_name_snapshot", 30)
+        assert polars_relation_row_count(project.adapter, "cc_all_snapshot") == 40
+        assert polars_relation_row_count(project.adapter, "cc_name_snapshot") == 30
         # does not see name updates
-        check_relation_rows(project, "cc_date_snapshot", 30)
+        assert polars_relation_row_count(project.adapter, "cc_date_snapshot") == 30
 
 
 class TestSnapshotCheckCols(BaseSnapshotCheckCols):

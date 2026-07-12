@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from dbt.adapters.base.column import Column
@@ -111,6 +113,23 @@ def _normalize_partition_by(partition_by: str | list[str] | None) -> list[str]:
 
 
 logger = AdapterLogger("polars")
+
+
+def _add_scd_id(df: pl.DataFrame, unique_key: str | list[str]) -> pl.DataFrame:
+    key_cols = [unique_key] if isinstance(unique_key, str) else list(unique_key)
+    key_expr = pl.concat_str(
+        [pl.col(c).cast(pl.String).fill_null("") for c in key_cols],
+        separator="|",
+    )
+    raw = pl.concat_str(
+        [key_expr, pl.lit("|"), pl.col("dbt_updated_at").cast(pl.String).fill_null("")]
+    )
+    return df.with_columns(
+        raw.map_elements(
+            lambda s: hashlib.md5(s.encode()).hexdigest(),
+            return_dtype=pl.String,
+        ).alias("dbt_scd_id")
+    )
 
 
 class PolarsAdapter(BaseAdapter):
@@ -794,6 +813,154 @@ class PolarsAdapter(BaseAdapter):
             )
 
         return AdapterResponse(_message="OK")
+
+    @available
+    def polars_execute_snapshot(
+        self,
+        relation: PolarsRelation,
+        sql: str,
+        unique_key: str | list[str],
+        strategy: str,
+        updated_at: str | None,
+        check_cols: str | list[str] | None,
+        hard_deletes: str,
+        extra_ctes: list | None,
+    ) -> None:
+        ctes = extra_ctes or []
+        cte_frames = self._evaluate_ctes(ctes)
+        sql = self._strip_all_ctes(sql, ctes)
+        source_df = self._run_sql(sql, extra_frames=cte_frames or None)
+
+        now = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
+
+        if strategy == "timestamp":
+            if updated_at is None:
+                raise DbtRuntimeError(
+                    "snapshot strategy 'timestamp' requires an 'updated_at' config"
+                )
+            source_df = source_df.with_columns(
+                pl.col(updated_at).cast(pl.Datetime("us")).alias("dbt_updated_at")
+            )
+        else:
+            source_df = source_df.with_columns(pl.lit(now).alias("dbt_updated_at"))
+
+        source_df = _add_scd_id(source_df, unique_key)
+
+        catalog = self.get_storage_catalog(relation.catalog)
+        if not catalog.table_exists(relation):
+            first_df = source_df.with_columns(
+                [
+                    pl.col("dbt_updated_at").alias("dbt_valid_from"),
+                    pl.lit(None).cast(pl.Datetime("us")).alias("dbt_valid_to"),
+                ]
+            )
+            if hard_deletes == "new_record":
+                first_df = first_df.with_columns(pl.lit(False).alias("dbt_is_deleted"))
+            catalog.write_relation(relation, first_df, [])
+        else:
+            self._snapshot_apply_scd2(
+                catalog,
+                relation,
+                source_df,
+                unique_key,
+                strategy,
+                updated_at,
+                check_cols,
+                hard_deletes,
+                now,
+            )
+
+    def _snapshot_apply_scd2(
+        self,
+        catalog: BaseCatalog,
+        relation: PolarsRelation,
+        source_df: pl.DataFrame,
+        unique_key: str | list[str],
+        strategy: str,
+        updated_at: str | None,
+        check_cols: str | list[str] | None,
+        hard_deletes: str,
+        now: datetime,
+    ) -> None:
+        if hard_deletes not in ("ignore", "invalidate", "new_record"):
+            raise DbtRuntimeError(
+                f"dbt-polars snapshots do not support hard_deletes='{hard_deletes}'"
+            )
+
+        keys = [unique_key] if isinstance(unique_key, str) else list(unique_key)
+
+        existing_open = (
+            catalog.get_relation(relation)
+            .filter(pl.col("dbt_valid_to").is_null())
+            .collect()
+        )
+
+        matched = existing_open.join(source_df, on=keys, how="inner", suffix="_new")
+
+        if strategy == "timestamp":
+            changed_mask = pl.col(f"{updated_at}_new") > pl.col("dbt_updated_at")
+        else:
+            dbt_added = {"dbt_updated_at", "dbt_scd_id"}
+            if check_cols == "all":
+                check_col_list = [
+                    c for c in source_df.columns if c not in keys and c not in dbt_added
+                ]
+            else:
+                check_col_list = (
+                    [check_cols]
+                    if isinstance(check_cols, str)
+                    else list(check_cols or [])
+                )
+            changed_mask = pl.any_horizontal(
+                [pl.col(f"{c}_new").ne_missing(pl.col(c)) for c in check_col_list]
+            )
+
+        changed = matched.filter(changed_mask)
+
+        rows_to_close = changed.with_columns(
+            [
+                pl.col("dbt_updated_at_new").alias("dbt_valid_to"),
+                pl.col("dbt_updated_at_new").alias("dbt_updated_at"),
+            ]
+        ).select(existing_open.columns)
+
+        new_keys = source_df.join(existing_open, on=keys, how="anti")
+        changed_new = source_df.join(changed.select(keys), on=keys, how="semi")
+        base = pl.concat([new_keys, changed_new]).with_columns(
+            pl.col("dbt_updated_at").alias("dbt_valid_from")
+        )
+        if hard_deletes == "new_record":
+            base = base.with_columns(pl.lit(False).alias("dbt_is_deleted"))
+        rows_to_insert = base.with_columns(
+            pl.lit(None).cast(base.schema["dbt_valid_from"]).alias("dbt_valid_to")
+        ).select(existing_open.columns)
+
+        if hard_deletes in ("invalidate", "new_record"):
+            deleted_open = existing_open.join(source_df, on=keys, how="anti")
+            if not deleted_open.is_empty():
+                rows_to_close = pl.concat(
+                    [
+                        rows_to_close,
+                        deleted_open.with_columns(
+                            [
+                                pl.lit(now).alias("dbt_valid_to"),
+                                pl.lit(now).alias("dbt_updated_at"),
+                            ]
+                        ).select(existing_open.columns),
+                    ]
+                )
+                if hard_deletes == "new_record":
+                    deleted_markers = deleted_open.with_columns(
+                        [
+                            pl.lit(now).alias("dbt_valid_from"),
+                            pl.lit(now).alias("dbt_updated_at"),
+                            pl.lit(None).cast(pl.Datetime("us")).alias("dbt_valid_to"),
+                            pl.lit(True).alias("dbt_is_deleted"),
+                        ]
+                    ).select(existing_open.columns)
+                    rows_to_insert = pl.concat([rows_to_insert, deleted_markers])
+
+        catalog.apply_snapshot_delta(relation, rows_to_close, rows_to_insert)
 
     def execute(
         self,

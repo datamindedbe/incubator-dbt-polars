@@ -234,6 +234,28 @@ class LocalCatalog(BaseCatalog):
             if field.metadata.get("comment")
         }
 
+    def apply_snapshot_delta(
+        self,
+        relation: PolarsRelation,
+        rows_to_close: pl.DataFrame,
+        rows_to_insert: pl.DataFrame,
+    ) -> None:
+        if rows_to_close.is_empty() and rows_to_insert.is_empty():
+            return
+        staging = pl.concat([rows_to_close, rows_to_insert])
+        dt = DeltaTable(str(self._relation_path(relation)))
+        (
+            dt.merge(
+                staging.to_arrow(),
+                "target.dbt_scd_id = source.dbt_scd_id",
+                source_alias="source",
+                target_alias="target",
+            )
+            .when_matched_update_all()
+            .when_not_matched_insert_all()
+            .execute()
+        )
+
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
     ) -> list[PolarsRelation]:

@@ -1,12 +1,24 @@
-from typing import Any, overload
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, overload
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.catalogs.iceberg_write_utils import (
+    _append_in_single_snapshot,
+    _overwrite_scd_ids_and_append,
+    _replace_in_single_snapshot,
+    _sync_partition_spec,
+    _sync_schema,
+)
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
 
 import polars as pl
+
+if TYPE_CHECKING:
+    from pyiceberg.table import Table
 
 logger = AdapterLogger("polars")
 
@@ -127,9 +139,6 @@ class IcebergCatalogConfig(CatalogConfig):
         return ("name",) + tuple(self._catalog_properties.keys())
 
 
-_DEFAULT_BATCH_SIZE = 50_000_000
-
-
 class IcebergCatalog(BaseCatalog):
     config: IcebergCatalogConfig
 
@@ -149,7 +158,7 @@ class IcebergCatalog(BaseCatalog):
             )
         return self._catalog_instance
 
-    def _load_table(self, identifier: tuple[str, str]) -> Any:
+    def _load_table(self, identifier: tuple[str, str]) -> Table:
         """Return a cached Table, fetching from the catalog on first access."""
         if identifier not in self._table_cache:
             self._table_cache[identifier] = self._catalog.load_table(identifier)
@@ -246,51 +255,28 @@ class IcebergCatalog(BaseCatalog):
         if not relation.identifier:
             raise DbtRuntimeError("relation identifier cannot be empty")
 
-        tmp_relation = PolarsRelation.create(
-            database=relation.database,
-            schema=relation.schema,
-            identifier=relation.identifier + "__dbt_tmp",
-            catalog=relation.catalog,
-        )
-        tmp_id = self._id(tmp_relation)
         target_id = self._id(relation)
 
         self.create_schema(relation)
 
-        if self._catalog.table_exists(tmp_id):
-            self._catalog.purge_table(tmp_id)
-            self._invalidate_table_cache(tmp_id)
-
-        tbl = self._catalog.create_table(tmp_id, schema=arrow_schema)
-        if partition_by:
-            with tbl.update_spec() as update:
-                for col in partition_by:
-                    update.add_identity(col)
-        self._table_cache[tmp_id] = tbl
-
-        if isinstance(data, pl.LazyFrame):
-            write_mode = model_config.get("write_mode", "lazy")
-            if write_mode == "lazy":
-                batch_size = model_config.get("write_options", {}).get(
-                    "batch_size", _DEFAULT_BATCH_SIZE
-                )
-                for batch in data.collect_batches(
-                    chunk_size=batch_size, engine="streaming", maintain_order=False
-                ):
-                    tbl.append(batch.to_arrow())
-            else:
-                tbl.append(data.collect().to_arrow())
-        else:
-            tbl.append(data.to_arrow())
-
-        # Swap: drop old target then rename temp into its place.
-        # Gap = two sequential catalog metadata operations (microseconds–milliseconds).
         if self._catalog.table_exists(target_id):
-            self._catalog.purge_table(target_id)
-            self._invalidate_table_cache(target_id)
-        self._catalog.rename_table(tmp_id, target_id)
-        self._invalidate_table_cache(tmp_id)
-        self._table_cache[target_id] = self._catalog.load_table(target_id)
+            tbl = self._load_table(target_id)
+            # Single commit: old snapshots remain until snapshot expiry,
+            # unlike the previous purge-and-rename.
+            with tbl.transaction() as transaction:
+                _sync_schema(transaction, tbl.schema(), arrow_schema)
+                _sync_partition_spec(transaction, partition_by)
+                _replace_in_single_snapshot(transaction, tbl.io, data, model_config)
+        else:
+            # Not create_table_transaction: Databricks Unity Catalog does not vend
+            # storage credentials on a stage-create response, so writes to the
+            # staged table fail. Create first (creates an empty, visible table),
+            # then write all data in one commit.
+            tbl = self._catalog.create_table(target_id, schema=arrow_schema)
+            self._table_cache[target_id] = tbl
+            with tbl.transaction() as transaction:
+                _sync_partition_spec(transaction, partition_by)
+                _append_in_single_snapshot(transaction, tbl.io, data, model_config)
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
@@ -332,28 +318,16 @@ class IcebergCatalog(BaseCatalog):
     ) -> None:
         data = _cast_unsigned_to_signed(data)
         tbl = self._load_table(self._id(relation))
-        if allow_schema_evolution:
-            arrow_schema = (
-                data.collect_schema().to_arrow()
-                if isinstance(data, pl.LazyFrame)
-                else data.to_arrow().schema
-            )
-            with tbl.update_schema() as update:
-                update.union_by_name(arrow_schema)
-        if isinstance(data, pl.LazyFrame):
-            write_mode = model_config.get("write_mode", "lazy")
-            if write_mode == "lazy":
-                batch_size = model_config.get("write_options", {}).get(
-                    "batch_size", _DEFAULT_BATCH_SIZE
+        with tbl.transaction() as transaction:
+            if allow_schema_evolution:
+                arrow_schema = (
+                    data.collect_schema().to_arrow()
+                    if isinstance(data, pl.LazyFrame)
+                    else data.to_arrow().schema
                 )
-                for batch in data.collect_batches(
-                    chunk_size=batch_size, engine="streaming", maintain_order=False
-                ):
-                    tbl.append(batch.to_arrow())
-            else:
-                tbl.append(data.collect().to_arrow())
-        else:
-            tbl.append(data.to_arrow())
+                with transaction.update_schema() as update:
+                    update.union_by_name(arrow_schema)
+            _append_in_single_snapshot(transaction, tbl.io, data, model_config)
 
     def merge_relation(
         self,
@@ -433,6 +407,30 @@ class IcebergCatalog(BaseCatalog):
 
         tbl = self._load_table(self._id(relation))
         tbl.delete(_build_key_delete_filter(keys, df))
+
+    def apply_snapshot_delta(
+        self,
+        relation: PolarsRelation,
+        rows_to_close: pl.DataFrame,
+        rows_to_insert: pl.DataFrame,
+    ) -> None:
+        if rows_to_close.is_empty() and rows_to_insert.is_empty():
+            return
+
+        tbl = self._load_table(self._id(relation))
+        if rows_to_close.is_empty():
+            with tbl.transaction() as transaction:
+                _append_in_single_snapshot(transaction, tbl.io, rows_to_insert, {})
+        else:
+            scd_ids = rows_to_close["dbt_scd_id"].to_list()
+            all_new = _cast_unsigned_to_signed(
+                pl.concat([rows_to_close, rows_to_insert])
+            )
+            with tbl.transaction() as transaction:
+                _overwrite_scd_ids_and_append(
+                    tbl, transaction, tbl.io, scd_ids, all_new
+                )
+        self._invalidate_table_cache(self._id(relation))
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
         tbl = self._load_table(self._id(relation))
