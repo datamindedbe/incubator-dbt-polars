@@ -93,7 +93,9 @@
         config.get('updated_at'),
         config.get('check_cols'),
         adapter.get_hard_deletes_behavior(config),
-        model['extra_ctes']
+        model['extra_ctes'],
+        config.get('snapshot_meta_column_names', {}),
+        config.get('dbt_valid_to_current')
   ) -%}
 
   {% call statement('main') -%}

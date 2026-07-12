@@ -100,6 +100,7 @@ def _overwrite_scd_ids_and_append(
     io: FileIO,
     scd_ids: list,
     new_rows: pl.DataFrame,
+    scd_id_col: str = "dbt_scd_id",
 ) -> None:
     """Single-snapshot alternative to Transaction.delete(In(...)) + append().
 
@@ -113,7 +114,7 @@ def _overwrite_scd_ids_and_append(
     schema = transaction.table_metadata.schema()
     file_counter = itertools.count(0)
     with transaction.update_snapshot().overwrite() as snapshot_writer:
-        for task in tbl.scan(row_filter=In("dbt_scd_id", scd_ids)).plan_files():
+        for task in tbl.scan(row_filter=In(scd_id_col, scd_ids)).plan_files():
             all_rows = pl.DataFrame(
                 ArrowScan(
                     table_metadata=transaction.table_metadata,
@@ -122,7 +123,7 @@ def _overwrite_scd_ids_and_append(
                     row_filter=AlwaysTrue(),
                 ).to_table(tasks=[task])
             )
-            kept_rows = all_rows.filter(~pl.col("dbt_scd_id").is_in(scd_ids))
+            kept_rows = all_rows.filter(~pl.col(scd_id_col).is_in(scd_ids))
             if len(kept_rows) < len(all_rows):
                 snapshot_writer.delete_data_file(task.file)
                 if kept_rows.shape[0] > 0:

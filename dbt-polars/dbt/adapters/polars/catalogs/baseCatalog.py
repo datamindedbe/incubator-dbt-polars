@@ -145,6 +145,7 @@ class BaseCatalog(ABC):
         relation: PolarsRelation,
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
+        scd_id_col: str = "dbt_scd_id",
     ) -> None: ...
 
     def expand_column_types(

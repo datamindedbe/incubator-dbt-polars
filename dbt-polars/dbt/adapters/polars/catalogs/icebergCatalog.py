@@ -413,6 +413,7 @@ class IcebergCatalog(BaseCatalog):
         relation: PolarsRelation,
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
+        scd_id_col: str = "dbt_scd_id",
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
@@ -422,13 +423,13 @@ class IcebergCatalog(BaseCatalog):
             with tbl.transaction() as transaction:
                 _append_in_single_snapshot(transaction, tbl.io, rows_to_insert, {})
         else:
-            scd_ids = rows_to_close["dbt_scd_id"].to_list()
+            scd_ids = rows_to_close[scd_id_col].to_list()
             all_new = _cast_unsigned_to_signed(
                 pl.concat([rows_to_close, rows_to_insert])
             )
             with tbl.transaction() as transaction:
                 _overwrite_scd_ids_and_append(
-                    tbl, transaction, tbl.io, scd_ids, all_new
+                    tbl, transaction, tbl.io, scd_ids, all_new, scd_id_col
                 )
         self._invalidate_table_cache(self._id(relation))
 

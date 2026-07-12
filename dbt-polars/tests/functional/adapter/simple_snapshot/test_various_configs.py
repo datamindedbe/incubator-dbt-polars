@@ -1,291 +1,287 @@
 import datetime
 
+import polars as pl
 import pytest
 from dbt.tests.util import (
-    check_relations_equal,
-    get_manifest,
+    get_connection,
+    relation_from_name,
     run_dbt,
     run_dbt_and_capture,
-    run_sql_with_adapter,
     update_config_file,
 )
-from tests.functional.adapter.simple_snapshot.fixtures import (
-    create_multi_key_seed_sql,
-    create_multi_key_snapshot_expected_sql,
-    create_seed_sql,
-    create_snapshot_expected_sql,
-    invalidate_multi_key_sql,
-    invalidate_sql,
-    model_seed_sql,
-    populate_multi_key_snapshot_expected_sql,
-    populate_snapshot_expected_sql,
-    populate_snapshot_expected_valid_to_current_sql,
-    ref_snapshot_sql,
-    seed_insert_sql,
-    seed_multi_key_insert_sql,
-    snapshot_actual_sql,
-    snapshots_multi_key_yml,
-    snapshots_no_column_names_yml,
-    snapshots_valid_to_current_yml,
-    snapshots_yml,
-    update_multi_key_sql,
-    update_sql,
-    update_with_current_sql,
-)
+
+from tests.functional.adapter.simple_snapshot import common, seeds
+
+MODEL_FACT_SQL = """
+{{ config(materialized="table") }}
+select * from {{ ref('seed') }}
+where id between 1 and 20
+"""
+
+META_COL_NAMES = {
+    "dbt_valid_to": "test_valid_to",
+    "dbt_valid_from": "test_valid_from",
+    "dbt_scd_id": "test_scd_id",
+    "dbt_updated_at": "test_updated_at",
+}
+
+SNAPSHOT_CUSTOM_COLS_SQL = """
+{% snapshot snapshot %}
+    {{ config(
+        strategy='timestamp',
+        updated_at='updated_at',
+        unique_key='id',
+        snapshot_meta_column_names={
+            'dbt_valid_to': 'test_valid_to',
+            'dbt_valid_from': 'test_valid_from',
+            'dbt_scd_id': 'test_scd_id',
+            'dbt_updated_at': 'test_updated_at',
+        }
+    ) }}
+    select * from {{ ref('fact') }}
+{% endsnapshot %}
+"""
+
+SNAPSHOT_NO_CUSTOM_COLS_SQL = """
+{% snapshot snapshot %}
+    {{ config(
+        strategy='timestamp',
+        updated_at='updated_at',
+        unique_key='id',
+    ) }}
+    select * from {{ ref('fact') }}
+{% endsnapshot %}
+"""
+
+SNAPSHOT_MULTI_KEY_SQL = """
+{% snapshot snapshot %}
+    {{ config(
+        strategy='timestamp',
+        updated_at='updated_at',
+        unique_key=['id', 'first_name'],
+        snapshot_meta_column_names={
+            'dbt_valid_to': 'test_valid_to',
+            'dbt_valid_from': 'test_valid_from',
+            'dbt_scd_id': 'test_scd_id',
+            'dbt_updated_at': 'test_updated_at',
+        }
+    ) }}
+    select * from {{ ref('fact') }}
+{% endsnapshot %}
+"""
+
+SNAPSHOT_VALID_TO_CURRENT_SQL = """
+{% snapshot snapshot %}
+    {{ config(
+        strategy='timestamp',
+        updated_at='updated_at',
+        unique_key='id',
+        dbt_valid_to_current="date('2099-12-31')",
+        snapshot_meta_column_names={
+            'dbt_valid_to': 'test_valid_to',
+            'dbt_valid_from': 'test_valid_from',
+            'dbt_scd_id': 'test_scd_id',
+            'dbt_updated_at': 'test_updated_at',
+        }
+    ) }}
+    select * from {{ ref('fact') }}
+{% endsnapshot %}
+"""
+
+SNAPSHOT_IS_DELETED_COL_SQL = """
+{% snapshot snapshot %}
+    {{ config(
+        strategy='timestamp',
+        updated_at='updated_at',
+        unique_key='id',
+        hard_deletes='new_record',
+        snapshot_meta_column_names={
+            'dbt_is_deleted': 'is_row_deleted',
+        }
+    ) }}
+    select * from {{ ref('fact') }}
+{% endsnapshot %}
+"""
 
 
-class BaseSnapshotColumnNames:
+def _get_snapshot_df(project) -> pl.DataFrame:
+    with get_connection(project.adapter):
+        relation = relation_from_name(project.adapter, "snapshot")
+        return (
+            project.adapter.get_storage_catalog(relation.database)
+            .get_relation(relation)
+            .collect()
+        )
+
+
+class BaseSnapshotWithCustomCols:
     @pytest.fixture(scope="class")
-    def snapshots(self):
-        return {"snapshot.sql": snapshot_actual_sql}
+    def seeds(self):
+        return {"seed.csv": seeds.SEED_CSV}
 
     @pytest.fixture(scope="class")
     def models(self):
-        return {
-            "snapshots.yml": snapshots_yml,
-            "ref_snapshot.sql": ref_snapshot_sql,
-        }
+        return {"fact.sql": MODEL_FACT_SQL}
 
-    def test_snapshot_column_names(self, project):
-        project.run_sql(create_seed_sql)
-        project.run_sql(create_snapshot_expected_sql)
-        project.run_sql(seed_insert_sql)
-        project.run_sql(populate_snapshot_expected_sql)
+    @pytest.fixture(scope="class", autouse=True)
+    def _setup_class(self, project):
+        run_dbt(["seed"])
 
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        project.run_sql(invalidate_sql)
-        project.run_sql(update_sql)
-
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        # run_dbt(["test"])
-        check_relations_equal(project.adapter, ["snapshot_actual", "snapshot_expected"])
+    @pytest.fixture(scope="function", autouse=True)
+    def _setup_method(self, project):
+        self.project = project
+        common.clone_table(project, "fact", "seed", "*", "id between 1 and 20")
+        run_dbt(["snapshot"])
+        yield
+        common.delete_records(project, "snapshot")
+        common.delete_records(project, "fact")
 
 
-@pytest.mark.skip(
-    reason="requires project.run_sql DDL / unimplemented snapshot features"
-)
-class TestSnapshotColumnNames(BaseSnapshotColumnNames):
-    pass
-
-
-class BaseSnapshotColumnNamesFromDbtProject:
+class TestSnapshotColumnNames(BaseSnapshotWithCustomCols):
     @pytest.fixture(scope="class")
     def snapshots(self):
-        return {"snapshot.sql": snapshot_actual_sql}
+        return {"snapshot.sql": SNAPSHOT_CUSTOM_COLS_SQL}
 
+    def test_meta_column_names_used(self, project):
+        df = _get_snapshot_df(project)
+        for internal, external in META_COL_NAMES.items():
+            assert external in df.columns, f"expected column {external!r}"
+            assert internal not in df.columns, f"column {internal!r} should be renamed"
+
+    def test_updates_captured_with_custom_cols(self, project):
+        common.update_records(
+            project,
+            "fact",
+            {"updated_at": "updated_at + interval '1 day'"},
+            "id between 16 and 20",
+        )
+        run_dbt(["snapshot"])
+        df = _get_snapshot_df(project)
+        for internal, external in META_COL_NAMES.items():
+            assert external in df.columns
+            assert internal not in df.columns
+        assert df.filter(pl.col("test_valid_to").is_null()).shape[0] == 20
+        assert df.filter(pl.col("test_valid_to").is_not_null()).shape[0] == 5
+
+
+class TestSnapshotColumnNamesFromDbtProject(BaseSnapshotWithCustomCols):
     @pytest.fixture(scope="class")
-    def models(self):
-        return {
-            "snapshots.yml": snapshots_no_column_names_yml,
-            "ref_snapshot.sql": ref_snapshot_sql,
-        }
+    def snapshots(self):
+        return {"snapshot.sql": SNAPSHOT_NO_CUSTOM_COLS_SQL}
 
     @pytest.fixture(scope="class")
     def project_config_update(self):
-        return {
-            "snapshots": {
-                "test": {
-                    "+snapshot_meta_column_names": {
-                        "dbt_valid_to": "test_valid_to",
-                        "dbt_valid_from": "test_valid_from",
-                        "dbt_scd_id": "test_scd_id",
-                        "dbt_updated_at": "test_updated_at",
-                    }
-                }
-            }
-        }
+        return {"snapshots": {"test": {"+snapshot_meta_column_names": META_COL_NAMES}}}
 
-    def test_snapshot_column_names_from_project(self, project):
-        project.run_sql(create_seed_sql)
-        project.run_sql(create_snapshot_expected_sql)
-        project.run_sql(seed_insert_sql)
-        project.run_sql(populate_snapshot_expected_sql)
-
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        project.run_sql(invalidate_sql)
-        project.run_sql(update_sql)
-
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        # run_dbt(["test"])
-        check_relations_equal(project.adapter, ["snapshot_actual", "snapshot_expected"])
+    def test_meta_column_names_from_project(self, project):
+        df = _get_snapshot_df(project)
+        for internal, external in META_COL_NAMES.items():
+            assert external in df.columns, f"expected column {external!r}"
+            assert internal not in df.columns, f"column {internal!r} should be renamed"
 
 
-@pytest.mark.skip(
-    reason="requires project.run_sql DDL / unimplemented snapshot features"
-)
-class TestSnapshotColumnNamesFromDbtProject(BaseSnapshotColumnNamesFromDbtProject):
-    pass
-
-
-class BaseSnapshotInvalidColumnNames:
+class TestSnapshotInvalidColumnNames(BaseSnapshotWithCustomCols):
     @pytest.fixture(scope="class")
     def snapshots(self):
-        return {"snapshot.sql": snapshot_actual_sql}
-
-    @pytest.fixture(scope="class")
-    def models(self):
-        return {
-            "snapshots.yml": snapshots_no_column_names_yml,
-            "ref_snapshot.sql": ref_snapshot_sql,
-        }
+        return {"snapshot.sql": SNAPSHOT_NO_CUSTOM_COLS_SQL}
 
     @pytest.fixture(scope="class")
     def project_config_update(self):
-        return {
-            "snapshots": {
-                "test": {
-                    "+snapshot_meta_column_names": {
-                        "dbt_valid_to": "test_valid_to",
-                        "dbt_valid_from": "test_valid_from",
-                        "dbt_scd_id": "test_scd_id",
-                        "dbt_updated_at": "test_updated_at",
+        return {"snapshots": {"test": {"+snapshot_meta_column_names": META_COL_NAMES}}}
+
+    def test_mismatched_column_names_raise_error(self, project):
+        # Table has test_valid_to, test_valid_from, test_scd_id, test_updated_at.
+        # Switch to a partial mapping — dbt_valid_from and dbt_scd_id become unremapped
+        # (expected as "dbt_valid_from"/"dbt_scd_id") but table still has "test_*".
+        update_config_file(
+            {
+                "snapshots": {
+                    "test": {
+                        "+snapshot_meta_column_names": {
+                            "dbt_valid_to": "test_valid_to",
+                            "dbt_updated_at": "test_updated_at",
+                        }
                     }
                 }
-            }
-        }
-
-    def test_snapshot_invalid_column_names(self, project):
-        project.run_sql(create_seed_sql)
-        project.run_sql(create_snapshot_expected_sql)
-        project.run_sql(seed_insert_sql)
-        project.run_sql(populate_snapshot_expected_sql)
-
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-        manifest = get_manifest(project.project_root)
-        snapshot_node = manifest.nodes["snapshot.test.snapshot_actual"]
-        snapshot_node.config.snapshot_meta_column_names == {
-            "dbt_valid_to": "test_valid_to",
-            "dbt_valid_from": "test_valid_from",
-            "dbt_scd_id": "test_scd_id",
-            "dbt_updated_at": "test_updated_at",
-        }
-
-        project.run_sql(invalidate_sql)
-        project.run_sql(update_sql)
-
-        # Change snapshot_meta_columns and look for an error
-        different_columns = {
-            "snapshots": {
-                "test": {
-                    "+snapshot_meta_column_names": {
-                        "dbt_valid_to": "test_valid_to",
-                        "dbt_updated_at": "test_updated_at",
-                    }
-                }
-            }
-        }
-        update_config_file(different_columns, "dbt_project.yml")
-
+            },
+            "dbt_project.yml",
+        )
         results, log_output = run_dbt_and_capture(["snapshot"], expect_pass=False)
         assert len(results) == 1
-        assert "Compilation Error in snapshot snapshot_actual" in log_output
         assert "Snapshot target is missing configured columns" in log_output
 
 
-@pytest.mark.skip(
-    reason="requires project.run_sql DDL / unimplemented snapshot features"
-)
-class TestSnapshotInvalidColumnNames(BaseSnapshotInvalidColumnNames):
-    pass
-
-
-class BaseSnapshotDbtValidToCurrent:
+class TestSnapshotDbtValidToCurrent(BaseSnapshotWithCustomCols):
     @pytest.fixture(scope="class")
     def snapshots(self):
-        return {"snapshot.sql": snapshot_actual_sql}
+        return {"snapshot.sql": SNAPSHOT_VALID_TO_CURRENT_SQL}
 
-    @pytest.fixture(scope="class")
-    def models(self):
-        return {
-            "snapshots.yml": snapshots_valid_to_current_yml,
-            "ref_snapshot.sql": ref_snapshot_sql,
-        }
+    def test_open_rows_use_sentinel(self, project):
+        sentinel = datetime.datetime(2099, 12, 31, 0, 0, 0)
+        df = _get_snapshot_df(project)
+        for internal, external in META_COL_NAMES.items():
+            assert external in df.columns
+            assert internal not in df.columns
+        assert df.filter(pl.col("test_valid_to") == sentinel).shape[0] == 20
+        assert df.filter(pl.col("test_valid_to").is_null()).is_empty()
 
-    def test_valid_to_current(self, project):
-        project.run_sql(create_seed_sql)
-        project.run_sql(create_snapshot_expected_sql)
-        project.run_sql(seed_insert_sql)
-        project.run_sql(populate_snapshot_expected_valid_to_current_sql)
-
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        original_snapshot = run_sql_with_adapter(
-            project.adapter,
-            "select id, test_scd_id, test_valid_to from {schema}.snapshot_actual",
-            "all",
+    def test_closed_rows_have_real_timestamp(self, project):
+        sentinel = datetime.datetime(2099, 12, 31, 0, 0, 0)
+        common.update_records(
+            project,
+            "fact",
+            {"updated_at": "updated_at + interval '1 day'"},
+            "id between 16 and 20",
         )
-        assert original_snapshot[0][2] == datetime.datetime(2099, 12, 31, 0, 0)
-        assert original_snapshot[9][2] == datetime.datetime(2099, 12, 31, 0, 0)
-
-        project.run_sql(invalidate_sql)
-        project.run_sql(update_with_current_sql)
-
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        updated_snapshot = run_sql_with_adapter(
-            project.adapter,
-            "select id, test_scd_id, test_valid_to from {schema}.snapshot_actual",
-            "all",
-        )
-        assert updated_snapshot[0][2] == datetime.datetime(2099, 12, 31, 0, 0)
-        # Original row that was updated now has a non-current (2099/12/31) date
-        assert updated_snapshot[9][2] == datetime.datetime(2016, 8, 20, 16, 44, 49)
-        # Updated row has a current date
-        assert updated_snapshot[20][2] == datetime.datetime(2099, 12, 31, 0, 0)
-
-        check_relations_equal(project.adapter, ["snapshot_actual", "snapshot_expected"])
+        run_dbt(["snapshot"])
+        df = _get_snapshot_df(project)
+        assert df.filter(pl.col("test_valid_to") == sentinel).shape[0] == 20
+        not_sentinel = pl.col("test_valid_to") != sentinel
+        closed = df.filter(pl.col("test_valid_to").is_not_null() & not_sentinel)
+        assert closed.shape[0] == 5
 
 
-@pytest.mark.skip(
-    reason="requires project.run_sql DDL / unimplemented snapshot features"
-)
-class TestSnapshotDbtValidToCurrent(BaseSnapshotDbtValidToCurrent):
-    pass
-
-
-# This uses snapshot_meta_column_names, yaml-only snapshot def,
-# and multiple keys
-class BaseSnapshotMultiUniqueKey:
+class TestSnapshotMultiUniqueKey(BaseSnapshotWithCustomCols):
     @pytest.fixture(scope="class")
-    def models(self):
-        return {
-            "seed.sql": model_seed_sql,
-            "snapshots.yml": snapshots_multi_key_yml,
-            "ref_snapshot.sql": ref_snapshot_sql,
-        }
+    def snapshots(self):
+        return {"snapshot.sql": SNAPSHOT_MULTI_KEY_SQL}
 
-    def test_multi_column_unique_key(self, project):
-        project.run_sql(create_multi_key_seed_sql)
-        project.run_sql(create_multi_key_snapshot_expected_sql)
-        project.run_sql(seed_multi_key_insert_sql)
-        project.run_sql(populate_multi_key_snapshot_expected_sql)
+    def test_multi_key_initial_snapshot(self, project):
+        df = _get_snapshot_df(project)
+        for internal, external in META_COL_NAMES.items():
+            assert external in df.columns
+            assert internal not in df.columns
+        assert df.filter(pl.col("test_valid_to").is_null()).shape[0] == 20
 
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        project.run_sql(invalidate_multi_key_sql)
-        project.run_sql(update_multi_key_sql)
-
-        results = run_dbt(["snapshot"])
-        assert len(results) == 1
-
-        # run_dbt(["test"])
-        check_relations_equal(project.adapter, ["snapshot_actual", "snapshot_expected"])
+    def test_multi_key_updates_captured(self, project):
+        common.update_records(
+            project,
+            "fact",
+            {"updated_at": "updated_at + interval '1 day'"},
+            "id between 16 and 20",
+        )
+        run_dbt(["snapshot"])
+        df = _get_snapshot_df(project)
+        assert df.filter(pl.col("test_valid_to").is_null()).shape[0] == 20
+        assert df.filter(pl.col("test_valid_to").is_not_null()).shape[0] == 5
 
 
-@pytest.mark.skip(
-    reason="requires project.run_sql DDL / unimplemented snapshot features"
-)
-class TestSnapshotMultiUniqueKey(BaseSnapshotMultiUniqueKey):
-    pass
+class TestSnapshotIsDeletedColumnName(BaseSnapshotWithCustomCols):
+    @pytest.fixture(scope="class")
+    def snapshots(self):
+        return {"snapshot.sql": SNAPSHOT_IS_DELETED_COL_SQL}
+
+    def test_is_deleted_column_uses_configured_name(self, project):
+        df = _get_snapshot_df(project)
+        assert "is_row_deleted" in df.columns
+        assert "dbt_is_deleted" not in df.columns
+        assert df.filter(pl.col("is_row_deleted")).is_empty()
+
+    def test_deleted_markers_use_configured_name(self, project):
+        common.delete_records(project, "fact", "id between 16 and 20")
+        run_dbt(["snapshot"])
+        df = _get_snapshot_df(project)
+        assert "is_row_deleted" in df.columns
+        assert "dbt_is_deleted" not in df.columns
+        markers = df.filter(pl.col("is_row_deleted"))
+        assert markers.shape[0] == 5

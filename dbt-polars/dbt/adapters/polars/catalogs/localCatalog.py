@@ -239,6 +239,7 @@ class LocalCatalog(BaseCatalog):
         relation: PolarsRelation,
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
+        scd_id_col: str = "dbt_scd_id",
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
@@ -247,7 +248,7 @@ class LocalCatalog(BaseCatalog):
         (
             dt.merge(
                 staging.to_arrow(),
-                "target.dbt_scd_id = source.dbt_scd_id",
+                f"target.{scd_id_col} = source.{scd_id_col}",
                 source_alias="source",
                 target_alias="target",
             )
