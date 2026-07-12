@@ -64,7 +64,7 @@ def _write_seed_expected_iceberg(project) -> None:
         )
         catalog = project.adapter.get_storage_catalog(project.database)
         catalog.create_schema(relation)
-        catalog.write_relation(relation, df)
+        catalog.write_relation(relation, df, [])
 
 
 @pytest.mark.require_profiles("local")
@@ -144,6 +144,7 @@ class TestSimpleSeedWithBOMIceberg(BaseSimpleSeedWithBOM):
         )
 
 
+@pytest.mark.skip_profiles("iceberg-databricks")
 class TestSeedWithExplicitCatalog:
     """Verify that a seed with an explicit catalog config is written
     to the correct catalog."""

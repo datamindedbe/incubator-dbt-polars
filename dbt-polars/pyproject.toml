@@ -49,8 +49,14 @@ include = ["dbt*"]
 [tool.uv]
 config-settings = { editable_mode = "compat" }
 
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint.per-file-ignores]
+"tests/functional/adapter/simple_snapshot/fixtures.py" = ["E501"]
+
 [tool.pytest.ini_options]
-addopts = "-n auto"
+addopts = "-n 0"
 markers = [
     "require_profiles(...): only run this test when --profile matches one of the listed names",
     "skip_profiles(...): skip this test when --profile matches one of the listed names",
