@@ -235,8 +235,9 @@ class IcebergCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
@@ -314,8 +315,9 @@ class IcebergCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         data = _cast_unsigned_to_signed(data)
         tbl = self._load_table(self._id(relation))
         with tbl.transaction() as transaction:

@@ -89,8 +89,9 @@ class LocalCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
@@ -116,7 +117,7 @@ class LocalCatalog(BaseCatalog):
                 ignore={"mode", "target"},
                 merge={"delta_write_options": adapter_delta_opts},
             )
-            df.write_delta(path, mode="overwrite", overwrite_schema=True, **kwargs)
+            df.write_delta(path, mode="overwrite", **kwargs)
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
@@ -137,8 +138,9 @@ class LocalCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         path = str(self._relation_path(relation))
         adapter_delta_opts = {"schema_mode": "merge"} if allow_schema_evolution else {}
         write_mode = model_config.get("write_mode", "lazy")
