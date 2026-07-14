@@ -245,6 +245,9 @@ class LocalCatalog(BaseCatalog):
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
+        if rows_to_close.is_empty():
+            self.append_relation(relation, rows_to_insert)
+            return
         staging = pl.concat([rows_to_close, rows_to_insert])
         dt = DeltaTable(str(self._relation_path(relation)))
         (

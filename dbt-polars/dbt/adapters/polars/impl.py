@@ -871,8 +871,6 @@ class PolarsAdapter(BaseAdapter):
         meta_cols: SnapshotMetaColumnNames | dict[str, str] | None = None,
         valid_to_current_expr: str | None = None,
     ) -> None:
-        print("Executing snapshot")
-
         if isinstance(meta_cols, SnapshotMetaColumnNames):
             meta_cols = {
                 key: value for key, value in meta_cols.to_dict().items() if value
@@ -885,7 +883,7 @@ class PolarsAdapter(BaseAdapter):
         sql = self._strip_all_ctes(sql, ctes)
         source_df = self._run_sql(sql, extra_frames=cte_frames or None)
 
-        now = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if strategy == "timestamp":
             if updated_at is None:
@@ -1060,25 +1058,27 @@ class PolarsAdapter(BaseAdapter):
                     ]
                 )
                 if hard_deletes == "new_record":
-                    deleted_markers = deleted_open.with_columns(
-                        [
-                            pl.lit(now).alias("dbt_valid_from"),
-                            pl.lit(now).alias("dbt_updated_at"),
-                            open_valid_to.alias("dbt_valid_to"),
-                            pl.lit(True).alias("dbt_is_deleted"),
-                        ]
+                    deleted_markers = _add_scd_id(
+                        deleted_open.with_columns(
+                            [
+                                pl.lit(now).alias("dbt_valid_from"),
+                                pl.lit(now).alias("dbt_updated_at"),
+                                open_valid_to.alias("dbt_valid_to"),
+                                pl.lit(True).alias("dbt_is_deleted"),
+                            ]
+                        ),
+                        unique_key,
                     ).select(existing_open.columns)
                     rows_to_insert = pl.concat([rows_to_insert, deleted_markers])
 
         # Rename internal column names back to configured external names before writing
         scd_id_col = meta_cols.get("dbt_scd_id", "dbt_scd_id")
         if meta_cols:
-            rename = {k: v for k, v in meta_cols.items()}
             rows_to_close = rows_to_close.rename(
-                {k: v for k, v in rename.items() if k in rows_to_close.columns}
+                {k: v for k, v in meta_cols.items() if k in rows_to_close.columns}
             )
             rows_to_insert = rows_to_insert.rename(
-                {k: v for k, v in rename.items() if k in rows_to_insert.columns}
+                {k: v for k, v in meta_cols.items() if k in rows_to_insert.columns}
             )
         catalog.apply_snapshot_delta(
             relation, rows_to_close, rows_to_insert, scd_id_col

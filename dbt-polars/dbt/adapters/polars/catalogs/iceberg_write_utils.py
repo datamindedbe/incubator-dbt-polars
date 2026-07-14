@@ -148,6 +148,7 @@ def _sync_schema(
         for field in current_schema.fields
         if field.name not in arrow_schema.names
     ]
+    # allow_incompatible_changes is required for column deletion
     with transaction.update_schema(allow_incompatible_changes=True) as update:
         update.union_by_name(arrow_schema)
         for column in removed_columns:
