@@ -924,6 +924,11 @@ class PolarsAdapter(BaseAdapter):
         error_if: str = "!= 0",
         store_failures_relation: PolarsRelation | None = None,
     ) -> tuple[AdapterResponse, agate.Table]:
+        sql_header = parsed_model.get("config", {}).get("sql_header")
+        if sql_header:
+            raise DbtRuntimeError(
+                "sql_header is not supported for Python singular tests"
+            )
         extra_ctes = parsed_model.get("extra_ctes", [])
         cte_frames = self._evaluate_ctes(extra_ctes)
         python_code = self._strip_all_ctes(compiled_code, extra_ctes)
