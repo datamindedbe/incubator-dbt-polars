@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import polars as pl
 from dbt.tests.util import get_connection, relation_from_name
 
@@ -103,3 +105,56 @@ def polars_check_relations_equal(adapter, relation_names: list[str]) -> None:
             assert mismatched == 0, (
                 f"Got {mismatched} different rows between {basis} and {compare_rel}"
             )
+
+
+def polars_update_rows(adapter, update_rows_config: dict) -> None:
+    """Polars-native substitute for dbt's update_rows
+    (which runs SQL UPDATE, a no-op here)."""
+    name = update_rows_config["name"]
+    dst_col = update_rows_config["dst_col"]
+    clause = update_rows_config["clause"]
+    where = update_rows_config.get("where")
+
+    with get_connection(adapter):
+        relation = relation_from_name(adapter, name)
+        catalog = adapter.get_storage_catalog(relation.database)
+        df = catalog.get_relation(relation).collect()
+
+    mask = pl.sql_expr(where) if where else pl.lit(True)
+
+    clause_type = clause["type"]
+    if clause_type == "add_timestamp":
+        src_col = clause["src_col"]
+        number = int(clause.get("number", 1))
+        interval = clause.get("interval", "hour")
+        _key = {
+            "second": "seconds",
+            "minute": "minutes",
+            "hour": "hours",
+            "day": "days",
+            "week": "weeks",
+        }.get(interval, interval + "s")
+        delta = timedelta(**{_key: number})
+        new_col = (
+            pl.when(mask)
+            .then(pl.col(src_col) + pl.lit(delta))
+            .otherwise(pl.col(src_col))
+        )
+        df = df.with_columns(new_col.alias(dst_col))
+
+    elif clause_type == "add_string":
+        src_col = clause["src_col"]
+        value = clause["value"]
+        location = clause.get("location", "append")
+        if location == "append":
+            new_val = pl.concat_str([pl.col(src_col), pl.lit(value)])
+        else:
+            new_val = pl.concat_str([pl.lit(value), pl.col(src_col)])
+        df = df.with_columns(
+            pl.when(mask).then(new_val).otherwise(pl.col(src_col)).alias(dst_col)
+        )
+
+    with get_connection(adapter):
+        relation = relation_from_name(adapter, name)
+        catalog = adapter.get_storage_catalog(relation.database)
+        catalog.write_relation(relation, df, [])

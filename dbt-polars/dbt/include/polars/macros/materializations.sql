@@ -80,3 +80,28 @@
 {% materialization clone, adapter='polars' %}
   {{ exceptions.raise_compiler_error("The polars adapter does not support dbt clone.") }}
 {% endmaterialization %}
+
+
+{% materialization snapshot, adapter='polars' %}
+  {%- set target_relation = this.incorporate(type='table') -%}
+
+  {%- do adapter.polars_execute_snapshot(
+        target_relation,
+        sql,
+        config.get('unique_key'),
+        config.get('strategy'),
+        config.get('updated_at'),
+        config.get('check_cols'),
+        adapter.get_hard_deletes_behavior(config),
+        model['extra_ctes'],
+        config.get('snapshot_meta_column_names', {}),
+        config.get('dbt_valid_to_current')
+  ) -%}
+
+  {% call statement('main') -%}
+    -- Source query of the snapshot model. The SCD2 merge is handled by the Polars adapter in Python.
+    {{ sql }}
+  {%- endcall %}
+
+  {{ return({'relations': [target_relation]}) }}
+{% endmaterialization %}
