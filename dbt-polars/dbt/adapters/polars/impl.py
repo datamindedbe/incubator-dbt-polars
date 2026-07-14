@@ -555,8 +555,6 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(
                 "Could not locate expected CTE prefix in compiled code. "
                 "This is a dbt-polars bug — please report it."
-                f"Code: {stripped}"
-                f"Prefix {prefix_pattern}"
             )
 
         remainder = stripped[m.end() :].lstrip()
