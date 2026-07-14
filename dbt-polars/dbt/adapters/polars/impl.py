@@ -512,7 +512,7 @@ class PolarsAdapter(BaseAdapter):
         new_data: pl.DataFrame,
         on_schema_change: str,
         partition_by: list[str],
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> tuple[pl.DataFrame | None, bool]:
         """Apply on_schema_change policy before an incremental write.
 
@@ -523,6 +523,7 @@ class PolarsAdapter(BaseAdapter):
           - allow_evolution: True when the catalog should enable schema
             evolution on the append (new columns present and policy permits)
         """
+        model_config = model_config or {}
         existing = {
             col.name: col.dtype for col in self.get_columns_in_relation(relation)
         }
@@ -625,8 +626,9 @@ class PolarsAdapter(BaseAdapter):
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
         partition_by: str | list[str] | None = None,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         partition_by = _normalize_partition_by(partition_by)
         current_partitions = catalog.get_partition_columns(relation)
         if current_partitions != partition_by:
@@ -703,8 +705,9 @@ class PolarsAdapter(BaseAdapter):
         incremental_predicates: str | list[str] | None = None,
         extra_ctes: list | None = None,
         partition_by: str | list[str] | None = None,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
@@ -731,8 +734,9 @@ class PolarsAdapter(BaseAdapter):
         sql: str,
         extra_ctes: list | None = None,
         partition_by: str | list[str] | None = None,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
