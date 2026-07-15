@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from dbt.adapters.base.column import Column
@@ -24,6 +26,7 @@ from dbt_common.clients.agate_helper import (
     table_from_data,
 )
 from dbt_common.exceptions import CompilationError, DbtRuntimeError
+from dbt.artifacts.resources.v1.snapshot import SnapshotMetaColumnNames
 
 import polars as pl
 
@@ -104,7 +107,57 @@ def _resolve_polars_type(type_str: str) -> type[pl.DataType]:
     return dtype
 
 
+def _normalize_partition_by(partition_by: str | list[str] | None) -> list[str]:
+    if partition_by is None:
+        return []
+    return [partition_by] if isinstance(partition_by, str) else list(partition_by)
+
+
 logger = AdapterLogger("polars")
+
+
+def _key_part(df: pl.DataFrame, k: str) -> pl.Expr:
+    """Column reference if k is in df, sql_expr otherwise; always cast to String."""
+    return (
+        pl.col(k).cast(pl.String).fill_null("")
+        if k in df.columns
+        else pl.sql_expr(k).cast(pl.String).fill_null("")
+    )
+
+
+def _resolve_join_keys(
+    df: pl.DataFrame, unique_key: str | list[str]
+) -> tuple[pl.DataFrame, list[str]]:
+    """Materialise any SQL expression keys as derived columns; return (df, col_names).
+
+    Column names are returned as-is; expressions become _scd_key_0, _scd_key_1, …
+    so the alias is consistent when the call is repeated for both sides of a join.
+    """
+    raw = [unique_key] if isinstance(unique_key, str) else list(unique_key)
+    result: list[str] = []
+    for i, k in enumerate(raw):
+        if k in df.columns:
+            result.append(k)
+        else:
+            alias = f"_scd_key_{i}"
+            df = df.with_columns(pl.sql_expr(k).alias(alias))
+            result.append(alias)
+    return df, result
+
+
+def _add_scd_id(df: pl.DataFrame, unique_key: str | list[str]) -> pl.DataFrame:
+    raw = [unique_key] if isinstance(unique_key, str) else list(unique_key)
+    parts = [_key_part(df, k) for k in raw]
+    key_expr = pl.concat_str(parts, separator="|") if len(parts) > 1 else parts[0]
+    raw_str = pl.concat_str(
+        [key_expr, pl.lit("|"), pl.col("dbt_updated_at").cast(pl.String).fill_null("")]
+    )
+    return df.with_columns(
+        raw_str.map_elements(
+            lambda s: hashlib.md5(s.encode()).hexdigest(),
+            return_dtype=pl.String,
+        ).alias("dbt_scd_id")
+    )
 
 
 class PolarsAdapter(BaseAdapter):
@@ -114,7 +167,10 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
-    CatalogAdapters: dict[str, BaseCatalog] = {}
+
+    def __init__(self, config, mp_context):
+        super().__init__(config, mp_context)
+        self.CatalogAdapters: dict[str, BaseCatalog] = {}
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         connection = self.connections.get_thread_connection()
@@ -136,9 +192,14 @@ class PolarsAdapter(BaseAdapter):
         config = credentials.catalog_configs.get(name)
         if config is None:
             raise DbtRuntimeError(f"Unknown catalog {name}")
-        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](config)
+        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](
+            config, self.config.project_root
+        )
 
         return self.CatalogAdapters[name]
+
+    def build_catalog_relation(self, config) -> None:
+        return None
 
     @classmethod
     def date_function(cls):
@@ -157,6 +218,7 @@ class PolarsAdapter(BaseAdapter):
 
     def drop_schema(self, relation: PolarsRelation) -> None:  # type: ignore[override]
         self.get_storage_catalog(relation.catalog).drop_schema(relation)
+        self.cache.drop_schema(relation.database, relation.schema)
 
     def list_schemas(self, database: str) -> list[str]:
         return self.get_storage_catalog(database).list_schemas()
@@ -337,6 +399,7 @@ class PolarsAdapter(BaseAdapter):
         relation: PolarsRelation,
         agate_table: agate.Table,
         column_types: dict[str, str],
+        partition_by: str | list[str] | None = None,
     ) -> None:
         import agate
 
@@ -373,7 +436,9 @@ class PolarsAdapter(BaseAdapter):
         if casts:
             df = df.with_columns(casts)
 
-        self.get_storage_catalog(relation.catalog).write_relation(relation, df)
+        self.get_storage_catalog(relation.catalog).write_relation(
+            relation, df, _normalize_partition_by(partition_by)
+        )
 
     @classmethod
     def quote(cls, identifier: str) -> str:
@@ -473,25 +538,39 @@ class PolarsAdapter(BaseAdapter):
                 cte_frames[cte_name] = self._execute_python_cte(cte, cte_frames)
             else:
                 body_match = re.search(r"\((.+)\)", cte["sql"], re.DOTALL)
-                if body_match:
-                    cte_frames[cte_name] = self._run_sql(
-                        body_match.group(1).strip(),
-                        eager=False,
-                        extra_frames=cte_frames or None,
+                if not body_match:
+                    raise DbtRuntimeError(
+                        f"Could not extract SQL from CTE: {cte['id']}"
                     )
+                cte_frames[cte_name] = self._run_sql(
+                    body_match.group(1).strip(),
+                    eager=False,
+                    extra_frames=cte_frames or None,
+                )
         return cte_frames
 
     def _strip_all_ctes(self, code: str, extra_ctes: list) -> str:
         if not extra_ctes:
             return code
-        prefix = "with" + ", ".join(cte["sql"] for cte in extra_ctes) + " "
+        prefix = "with" + ", ".join(cte["sql"] for cte in extra_ctes)
+        tokens = [re.escape(t) for t in re.split(r"\s+", prefix) if t]
+        prefix_pattern = r"\s+".join(tokens)
+
         stripped = code.lstrip()
-        if not stripped.startswith(prefix):
+        m = re.match(prefix_pattern, stripped, re.DOTALL | re.IGNORECASE)
+
+        if not m:
             raise DbtRuntimeError(
                 "Could not locate expected CTE prefix in compiled code. "
                 "This is a dbt-polars bug — please report it."
             )
-        return stripped[len(prefix) :]
+
+        remainder = stripped[m.end() :].lstrip()
+        # Remainder is a CTE - inject a with statement
+        if remainder.startswith(","):
+            return "with " + remainder[1:]
+        else:
+            return remainder
 
     def _apply_schema_change(
         self,
@@ -499,6 +578,8 @@ class PolarsAdapter(BaseAdapter):
         relation: PolarsRelation,
         new_data: pl.DataFrame,
         on_schema_change: str,
+        partition_by: list[str],
+        model_config: dict | None = None,
     ) -> tuple[pl.DataFrame | None, bool]:
         """Apply on_schema_change policy before an incremental write.
 
@@ -509,6 +590,7 @@ class PolarsAdapter(BaseAdapter):
           - allow_evolution: True when the catalog should enable schema
             evolution on the append (new columns present and policy permits)
         """
+        model_config = model_config or {}
         existing = {
             col.name: col.dtype for col in self.get_columns_in_relation(relation)
         }
@@ -548,7 +630,9 @@ class PolarsAdapter(BaseAdapter):
                     ]
                 )
             existing_df = existing_df.select(new_cols)
-            catalog.write_relation(relation, pl.concat([existing_df, new_data]))
+            catalog.write_relation(
+                relation, pl.concat([existing_df, new_data]), partition_by, model_config
+            )
             return None, False
 
         return new_data, False
@@ -608,9 +692,22 @@ class PolarsAdapter(BaseAdapter):
         merge_update_columns: str | list[str] | None = None,
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
+        partition_by: str | list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
+        partition_by = _normalize_partition_by(partition_by)
+        current_partitions = catalog.get_partition_columns(relation)
+        if current_partitions != partition_by:
+            raise DbtRuntimeError(
+                f"Relation {relation} is partitioned by {current_partitions!r}, but "
+                f"the model is configured with partition_by={partition_by!r}. "
+                "Changing partitioning on an existing incremental model requires "
+                "`--full-refresh`."
+            )
+
         schema_result, allow_evolution = self._apply_schema_change(
-            catalog, relation, new_data, on_schema_change
+            catalog, relation, new_data, on_schema_change, partition_by, model_config
         )
 
         if schema_result is None:
@@ -623,7 +720,10 @@ class PolarsAdapter(BaseAdapter):
 
         if strategy == "append":
             catalog.append_relation(
-                relation, new_data, allow_schema_evolution=allow_evolution
+                relation,
+                new_data,
+                allow_schema_evolution=allow_evolution,
+                model_config=model_config,
             )
         elif strategy == "merge":
             if not unique_key:
@@ -651,7 +751,10 @@ class PolarsAdapter(BaseAdapter):
                 incremental_predicates=incremental_predicates or None,
             )
             catalog.append_relation(
-                relation, new_data, allow_schema_evolution=allow_evolution
+                relation,
+                new_data,
+                allow_schema_evolution=allow_evolution,
+                model_config=model_config,
             )
         else:
             raise DbtRuntimeError(f"Unknown incremental strategy: {strategy!r}")
@@ -668,7 +771,10 @@ class PolarsAdapter(BaseAdapter):
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
         extra_ctes: list | None = None,
+        partition_by: str | list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
@@ -684,17 +790,28 @@ class PolarsAdapter(BaseAdapter):
             merge_update_columns,
             merge_exclude_columns,
             incremental_predicates,
+            partition_by,
+            model_config,
         )
 
     @available
     def polars_execute_model(
-        self, relation: PolarsRelation, sql: str, extra_ctes: list | None = None
+        self,
+        relation: PolarsRelation,
+        sql: str,
+        extra_ctes: list | None = None,
+        partition_by: str | list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
-        result = self._run_sql(sql, extra_frames=cte_frames or None)
-        self.get_storage_catalog(relation.catalog).write_relation(relation, result)
+        result = self._run_sql(sql, eager=False, extra_frames=cte_frames or None)
+        catalog = self.get_storage_catalog(relation.catalog)
+        catalog.write_relation(
+            relation, result, _normalize_partition_by(partition_by), model_config
+        )
 
     def submit_python_job(
         self, parsed_model: dict, compiled_code: str
@@ -703,7 +820,7 @@ class PolarsAdapter(BaseAdapter):
         cte_frames = self._evaluate_ctes(extra_ctes)
         python_code = self._strip_all_ctes(compiled_code, extra_ctes)
 
-        result = self._run_python_model(python_code, cte_frames or None).collect()
+        lazy_result = self._run_python_model(python_code, cte_frames or None)
 
         target_relation = PolarsRelation.create(
             database=parsed_model["database"],
@@ -713,34 +830,267 @@ class PolarsAdapter(BaseAdapter):
             catalog=parsed_model["database"],
         )
         catalog = self.get_storage_catalog(target_relation.catalog)
-        config = parsed_model.get("config", {})
+        model_config = parsed_model.get("config", {})
 
-        if config.get("materialized") == "incremental" and catalog.table_exists(
+        partition_by = _normalize_partition_by(model_config.get("partition_by"))
+
+        if model_config.get("materialized") == "incremental" and catalog.table_exists(
             target_relation
         ):
-            unique_key = config.get("unique_key")
+            unique_key = model_config.get("unique_key")
             strategy = (
-                config.get("incremental_strategy")
+                model_config.get("incremental_strategy")
                 or (unique_key and "merge")
                 or "append"
             )
-            on_schema_change = config.get("on_schema_change") or "ignore"
+            on_schema_change = model_config.get("on_schema_change") or "ignore"
             self._incremental_write(
                 catalog,
                 target_relation,
-                result,
+                lazy_result.collect(),
                 unique_key,
                 strategy,
                 on_schema_change,
-                merge_update_columns=config.get("merge_update_columns"),
-                merge_exclude_columns=config.get("merge_exclude_columns"),
-                incremental_predicates=config.get("predicates")
-                or config.get("incremental_predicates"),
+                merge_update_columns=model_config.get("merge_update_columns"),
+                merge_exclude_columns=model_config.get("merge_exclude_columns"),
+                incremental_predicates=model_config.get("predicates")
+                or model_config.get("incremental_predicates"),
+                partition_by=partition_by,
+                model_config=model_config,
             )
         else:
-            catalog.write_relation(target_relation, result)
+            catalog.write_relation(
+                target_relation, lazy_result, partition_by, model_config
+            )
 
         return AdapterResponse(_message="OK")
+
+    @available
+    def polars_execute_snapshot(
+        self,
+        relation: PolarsRelation,
+        sql: str,
+        unique_key: str | list[str],
+        strategy: str,
+        updated_at: str | None,
+        check_cols: str | list[str] | None,
+        hard_deletes: str,
+        extra_ctes: list | None,
+        meta_cols: SnapshotMetaColumnNames | dict[str, str] | None = None,
+        valid_to_current_expr: str | None = None,
+    ) -> None:
+        if isinstance(meta_cols, SnapshotMetaColumnNames):
+            meta_cols = {
+                key: value for key, value in meta_cols.to_dict().items() if value
+            }
+
+        meta_cols = meta_cols or {}
+
+        ctes = extra_ctes or []
+        cte_frames = self._evaluate_ctes(ctes)
+        sql = self._strip_all_ctes(sql, ctes)
+        source_df = self._run_sql(sql, extra_frames=cte_frames or None)
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if strategy == "timestamp":
+            if updated_at is None:
+                raise DbtRuntimeError(
+                    "snapshot strategy 'timestamp' requires an 'updated_at' config"
+                )
+            source_df = source_df.with_columns(
+                pl.col(updated_at).cast(pl.Datetime("us")).alias("dbt_updated_at")
+            )
+        else:
+            source_df = source_df.with_columns(pl.lit(now).alias("dbt_updated_at"))
+
+        source_df = _add_scd_id(source_df, unique_key)
+
+        valid_to_sentinel: object = None
+        if valid_to_current_expr:
+            valid_to_sentinel = pl.select(
+                pl.sql_expr(valid_to_current_expr).cast(pl.Datetime("us"))
+            ).to_series()[0]
+
+        catalog = self.get_storage_catalog(relation.catalog)
+        if catalog.table_exists(relation):
+            self._validate_snapshot_meta_cols(
+                catalog, relation, meta_cols, hard_deletes
+            )
+            self._snapshot_apply_scd2(
+                catalog,
+                relation,
+                source_df,
+                unique_key,
+                strategy,
+                updated_at,
+                check_cols,
+                hard_deletes,
+                now,
+                meta_cols,
+                valid_to_sentinel,
+            )
+        else:
+            open_valid_to = pl.lit(valid_to_sentinel).cast(pl.Datetime("us"))
+            first_df = source_df.with_columns(
+                [
+                    pl.col("dbt_updated_at").alias("dbt_valid_from"),
+                    open_valid_to.alias("dbt_valid_to"),
+                ]
+            )
+            if hard_deletes == "new_record":
+                first_df = first_df.with_columns(pl.lit(False).alias("dbt_is_deleted"))
+            if meta_cols:
+                first_df = first_df.rename(
+                    {k: v for k, v in meta_cols.items() if k in first_df.columns}
+                )
+            catalog.write_relation(relation, first_df, [])
+
+    def _validate_snapshot_meta_cols(
+        self,
+        catalog: BaseCatalog,
+        relation: PolarsRelation,
+        meta_cols: dict[str, str],
+        hard_deletes: str,
+    ) -> None:
+        internal = {"dbt_valid_to", "dbt_valid_from", "dbt_scd_id", "dbt_updated_at"}
+        if hard_deletes == "new_record":
+            internal.add("dbt_is_deleted")
+        expected_external = {meta_cols.get(c, c) for c in internal}
+        existing_cols = set(catalog.get_relation(relation).collect_schema().names())
+        missing = expected_external - existing_cols
+        if missing:
+            raise DbtRuntimeError(
+                "Snapshot target is missing configured columns: "
+                + ", ".join(sorted(missing))
+            )
+
+    def _snapshot_apply_scd2(
+        self,
+        catalog: BaseCatalog,
+        relation: PolarsRelation,
+        source_df: pl.DataFrame,
+        unique_key: str | list[str],
+        strategy: str,
+        updated_at: str | None,
+        check_cols: str | list[str] | None,
+        hard_deletes: str,
+        now: datetime,
+        meta_cols: dict[str, str],
+        valid_to_sentinel: object,
+    ) -> None:
+        if hard_deletes not in ("ignore", "invalidate", "new_record"):
+            raise DbtRuntimeError(
+                f"dbt-polars snapshots do not support hard_deletes='{hard_deletes}'"
+            )
+
+        # Read existing snapshot; rename external column names to internal
+        meta_cols_rev = {v: k for k, v in meta_cols.items()}
+        existing = catalog.get_relation(relation).collect()
+        if meta_cols_rev:
+            existing = existing.rename(
+                {e: i for e, i in meta_cols_rev.items() if e in existing.columns}
+            )
+
+        open_filter = (
+            pl.col("dbt_valid_to") == valid_to_sentinel
+            if valid_to_sentinel is not None
+            else pl.col("dbt_valid_to").is_null()
+        )
+        existing_open = existing.filter(open_filter)
+
+        # Materialise any SQL expression keys as derived columns for joining
+        existing_for_join, keys = _resolve_join_keys(existing_open, unique_key)
+        source_for_join, _ = _resolve_join_keys(source_df, unique_key)
+
+        matched = existing_for_join.join(
+            source_for_join, on=keys, how="inner", suffix="_new"
+        )
+
+        if strategy == "timestamp":
+            changed_mask = pl.col(f"{updated_at}_new") > pl.col("dbt_updated_at")
+        else:
+            dbt_added = {"dbt_updated_at", "dbt_scd_id"}
+            if check_cols == "all":
+                raw_keys = (
+                    [unique_key] if isinstance(unique_key, str) else list(unique_key)
+                )
+                check_col_list = [
+                    c
+                    for c in source_df.columns
+                    if c not in raw_keys and c not in dbt_added
+                ]
+            else:
+                check_col_list = (
+                    [check_cols]
+                    if isinstance(check_cols, str)
+                    else list(check_cols or [])
+                )
+            changed_mask = pl.any_horizontal(
+                [pl.col(f"{c}_new").ne_missing(pl.col(c)) for c in check_col_list]
+            )
+
+        changed = matched.filter(changed_mask)
+
+        rows_to_close = changed.with_columns(
+            [
+                pl.col("dbt_updated_at_new").alias("dbt_valid_to"),
+                pl.col("dbt_updated_at_new").alias("dbt_updated_at"),
+            ]
+        ).select(existing_open.columns)
+
+        new_keys = source_for_join.join(existing_for_join, on=keys, how="anti")
+        changed_new = source_for_join.join(changed.select(keys), on=keys, how="semi")
+        base = pl.concat([new_keys, changed_new]).with_columns(
+            pl.col("dbt_updated_at").alias("dbt_valid_from")
+        )
+        if hard_deletes == "new_record":
+            base = base.with_columns(pl.lit(False).alias("dbt_is_deleted"))
+        open_valid_to = pl.lit(valid_to_sentinel).cast(base.schema["dbt_valid_from"])
+        rows_to_insert = base.with_columns(open_valid_to.alias("dbt_valid_to")).select(
+            existing_open.columns
+        )
+
+        if hard_deletes in ("invalidate", "new_record"):
+            deleted_open = existing_for_join.join(source_for_join, on=keys, how="anti")
+            if not deleted_open.is_empty():
+                rows_to_close = pl.concat(
+                    [
+                        rows_to_close,
+                        deleted_open.with_columns(
+                            [
+                                pl.lit(now).alias("dbt_valid_to"),
+                                pl.lit(now).alias("dbt_updated_at"),
+                            ]
+                        ).select(existing_open.columns),
+                    ]
+                )
+                if hard_deletes == "new_record":
+                    deleted_markers = _add_scd_id(
+                        deleted_open.with_columns(
+                            [
+                                pl.lit(now).alias("dbt_valid_from"),
+                                pl.lit(now).alias("dbt_updated_at"),
+                                open_valid_to.alias("dbt_valid_to"),
+                                pl.lit(True).alias("dbt_is_deleted"),
+                            ]
+                        ),
+                        unique_key,
+                    ).select(existing_open.columns)
+                    rows_to_insert = pl.concat([rows_to_insert, deleted_markers])
+
+        # Rename internal column names back to configured external names before writing
+        scd_id_col = meta_cols.get("dbt_scd_id", "dbt_scd_id")
+        if meta_cols:
+            rows_to_close = rows_to_close.rename(
+                {k: v for k, v in meta_cols.items() if k in rows_to_close.columns}
+            )
+            rows_to_insert = rows_to_insert.rename(
+                {k: v for k, v in meta_cols.items() if k in rows_to_insert.columns}
+            )
+        catalog.apply_snapshot_delta(
+            relation, rows_to_close, rows_to_insert, scd_id_col
+        )
 
     def execute(
         self,

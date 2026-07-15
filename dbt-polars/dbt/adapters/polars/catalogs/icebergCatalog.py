@@ -1,14 +1,56 @@
-from typing import Any
+from __future__ import annotations
+
+import re
+from typing import TYPE_CHECKING, Any, overload
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.catalogs.iceberg_write_utils import (
+    _append_in_single_snapshot,
+    _overwrite_scd_ids_and_append,
+    _replace_in_single_snapshot,
+    _sync_partition_spec,
+    _sync_schema,
+)
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
 
 import polars as pl
 
+if TYPE_CHECKING:
+    from pyiceberg.table import Table
+
 logger = AdapterLogger("polars")
+
+_UNSIGNED_TO_SIGNED: dict[type, type[pl.DataType]] = {
+    pl.UInt8: pl.Int8,
+    pl.UInt16: pl.Int16,
+    pl.UInt32: pl.Int32,
+    pl.UInt64: pl.Int64,
+}
+
+
+@overload
+def _cast_unsigned_to_signed(data: pl.DataFrame) -> pl.DataFrame: ...
+
+
+@overload
+def _cast_unsigned_to_signed(data: pl.LazyFrame) -> pl.LazyFrame: ...
+
+
+def _cast_unsigned_to_signed(
+    data: pl.DataFrame | pl.LazyFrame,
+) -> pl.DataFrame | pl.LazyFrame:
+    # Iceberg has no unsigned integer types; cast to the corresponding signed type
+    schema = data.collect_schema() if isinstance(data, pl.LazyFrame) else data.schema
+    casts = [
+        pl.col(name).cast(_UNSIGNED_TO_SIGNED[type(dtype)])
+        for name, dtype in schema.items()
+        if type(dtype) in _UNSIGNED_TO_SIGNED
+    ]
+    return data.with_columns(casts) if casts else data
+
 
 # Maps pyiceberg FileIO property names to Polars/object_store storage option keys.
 # Populated by credential vending from REST catalogs (e.g. Unity Catalog, Polaris).
@@ -21,16 +63,38 @@ _ICEBERG_TO_POLARS_STORAGE_OPTIONS: dict[str, str] = {
     "adls.tenant-id": "tenant_id",
 }
 
+# Matches adls.sas-token.<account>.dfs.core.windows.net (not the -expires-at-ms variant)
+_VENDED_SAS_RE = re.compile(r"^adls\.sas-token\.(.+)\.dfs\.core\.windows\.net$")
 
-def _scan_iceberg(tbl: Any) -> pl.LazyFrame:
-    """Scan an iceberg table, forwarding vended credentials to Polars' storage layer."""
+
+def _extract_vended_sas(io_props: dict, opts: dict) -> None:
+    if "sas_token" in opts:
+        return
+    for key, value in io_props.items():
+        m = _VENDED_SAS_RE.match(key)
+        if m:
+            opts["sas_token"] = value
+            opts.setdefault("account_name", m.group(1))
+            break
+
+
+_SPECIAL_EXTRACTORS = [_extract_vended_sas]
+
+
+def _storage_options(tbl: Table) -> dict[str, str] | None:
     io_props: dict[str, str] = getattr(getattr(tbl, "io", None), "properties", {})
-    storage_options = {
+    opts = {
         polars_key: io_props[iceberg_key]
         for iceberg_key, polars_key in _ICEBERG_TO_POLARS_STORAGE_OPTIONS.items()
         if iceberg_key in io_props
     }
-    return pl.scan_iceberg(tbl, storage_options=storage_options or None)
+    for extractor in _SPECIAL_EXTRACTORS:
+        extractor(io_props, opts)
+    return opts or None
+
+
+def _scan_iceberg(tbl: Table) -> pl.LazyFrame:
+    return pl.scan_iceberg(tbl, storage_options=_storage_options(tbl))
 
 
 def _apply_partial_update(
@@ -98,8 +162,8 @@ class IcebergCatalogConfig(CatalogConfig):
 class IcebergCatalog(BaseCatalog):
     config: IcebergCatalogConfig
 
-    def __init__(self, config: IcebergCatalogConfig) -> None:
-        super().__init__(config)
+    def __init__(self, config: IcebergCatalogConfig, project_root: str) -> None:
+        super().__init__(config, project_root)
         self._table_cache: dict[tuple[str, str], Any] = {}
         self._known_namespaces: set[str] = set()
 
@@ -114,7 +178,7 @@ class IcebergCatalog(BaseCatalog):
             )
         return self._catalog_instance
 
-    def _load_table(self, identifier: tuple[str, str]) -> Any:
+    def _load_table(self, identifier: tuple[str, str]) -> Table:
         """Return a cached Table, fetching from the catalog on first access."""
         if identifier not in self._table_cache:
             self._table_cache[identifier] = self._catalog.load_table(identifier)
@@ -182,22 +246,58 @@ class IcebergCatalog(BaseCatalog):
             self._catalog.purge_table(identifier)
             self._invalidate_table_cache(identifier)
 
-    def write_relation(self, relation: PolarsRelation, df: pl.DataFrame) -> None:
+    def get_partition_columns(self, relation: PolarsRelation) -> list[str]:
+        tbl = self._load_table(self._id(relation))
+        return [f.name for f in tbl.spec().fields]
+
+    def write_relation(
+        self,
+        relation: PolarsRelation,
+        data: pl.DataFrame | pl.LazyFrame,
+        partition_by: list[str],
+        model_config: dict | None = None,
+    ) -> None:
+        model_config = model_config or {}
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
+        data = _cast_unsigned_to_signed(data)
+        arrow_schema = (
+            data.collect_schema().to_arrow()
+            if isinstance(data, pl.LazyFrame)
+            else data.to_arrow().schema
+        )
+        missing = [c for c in partition_by if c not in arrow_schema.names]
+        if missing:
+            raise DbtRuntimeError(
+                f"partition_by column(s) not found in model: {', '.join(missing)}"
+            )
 
-        identifier = self._id(relation)
-        from pyiceberg.exceptions import NoSuchTableError
+        if not relation.identifier:
+            raise DbtRuntimeError("relation identifier cannot be empty")
 
-        try:
-            self._catalog.purge_table(identifier)
-            self._invalidate_table_cache(identifier)
-        except NoSuchTableError:
-            self.create_schema(relation)
-        tbl = self._catalog.create_table(identifier, schema=df.to_arrow().schema)
-        self._table_cache[identifier] = tbl
-        df.write_iceberg(tbl, mode="append")
+        target_id = self._id(relation)
+
+        self.create_schema(relation)
+
+        if self._catalog.table_exists(target_id):
+            tbl = self._load_table(target_id)
+            # Single commit: old snapshots remain until snapshot expiry,
+            # unlike the previous purge-and-rename.
+            with tbl.transaction() as transaction:
+                _sync_schema(transaction, tbl.schema(), arrow_schema)
+                _sync_partition_spec(transaction, partition_by)
+                _replace_in_single_snapshot(transaction, tbl.io, data, model_config)
+        else:
+            # Not create_table_transaction: Databricks Unity Catalog does not vend
+            # storage credentials on a stage-create response, so writes to the
+            # staged table fail. Create first (creates an empty, visible table),
+            # then write all data in one commit.
+            tbl = self._catalog.create_table(target_id, schema=arrow_schema)
+            self._table_cache[target_id] = tbl
+            with tbl.transaction() as transaction:
+                _sync_partition_spec(transaction, partition_by)
+                _append_in_single_snapshot(transaction, tbl.io, data, model_config)
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
@@ -233,15 +333,23 @@ class IcebergCatalog(BaseCatalog):
     def append_relation(
         self,
         relation: PolarsRelation,
-        df: pl.DataFrame,
+        data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
+        data = _cast_unsigned_to_signed(data)
         tbl = self._load_table(self._id(relation))
-        if allow_schema_evolution:
-            with tbl.update_schema() as update:
-                update.union_by_name(df.to_arrow().schema)
-
-        df.write_iceberg(tbl, mode="append")
+        with tbl.transaction() as transaction:
+            if allow_schema_evolution:
+                arrow_schema = (
+                    data.collect_schema().to_arrow()
+                    if isinstance(data, pl.LazyFrame)
+                    else data.to_arrow().schema
+                )
+                with transaction.update_schema() as update:
+                    update.union_by_name(arrow_schema)
+            _append_in_single_snapshot(transaction, tbl.io, data, model_config)
 
     def merge_relation(
         self,
@@ -252,6 +360,7 @@ class IcebergCatalog(BaseCatalog):
         incremental_predicates: list[str] | None = None,
         allow_schema_evolution: bool = False,
     ) -> None:
+        df = _cast_unsigned_to_signed(df)
         missing_keys = [k for k in keys if k not in df.columns]
         if missing_keys:
             raise DbtRuntimeError(
@@ -320,6 +429,31 @@ class IcebergCatalog(BaseCatalog):
 
         tbl = self._load_table(self._id(relation))
         tbl.delete(_build_key_delete_filter(keys, df))
+
+    def apply_snapshot_delta(
+        self,
+        relation: PolarsRelation,
+        rows_to_close: pl.DataFrame,
+        rows_to_insert: pl.DataFrame,
+        scd_id_col: str = "dbt_scd_id",
+    ) -> None:
+        if rows_to_close.is_empty() and rows_to_insert.is_empty():
+            return
+
+        tbl = self._load_table(self._id(relation))
+        if rows_to_close.is_empty():
+            with tbl.transaction() as transaction:
+                _append_in_single_snapshot(transaction, tbl.io, rows_to_insert, {})
+        else:
+            scd_ids = rows_to_close[scd_id_col].to_list()
+            all_new = _cast_unsigned_to_signed(
+                pl.concat([rows_to_close, rows_to_insert])
+            )
+            with tbl.transaction() as transaction:
+                _overwrite_scd_ids_and_append(
+                    tbl, transaction, tbl.io, scd_ids, all_new, scd_id_col
+                )
+        self._invalidate_table_cache(self._id(relation))
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
         tbl = self._load_table(self._id(relation))

@@ -37,7 +37,9 @@ dev = [
 ]
 
 [project.optional-dependencies]
-iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.9"]
+# Pinned: iceberg_write_utils.py uses private pyiceberg APIs
+# Test with each new adapter version if pyiceberg can be upgraded
+iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
 
 [build-system]
 requires = ["setuptools>=64"]
@@ -49,8 +51,15 @@ include = ["dbt*"]
 [tool.uv]
 config-settings = { editable_mode = "compat" }
 
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint.per-file-ignores]
+"tests/functional/adapter/simple_snapshot/fixtures.py" = ["E501"]
+
 [tool.pytest.ini_options]
-addopts = "-n auto"
+# CI runs with -n auto; keep -n 0 here for local development (easier debugging)
+addopts = "-n 0"
 markers = [
     "require_profiles(...): only run this test when --profile matches one of the listed names",
     "skip_profiles(...): skip this test when --profile matches one of the listed names",

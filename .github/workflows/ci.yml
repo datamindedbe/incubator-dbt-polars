@@ -29,7 +29,7 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests
-        run: uv run  --directory dbt-polars --python ${{ matrix.python-version }} pytest
+        run: uv run  --directory dbt-polars --python ${{ matrix.python-version }} pytest -n auto
 
   test-iceberg:
     name: "Test iceberg / py${{ matrix.python-version }} / ${{ matrix.deps }}"
@@ -52,7 +52,7 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} --extra iceberg ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests (iceberg catalog)
-        run: uv run --directory dbt-polars --python ${{ matrix.python-version }} pytest --profile iceberg
+        run: uv run --directory dbt-polars --python ${{ matrix.python-version }} pytest  -n auto --profile iceberg
 
   ruff:
     name: "Ruff"

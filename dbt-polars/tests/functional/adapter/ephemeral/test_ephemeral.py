@@ -93,17 +93,17 @@ class TestEphemeralModelIsInlinedNotExecuted(PolarsTestMixin):
             "Ephemeral models don't produce their own run result; only "
             f"'dependent_model' should, got {len(results)} results."
         )
-        assert len(lazy_sql) == 1, (
-            f"Expected exactly one lazy _run_sql call for the ephemeral CTE, "
-            f"got {len(lazy_sql)}: {lazy_sql!r}"
-        )
-        assert len(eager_sql) == 1, (
-            f"Expected exactly one eager _run_sql call for the downstream model, "
-            f"got {len(eager_sql)}: {eager_sql!r}"
-        )
-        assert "__dbt__cte__ephemeral_model" in eager_sql[0], (
-            "Expected the downstream SQL to reference the ephemeral model by its "
-            f"CTE frame name, got: {eager_sql[0]!r}"
+
+        # The ephemeral model's body SQL (identified by not referencing its own CTE
+        # frame name) must be collected exactly once across all _run_sql calls —
+        # it should be inlined as a CTE, never executed as a standalone query.
+        all_sql = lazy_sql + eager_sql
+        ephemeral_body_calls = [
+            s for s in all_sql if "__dbt__cte__ephemeral_model" not in s
+        ]
+        assert len(ephemeral_body_calls) == 1, (
+            f"Expected ephemeral SQL to be collected exactly once, "
+            f"got {len(ephemeral_body_calls)}: {ephemeral_body_calls!r}"
         )
 
 

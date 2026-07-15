@@ -139,9 +139,48 @@ class BasePythonIncrementalTests:
         assert polars_relation_row_count(project.adapter, "incremental") == 7
 
 
+_incremental_append_python = """
+import polars as pl
+
+def model(dbt, _):
+    dbt.config(materialized="incremental")
+    df = dbt.ref("m_1")
+    if dbt.is_incremental:
+        df = df.filter(pl.col("id") > 5)
+    return df
+"""
+
+
+class BasePythonIncrementalFullRefreshTests:
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"m_1.sql": m_1, "incremental.py": _incremental_append_python}
+
+    def test_full_refresh_recreates_table(self, project):
+        # initial run: dbt.is_incremental=False → all 5 rows written
+        run_dbt(["run"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+        # incremental run: dbt.is_incremental=True → filter id>5 → 0 new rows appended
+        run_dbt(["run", "-s", "incremental"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+        # full-refresh: table must be rebuilt from scratch → still 5 rows
+        # bug: without a full_refresh check in submit_python_job the existing table
+        # is kept and the result is appended, producing 10 rows instead of 5
+        run_dbt(["run", "-s", "incremental", "--full-refresh"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+
 class TestPythonModel(PolarsTestMixin, BasePythonModelTests):
     pass
 
 
 class TestPythonIncrementalModel(PolarsTestMixin, BasePythonIncrementalTests):
+    pass
+
+
+class TestPythonIncrementalFullRefresh(
+    PolarsTestMixin, BasePythonIncrementalFullRefreshTests
+):
     pass
