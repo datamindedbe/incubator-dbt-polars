@@ -167,7 +167,10 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
-    CatalogAdapters: dict[str, BaseCatalog] = {}
+
+    def __init__(self, config, mp_context):
+        super().__init__(config, mp_context)
+        self.CatalogAdapters: dict[str, BaseCatalog] = {}
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         connection = self.connections.get_thread_connection()
@@ -189,7 +192,9 @@ class PolarsAdapter(BaseAdapter):
         config = credentials.catalog_configs.get(name)
         if config is None:
             raise DbtRuntimeError(f"Unknown catalog {name}")
-        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](config)
+        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](
+            config, self.config.project_root
+        )
 
         return self.CatalogAdapters[name]
 

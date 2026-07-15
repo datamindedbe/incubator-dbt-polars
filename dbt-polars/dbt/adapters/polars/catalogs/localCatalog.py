@@ -34,8 +34,11 @@ class LocalCatalogConfig(CatalogConfig):
 class LocalCatalog(BaseCatalog):
     config: LocalCatalogConfig
 
-    def __init__(self, config: LocalCatalogConfig):
-        absolute_root = Path(config.root).resolve()
+    def __init__(self, config: LocalCatalogConfig, project_root: str):
+        root = Path(config.root)
+        if not root.is_absolute():
+            root = Path(project_root) / root
+        absolute_root = root.resolve()
         if " " in str(absolute_root):
             raise DbtRuntimeError(
                 f"LocalCatalog root resolves to '{absolute_root}', which contains "
@@ -44,7 +47,7 @@ class LocalCatalog(BaseCatalog):
                 "https://github.com/pola-rs/polars/issues/20944. Use a root path "
                 "that resolves to an absolute path without spaces."
             )
-        super().__init__(config)
+        super().__init__(config, project_root)
         self.absolute_root = absolute_root
 
     def _schema_path(self, schema: str) -> Path:
