@@ -167,7 +167,10 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
-    CatalogAdapters: dict[str, BaseCatalog] = {}
+
+    def __init__(self, config, mp_context):
+        super().__init__(config, mp_context)
+        self.CatalogAdapters: dict[str, BaseCatalog] = {}
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         connection = self.connections.get_thread_connection()
@@ -189,9 +192,14 @@ class PolarsAdapter(BaseAdapter):
         config = credentials.catalog_configs.get(name)
         if config is None:
             raise DbtRuntimeError(f"Unknown catalog {name}")
-        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](config)
+        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](
+            config, self.config.project_root
+        )
 
         return self.CatalogAdapters[name]
+
+    def build_catalog_relation(self, config) -> None:
+        return None
 
     @classmethod
     def date_function(cls):
@@ -577,8 +585,6 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(
                 "Could not locate expected CTE prefix in compiled code. "
                 "This is a dbt-polars bug — please report it."
-                f"Code: {stripped}"
-                f"Prefix {prefix_pattern}"
             )
 
         remainder = stripped[m.end() :].lstrip()
@@ -595,7 +601,7 @@ class PolarsAdapter(BaseAdapter):
         new_data: pl.DataFrame,
         on_schema_change: str,
         partition_by: list[str],
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> tuple[pl.DataFrame | None, bool]:
         """Apply on_schema_change policy before an incremental write.
 
@@ -606,6 +612,7 @@ class PolarsAdapter(BaseAdapter):
           - allow_evolution: True when the catalog should enable schema
             evolution on the append (new columns present and policy permits)
         """
+        model_config = model_config or {}
         existing = {
             col.name: col.dtype for col in self.get_columns_in_relation(relation)
         }
@@ -708,8 +715,9 @@ class PolarsAdapter(BaseAdapter):
         merge_exclude_columns: str | list[str] | None = None,
         incremental_predicates: str | list[str] | None = None,
         partition_by: str | list[str] | None = None,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         partition_by = _normalize_partition_by(partition_by)
         current_partitions = catalog.get_partition_columns(relation)
         if current_partitions != partition_by:
@@ -786,8 +794,9 @@ class PolarsAdapter(BaseAdapter):
         incremental_predicates: str | list[str] | None = None,
         extra_ctes: list | None = None,
         partition_by: str | list[str] | None = None,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
@@ -814,8 +823,9 @@ class PolarsAdapter(BaseAdapter):
         sql: str,
         extra_ctes: list | None = None,
         partition_by: str | list[str] | None = None,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
@@ -981,8 +991,6 @@ class PolarsAdapter(BaseAdapter):
         meta_cols: SnapshotMetaColumnNames | dict[str, str] | None = None,
         valid_to_current_expr: str | None = None,
     ) -> None:
-        print("Executing snapshot")
-
         if isinstance(meta_cols, SnapshotMetaColumnNames):
             meta_cols = {
                 key: value for key, value in meta_cols.to_dict().items() if value
@@ -995,7 +1003,7 @@ class PolarsAdapter(BaseAdapter):
         sql = self._strip_all_ctes(sql, ctes)
         source_df = self._run_sql(sql, extra_frames=cte_frames or None)
 
-        now = datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if strategy == "timestamp":
             if updated_at is None:
@@ -1170,25 +1178,27 @@ class PolarsAdapter(BaseAdapter):
                     ]
                 )
                 if hard_deletes == "new_record":
-                    deleted_markers = deleted_open.with_columns(
-                        [
-                            pl.lit(now).alias("dbt_valid_from"),
-                            pl.lit(now).alias("dbt_updated_at"),
-                            open_valid_to.alias("dbt_valid_to"),
-                            pl.lit(True).alias("dbt_is_deleted"),
-                        ]
+                    deleted_markers = _add_scd_id(
+                        deleted_open.with_columns(
+                            [
+                                pl.lit(now).alias("dbt_valid_from"),
+                                pl.lit(now).alias("dbt_updated_at"),
+                                open_valid_to.alias("dbt_valid_to"),
+                                pl.lit(True).alias("dbt_is_deleted"),
+                            ]
+                        ),
+                        unique_key,
                     ).select(existing_open.columns)
                     rows_to_insert = pl.concat([rows_to_insert, deleted_markers])
 
         # Rename internal column names back to configured external names before writing
         scd_id_col = meta_cols.get("dbt_scd_id", "dbt_scd_id")
         if meta_cols:
-            rename = {k: v for k, v in meta_cols.items()}
             rows_to_close = rows_to_close.rename(
-                {k: v for k, v in rename.items() if k in rows_to_close.columns}
+                {k: v for k, v in meta_cols.items() if k in rows_to_close.columns}
             )
             rows_to_insert = rows_to_insert.rename(
-                {k: v for k, v in rename.items() if k in rows_to_insert.columns}
+                {k: v for k, v in meta_cols.items() if k in rows_to_insert.columns}
             )
         catalog.apply_snapshot_delta(
             relation, rows_to_close, rows_to_insert, scd_id_col

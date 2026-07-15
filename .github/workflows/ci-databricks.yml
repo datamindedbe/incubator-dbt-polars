@@ -1,0 +1,39 @@
+name: CI (Databricks)
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+jobs:
+  test-iceberg-databricks:
+    name: "Test iceberg-databricks"
+    if: github.event.label.name == 'iceberg-databricks verified'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --python 3.12 --extra iceberg
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run tests (iceberg-databricks catalog)
+        env:
+          DATABRICKS_WORKSPACE_URL: ${{ secrets.DATABRICKS_WORKSPACE_URL }}
+          DATABRICKS_UC_CATALOG: ${{ secrets.DATABRICKS_UC_CATALOG }}
+        run: uv run --directory dbt-polars --python 3.12 pytest -n auto --profile iceberg-databricks

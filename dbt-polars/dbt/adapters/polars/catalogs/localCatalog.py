@@ -34,8 +34,11 @@ class LocalCatalogConfig(CatalogConfig):
 class LocalCatalog(BaseCatalog):
     config: LocalCatalogConfig
 
-    def __init__(self, config: LocalCatalogConfig):
-        absolute_root = Path(config.root).resolve()
+    def __init__(self, config: LocalCatalogConfig, project_root: str):
+        root = Path(config.root)
+        if not root.is_absolute():
+            root = Path(project_root) / root
+        absolute_root = root.resolve()
         if " " in str(absolute_root):
             raise DbtRuntimeError(
                 f"LocalCatalog root resolves to '{absolute_root}', which contains "
@@ -44,7 +47,7 @@ class LocalCatalog(BaseCatalog):
                 "https://github.com/pola-rs/polars/issues/20944. Use a root path "
                 "that resolves to an absolute path without spaces."
             )
-        super().__init__(config)
+        super().__init__(config, project_root)
         self.absolute_root = absolute_root
 
     def _schema_path(self, schema: str) -> Path:
@@ -89,8 +92,9 @@ class LocalCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
@@ -116,7 +120,7 @@ class LocalCatalog(BaseCatalog):
                 ignore={"mode", "target"},
                 merge={"delta_write_options": adapter_delta_opts},
             )
-            df.write_delta(path, mode="overwrite", overwrite_schema=True, **kwargs)
+            df.write_delta(path, mode="overwrite", **kwargs)
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
@@ -137,8 +141,9 @@ class LocalCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         path = str(self._relation_path(relation))
         adapter_delta_opts = {"schema_mode": "merge"} if allow_schema_evolution else {}
         write_mode = model_config.get("write_mode", "lazy")
@@ -242,6 +247,9 @@ class LocalCatalog(BaseCatalog):
         scd_id_col: str = "dbt_scd_id",
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
+            return
+        if rows_to_close.is_empty():
+            self.append_relation(relation, rows_to_insert)
             return
         staging = pl.concat([rows_to_close, rows_to_insert])
         dt = DeltaTable(str(self._relation_path(relation)))

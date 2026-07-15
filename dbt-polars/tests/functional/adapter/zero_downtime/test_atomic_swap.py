@@ -34,8 +34,7 @@ class TestNoAtomicTableSwap(PolarsTestMixin):
                 if not catalog.table_exists(relation):
                     if not gap_start:
                         gap_start.append(now)
-                    if gap_end:
-                        gap_end.clear()
+                    gap_end.clear()
                     gap_end.append(now)
                 time.sleep(0.001)
 

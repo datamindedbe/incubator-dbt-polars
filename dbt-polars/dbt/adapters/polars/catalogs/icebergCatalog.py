@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any, overload
 
 from dbt.adapters.contracts.relation import RelationType
@@ -62,18 +63,37 @@ _ICEBERG_TO_POLARS_STORAGE_OPTIONS: dict[str, str] = {
     "adls.tenant-id": "tenant_id",
 }
 
+# Matches adls.sas-token.<account>.dfs.core.windows.net (not the -expires-at-ms variant)
+_VENDED_SAS_RE = re.compile(r"^adls\.sas-token\.(.+)\.dfs\.core\.windows\.net$")
 
-def _storage_options(tbl: Any) -> dict[str, str] | None:
+
+def _extract_vended_sas(io_props: dict, opts: dict) -> None:
+    if "sas_token" in opts:
+        return
+    for key, value in io_props.items():
+        m = _VENDED_SAS_RE.match(key)
+        if m:
+            opts["sas_token"] = value
+            opts.setdefault("account_name", m.group(1))
+            break
+
+
+_SPECIAL_EXTRACTORS = [_extract_vended_sas]
+
+
+def _storage_options(tbl: Table) -> dict[str, str] | None:
     io_props: dict[str, str] = getattr(getattr(tbl, "io", None), "properties", {})
     opts = {
         polars_key: io_props[iceberg_key]
         for iceberg_key, polars_key in _ICEBERG_TO_POLARS_STORAGE_OPTIONS.items()
         if iceberg_key in io_props
     }
+    for extractor in _SPECIAL_EXTRACTORS:
+        extractor(io_props, opts)
     return opts or None
 
 
-def _scan_iceberg(tbl: Any) -> pl.LazyFrame:
+def _scan_iceberg(tbl: Table) -> pl.LazyFrame:
     return pl.scan_iceberg(tbl, storage_options=_storage_options(tbl))
 
 
@@ -142,8 +162,8 @@ class IcebergCatalogConfig(CatalogConfig):
 class IcebergCatalog(BaseCatalog):
     config: IcebergCatalogConfig
 
-    def __init__(self, config: IcebergCatalogConfig) -> None:
-        super().__init__(config)
+    def __init__(self, config: IcebergCatalogConfig, project_root: str) -> None:
+        super().__init__(config, project_root)
         self._table_cache: dict[tuple[str, str], Any] = {}
         self._known_namespaces: set[str] = set()
 
@@ -235,8 +255,9 @@ class IcebergCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
@@ -314,8 +335,9 @@ class IcebergCatalog(BaseCatalog):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         data = _cast_unsigned_to_signed(data)
         tbl = self._load_table(self._id(relation))
         with tbl.transaction() as transaction:

@@ -55,7 +55,7 @@ class BaseCatalog(ABC):
     Subclasses implement schema and relation management for a specific storage target.
     """
 
-    def __init__(self, config: CatalogConfig):
+    def __init__(self, config: CatalogConfig, project_root: str):
         self.config = config
 
     @abstractmethod
@@ -82,7 +82,7 @@ class BaseCatalog(ABC):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         partition_by: list[str],
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None: ...
 
     @abstractmethod
@@ -102,7 +102,7 @@ class BaseCatalog(ABC):
         relation: PolarsRelation,
         data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool = False,
-        model_config: dict = {},
+        model_config: dict | None = None,
     ) -> None: ...
 
     @abstractmethod

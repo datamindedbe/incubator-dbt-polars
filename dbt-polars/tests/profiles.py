@@ -1,3 +1,6 @@
+import os
+
+
 def local_catalog(name: str, root: str) -> dict:
     return {
         "type": "local",
@@ -43,19 +46,16 @@ def iceberg_target(base_path: str) -> dict:
     }
 
 
-_DATABRICKS_WORKSPACE_URL = "https://adb-7405609020332160.0.azuredatabricks.net"
-_DATABRICKS_UC_CATALOG = "managed"
-_DATABRICKS_RESOURCE_ID = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d"
-
-
 def get_databricks_token() -> str:
     import requests
     from azure.identity import DefaultAzureCredential
 
+    DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
+
     credential = DefaultAzureCredential(exclude_managed_identity_credential=True)
-    azure_token = credential.get_token(f"{_DATABRICKS_RESOURCE_ID}/.default")
+    azure_token = credential.get_token("2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default")
     response = requests.post(
-        f"{_DATABRICKS_WORKSPACE_URL}/api/2.0/token/create",
+        f"{DATABRICKS_WORKSPACE_URL}/api/2.0/token/create",
         headers={"Authorization": f"Bearer {azure_token.token}"},
         json={"lifetime_seconds": 3600, "comment": "pyiceberg session"},
     )
@@ -64,13 +64,16 @@ def get_databricks_token() -> str:
 
 
 def iceberg_databricks_catalog(token: str) -> dict:
+    DATABRICKS_UC_CATALOG = os.environ.get("DATABRICKS_UC_CATALOG")
+    DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
+
     return {
         "type": "iceberg",
         "pyiceberg_type": "rest",
-        "name": _DATABRICKS_UC_CATALOG,
-        "uri": f"{_DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
+        "name": DATABRICKS_UC_CATALOG,
+        "uri": f"{DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
         "token": token,
-        "warehouse": _DATABRICKS_UC_CATALOG,
+        "warehouse": DATABRICKS_UC_CATALOG,
     }
 
 
@@ -84,12 +87,15 @@ def iceberg_databricks_target(token: str) -> dict:
 def get_databricks_pyiceberg_catalog(token: str):
     from pyiceberg.catalog import load_catalog
 
+    DATABRICKS_UC_CATALOG = os.environ.get("DATABRICKS_UC_CATALOG")
+    DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
+
     return load_catalog(
-        _DATABRICKS_UC_CATALOG,
+        DATABRICKS_UC_CATALOG,
         **{
             "type": "rest",
-            "uri": f"{_DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
+            "uri": f"{DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
             "token": token,
-            "warehouse": _DATABRICKS_UC_CATALOG,
+            "warehouse": DATABRICKS_UC_CATALOG,
         },
     )
