@@ -702,7 +702,6 @@ class PolarsAdapter(BaseAdapter):
         update_lower = {c.lower() for c in update}
         return [c for c in dest_cols if c.lower() not in update_lower]
 
-    @available
     def _incremental_write(
         self,
         catalog: BaseCatalog,
@@ -978,6 +977,7 @@ class PolarsAdapter(BaseAdapter):
         table = table_from_data(summary.to_dicts(), summary.columns)
         return AdapterResponse(_message="OK"), table
 
+    @available
     def polars_execute_snapshot(
         self,
         relation: PolarsRelation,
