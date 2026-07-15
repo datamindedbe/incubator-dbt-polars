@@ -37,9 +37,9 @@ dev = [
 ]
 
 [project.optional-dependencies]
-# Pinned upper bound: iceberg_write_utils.py uses private pyiceberg APIs
-# (_dataframe_to_data_files, ArrowScan). Re-test when bumping past this bound.
-iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.9,<0.12"]
+# Pinned: iceberg_write_utils.py uses private pyiceberg APIs
+# Test with each new adapter version if pyiceberg can be upgraded
+iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
 
 [build-system]
 requires = ["setuptools>=64"]

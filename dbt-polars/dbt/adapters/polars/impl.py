@@ -198,6 +198,9 @@ class PolarsAdapter(BaseAdapter):
 
         return self.CatalogAdapters[name]
 
+    def build_catalog_relation(self, config) -> None:
+        return None
+
     @classmethod
     def date_function(cls):
         """

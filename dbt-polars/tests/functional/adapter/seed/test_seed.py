@@ -145,6 +145,28 @@ class TestSimpleSeedWithBOMIceberg(BaseSimpleSeedWithBOM):
 
 
 @pytest.mark.skip_profiles("iceberg-databricks")
+class TestSeedWithExplicitCatalogParsing:
+    """Manifest parsing must not raise DbtCatalogIntegrationNotFoundError
+    when seeds carry an explicit +catalog config."""
+
+    @pytest.fixture(scope="class")
+    def seeds(self):
+        return {"seed_actual.csv": seeds.seed__actual_csv}
+
+    @pytest.fixture(scope="class")
+    def project_config_update(self):
+        return {
+            "seeds": {
+                "quote_columns": False,
+                "+catalog": "local2",
+            },
+        }
+
+    def test_parse_with_explicit_catalog(self, project):
+        util.run_dbt(["parse"])
+
+
+@pytest.mark.skip_profiles("iceberg-databricks")
 class TestSeedWithExplicitCatalog:
     """Verify that a seed with an explicit catalog config is written
     to the correct catalog."""
