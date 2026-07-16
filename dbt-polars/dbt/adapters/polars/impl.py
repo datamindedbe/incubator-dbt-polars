@@ -487,11 +487,28 @@ class PolarsAdapter(BaseAdapter):
     def _is_python_cte(self, cte: dict) -> bool:
         return "def model(" in cte["sql"]
 
+    @overload
+    def _run_python_model(
+        self,
+        python_code: str,
+        cte_frames: dict[str, pl.LazyFrame] | None = ...,
+        allow_bool: Literal[False] = ...,
+    ) -> pl.LazyFrame: ...
+
+    @overload
+    def _run_python_model(
+        self,
+        python_code: str,
+        cte_frames: dict[str, pl.LazyFrame] | None = ...,
+        allow_bool: Literal[True] = ...,
+    ) -> pl.LazyFrame | bool: ...
+
     def _run_python_model(
         self,
         python_code: str,
         cte_frames: dict[str, pl.LazyFrame] | None = None,
-    ) -> pl.LazyFrame:
+        allow_bool: bool = False,
+    ) -> pl.LazyFrame | bool:
         namespace: dict[str, Any] = {}
         exec(python_code, namespace)  # noqa: S102
 
@@ -518,6 +535,11 @@ class PolarsAdapter(BaseAdapter):
         result = namespace["model"](dbt_obj, pl)
         if isinstance(result, pl.DataFrame):
             return result.lazy()
+        if isinstance(result, bool) and not allow_bool:
+            raise DbtRuntimeError(
+                "Python model code returned a boolean; only Python singular tests "
+                "may return a boolean pass/fail result."
+            )
         return result
 
     def _execute_python_cte(
@@ -680,7 +702,6 @@ class PolarsAdapter(BaseAdapter):
         update_lower = {c.lower() for c in update}
         return [c for c in dest_cols if c.lower() not in update_lower]
 
-    @available
     def _incremental_write(
         self,
         catalog: BaseCatalog,
@@ -864,6 +885,97 @@ class PolarsAdapter(BaseAdapter):
             )
 
         return AdapterResponse(_message="OK")
+
+    @available
+    def polars_execute_sql_test(
+        self,
+        sql: str,
+        extra_ctes: list | None = None,
+        limit: int | None = None,
+        fail_calc: str = "count(*)",
+        warn_if: str = "!= 0",
+        error_if: str = "!= 0",
+        store_failures_relation: PolarsRelation | None = None,
+    ) -> tuple[AdapterResponse, agate.Table]:
+        extra_ctes = extra_ctes or []
+        cte_frames = self._evaluate_ctes(extra_ctes)
+        stripped_sql = self._strip_all_ctes(sql, extra_ctes)
+
+        result = self._run_sql(
+            stripped_sql, eager=False, extra_frames=cte_frames or None
+        )
+
+        if limit is not None:
+            result = result.limit(limit)
+        frame = result.collect()
+
+        if store_failures_relation is not None:
+            self.get_storage_catalog(store_failures_relation.catalog).write_relation(
+                store_failures_relation, frame, []
+            )
+
+        summary = frame.select(
+            pl.sql_expr(fail_calc).alias("failures"),
+            pl.sql_expr(f"{fail_calc} {warn_if}").alias("should_warn"),
+            pl.sql_expr(f"{fail_calc} {error_if}").alias("should_error"),
+        )
+        table = table_from_data(summary.to_dicts(), summary.columns)
+        return AdapterResponse(_message="OK"), table
+
+    @available
+    def execute_python_test(
+        self,
+        parsed_model: dict,
+        compiled_code: str,
+        limit: int | None = None,
+        fail_calc: str = "count(*)",
+        warn_if: str = "!= 0",
+        error_if: str = "!= 0",
+        store_failures_relation: PolarsRelation | None = None,
+    ) -> tuple[AdapterResponse, agate.Table]:
+        sql_header = parsed_model.get("config", {}).get("sql_header")
+        if sql_header:
+            raise DbtRuntimeError(
+                "sql_header is not supported for Python singular tests"
+            )
+        extra_ctes = parsed_model.get("extra_ctes", [])
+        cte_frames = self._evaluate_ctes(extra_ctes)
+        python_code = self._strip_all_ctes(compiled_code, extra_ctes)
+
+        result = self._run_python_model(
+            python_code, cte_frames or None, allow_bool=True
+        )
+
+        if isinstance(result, bool):
+            failures = 0 if result else 1
+            table = table_from_data(
+                [
+                    {
+                        "failures": failures,
+                        "should_warn": not result,
+                        "should_error": not result,
+                    }
+                ],
+                ["failures", "should_warn", "should_error"],
+            )
+            return AdapterResponse(_message="OK"), table
+
+        if limit is not None:
+            result = result.limit(limit)
+        frame = result.collect()
+
+        if store_failures_relation is not None:
+            self.get_storage_catalog(store_failures_relation.catalog).write_relation(
+                store_failures_relation, frame, []
+            )
+
+        summary = frame.select(
+            pl.sql_expr(fail_calc).alias("failures"),
+            pl.sql_expr(f"{fail_calc} {warn_if}").alias("should_warn"),
+            pl.sql_expr(f"{fail_calc} {error_if}").alias("should_error"),
+        )
+        table = table_from_data(summary.to_dicts(), summary.columns)
+        return AdapterResponse(_message="OK"), table
 
     @available
     def polars_execute_snapshot(

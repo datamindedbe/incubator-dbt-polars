@@ -11,13 +11,6 @@ class TestNoAtomicTableSwap(PolarsTestMixin):
     def models(self):
         return {"my_model.sql": "select 1 as id"}
 
-    # @pytest.mark.xfail(
-    #     strict=True,
-    #     reason=(
-    #         "dbt-polars drops then writes (no atomic swap); "
-    #         "table is inaccessible during the write window"
-    #     ),
-    # )
     def test_table_always_accessible_during_refresh(self, project):
         run_dbt(["run"])  # initial creation
 

@@ -36,6 +36,7 @@ class BaseSingularTestsEphemeral:
     def project_config_update(self):
         return {
             "name": "singular_tests_ephemeral",
+            "models": {"+materialized": "table"},
         }
 
     @pytest.fixture(autouse=True)
