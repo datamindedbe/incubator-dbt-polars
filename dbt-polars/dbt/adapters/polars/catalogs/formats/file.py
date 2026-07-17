@@ -9,32 +9,44 @@ import polars as pl
 class FileFormat:
     @staticmethod
     def write(
-        path: Path,
+        path: str | Path,
         data: pl.DataFrame | pl.LazyFrame,
         fmt: str,
         model_config: dict,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
         spec = FILE_FORMATS[fmt]
-        kwargs = get_write_options(spec.sink, model_config, ignore={"path"})
+        kwargs = get_write_options(
+            spec.sink, model_config, ignore={"path", "storage_options"}
+        )
         lf = data if isinstance(data, pl.LazyFrame) else data.lazy()
-        spec.sink(lf, path, **kwargs)
+        spec.sink(lf, path, storage_options=storage_options, **kwargs)
 
     @staticmethod
-    def read(path: Path, fmt: str, read_options: dict) -> pl.LazyFrame:
+    def read(
+        path: str | Path,
+        fmt: str,
+        read_options: dict,
+        storage_options: dict[str, str] | None = None,
+    ) -> pl.LazyFrame:
         spec = FILE_FORMATS[fmt]
         valid = frozenset(inspect.signature(spec.scan).parameters) - {"source", "path"}
         kwargs = {k: v for k, v in read_options.items() if k in valid}
+        kwargs["storage_options"] = storage_options
         return spec.scan(path, **kwargs)
 
     @staticmethod
     def append(
-        path: Path,
+        path: str | Path,
         fmt: str,
         data: pl.DataFrame | pl.LazyFrame,
         model_config: dict,
         read_options: dict,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
-        existing = FileFormat.read(path, fmt, read_options).collect()
+        existing = FileFormat.read(
+            path, fmt, read_options, storage_options=storage_options
+        ).collect()
         new = data.collect() if isinstance(data, pl.LazyFrame) else data
         if FILE_FORMATS[fmt].auto_cast:
             cast_exprs = [
@@ -49,19 +61,23 @@ class FileFormat:
             pl.concat([existing, new], how="diagonal_relaxed").lazy(),
             fmt,
             model_config,
+            storage_options=storage_options,
         )
 
     @staticmethod
     def merge(
-        path: Path,
+        path: str | Path,
         fmt: str,
         df: pl.DataFrame,
         keys: list[str],
         except_cols: list[str] | None,
         _incremental_predicates: list[str] | None,
         read_options: dict,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
-        existing = FileFormat.read(path, fmt, read_options).collect()
+        existing = FileFormat.read(
+            path, fmt, read_options, storage_options=storage_options
+        ).collect()
 
         if FILE_FORMATS[fmt].auto_cast:
             align_casts = [
@@ -102,36 +118,51 @@ class FileFormat:
 
         all_cols = [*existing.columns, *new_schema_cols]
         merged = pl.concat([updated.select(all_cols), new_rows.select(all_cols)])
-        FileFormat.write(path, merged.lazy(), fmt, {})
+        FileFormat.write(path, merged.lazy(), fmt, {}, storage_options=storage_options)
 
     @staticmethod
     def delete_matched(
-        path: Path,
+        path: str | Path,
         fmt: str,
         df: pl.DataFrame,
         keys: list[str],
         _incremental_predicates: list[str] | None,
         read_options: dict,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
-        existing = FileFormat.read(path, fmt, read_options).collect()
+        existing = FileFormat.read(
+            path, fmt, read_options, storage_options=storage_options
+        ).collect()
         result = existing.join(df.select(keys), on=keys, how="anti")
-        FileFormat.write(path, result.lazy(), fmt, {})
+        FileFormat.write(path, result.lazy(), fmt, {}, storage_options=storage_options)
 
     @staticmethod
-    def truncate(path: Path, fmt: str, read_options: dict) -> None:
-        schema = FileFormat.read(path, fmt, read_options).schema
-        FileFormat.write(path, pl.LazyFrame(schema=schema), fmt, {})
+    def truncate(
+        path: str | Path,
+        fmt: str,
+        read_options: dict,
+        storage_options: dict[str, str] | None = None,
+    ) -> None:
+        schema = FileFormat.read(
+            path, fmt, read_options, storage_options=storage_options
+        ).schema
+        FileFormat.write(
+            path, pl.LazyFrame(schema=schema), fmt, {}, storage_options=storage_options
+        )
 
     @staticmethod
     def apply_snapshot(
-        path: Path,
+        path: str | Path,
         fmt: str,
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
         scd_id_col: str,
         read_options: dict,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
-        existing = FileFormat.read(path, fmt, read_options).collect()
+        existing = FileFormat.read(
+            path, fmt, read_options, storage_options=storage_options
+        ).collect()
         updated = existing.update(rows_to_close, on=scd_id_col, how="left")
         result = pl.concat([updated, rows_to_insert])
-        FileFormat.write(path, result.lazy(), fmt, {})
+        FileFormat.write(path, result.lazy(), fmt, {}, storage_options=storage_options)

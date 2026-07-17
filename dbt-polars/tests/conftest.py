@@ -9,11 +9,14 @@ import pytest
 
 from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
+    azure_schemas_as_containers_target,
+    azure_target,
     default_target,
     get_databricks_pyiceberg_catalog,
     get_databricks_token,
     iceberg_databricks_target,
     iceberg_target,
+    s3_target,
 )
 from tests.utils import _resolve_relation, polars_check_relations_equal
 
@@ -27,7 +30,14 @@ def pytest_addoption(parser):
     parser.addoption(
         "--profile",
         dest="profile",
-        choices=["local", "iceberg", "iceberg-databricks"],
+        choices=[
+            "local",
+            "iceberg",
+            "iceberg-databricks",
+            "azure",
+            "azure-containers",
+            "s3",
+        ],
         default="local",
         help=(
             "dbt profile to use for tests (determines the catalog backend). "
@@ -80,14 +90,35 @@ def databricks_token(request):
     return get_databricks_token()
 
 
+@pytest.fixture(scope="session")
+def azure_storage_token(request):
+    if request.config.option.profile not in ("azure", "azure-containers"):
+        return None
+    from azure.identity import DefaultAzureCredential
+
+    return (
+        DefaultAzureCredential(exclude_managed_identity_credential=True)
+        .get_token("https://storage.azure.com/.default")
+        .token
+    )
+
+
 @pytest.fixture(scope="class")
-def dbt_profile_target(request, tmp_path_factory, databricks_token):
+def dbt_profile_target(
+    request, tmp_path_factory, databricks_token, azure_storage_token
+):
     profile = request.config.option.profile
     if profile == "iceberg":
         base = str(tmp_path_factory.mktemp("iceberg"))
         return iceberg_target(base)
     if profile == "iceberg-databricks":
         return iceberg_databricks_target(databricks_token)
+    if profile == "azure":
+        return azure_target(azure_storage_token)
+    if profile == "azure-containers":
+        return azure_schemas_as_containers_target(azure_storage_token)
+    if profile == "s3":
+        return s3_target()
     return default_target()
 
 
@@ -112,6 +143,87 @@ def unique_schema(request, prefix) -> str:
 @pytest.fixture(scope="class")
 def project_root(tmpdir_factory):
     return tmpdir_factory.mktemp("project")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_azure_test_schemas(request):
+    yield
+    if request.config.option.profile != "azure":
+        return
+    import os
+
+    from azure.identity import DefaultAzureCredential
+    from azure.storage.blob import BlobServiceClient
+
+    account_name = os.environ.get("AZURE_STORAGE_ACCOUNT", "")
+    container = os.environ.get("AZURE_STORAGE_CONTAINER", "")
+    prefix = os.environ.get("AZURE_STORAGE_PREFIX", "dbt-test")
+    if not account_name or not container:
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    client = BlobServiceClient(
+        f"https://{account_name}.blob.core.windows.net",
+        credential=DefaultAzureCredential(exclude_managed_identity_credential=True),
+    ).get_container_client(container)
+
+    depth_groups: dict[int, list[str]] = {}
+    for blob in client.list_blobs(name_starts_with=f"{prefix}/"):
+        if "/test" in blob.name:
+            depth = blob.name.rstrip("/").count("/")
+            depth_groups.setdefault(depth, []).append(blob.name)
+
+    for depth in sorted(depth_groups.keys(), reverse=True):
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            list(executor.map(client.delete_blob, depth_groups[depth]))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_azure_containers_test_schemas(request):
+    yield
+    if request.config.option.profile != "azure-containers":
+        return
+    import os
+
+    from azure.identity import DefaultAzureCredential
+    from azure.storage.blob import BlobServiceClient
+
+    account_name = os.environ.get("AZURE_STORAGE_ACCOUNT", "")
+    if not account_name:
+        return
+    service = BlobServiceClient(
+        f"https://{account_name}.blob.core.windows.net",
+        credential=DefaultAzureCredential(exclude_managed_identity_credential=True),
+    )
+    for container in service.list_containers():
+        name = container["name"]
+        if name.startswith("test") and "_azure_containers_" in name:
+            service.delete_container(name)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_s3_test_schemas(request):
+    yield
+    if request.config.option.profile != "s3":
+        return
+    import os
+
+    import boto3
+
+    bucket = os.environ.get("AWS_S3_BUCKET", "")
+    prefix = os.environ.get("AWS_S3_PREFIX", "dbt-test")
+    if not bucket:
+        return
+    s3 = boto3.client("s3")
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/"):
+        objects = [
+            {"Key": obj["Key"]}
+            for obj in page.get("Contents", [])
+            if "/test" in obj["Key"]
+        ]
+        if objects:
+            s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -22,8 +22,7 @@ dependencies = [
     "dbt-adapters>=1.0.0",
     "dbt-common>=1.0.0",
     "dbt-core>=1.11.2",
-    # polars<2: str->Date cast is deprecated in 2.0; pin until adapter is updated
-    "polars[deltalake,pyarrow]>=0.19,<2",
+    "polars[deltalake,pyarrow]>=1.0.0,<2",
     "sqlglot>=1.0.0",
 ]
 
@@ -40,6 +39,8 @@ dev = [
 # Pinned: iceberg_write_utils.py uses private pyiceberg APIs
 # Test with each new adapter version to see if pyiceberg can be upgraded
 iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
+s3 = ["boto3>=1.20.0"]
+azure = ["azure-storage-blob>=12.0.0", "azure-identity>=1.0.0"]
 
 [build-system]
 requires = ["setuptools>=64"]

@@ -9,11 +9,12 @@ import polars as pl
 class DeltaFormat:
     @staticmethod
     def write(
-        path: Path,
+        path: str | Path,
         data: pl.DataFrame | pl.LazyFrame,
         mode: str,
         model_config: dict,
         partition_by: list[str] | None = None,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
         adapter_delta_opts: dict = {
             "schema_mode": "overwrite" if mode == "overwrite" else "merge"
@@ -27,30 +28,38 @@ class DeltaFormat:
             kwargs = get_write_options(
                 pl.LazyFrame.sink_delta,
                 model_config,
-                ignore={"mode", "target"},
+                ignore={"mode", "target", "storage_options"},
                 merge={"delta_write_options": adapter_delta_opts},
             )
-            data.sink_delta(str_path, mode=mode, **kwargs)  # type: ignore[call-overload]
+            data.sink_delta(
+                str_path, mode=mode, storage_options=storage_options, **kwargs
+            )  # type: ignore[call-overload]
         else:
             df = data.collect() if isinstance(data, pl.LazyFrame) else data
             kwargs = get_write_options(
                 pl.DataFrame.write_delta,
                 model_config,
-                ignore={"mode", "target"},
+                ignore={"mode", "target", "storage_options"},
                 merge={"delta_write_options": adapter_delta_opts},
             )
-            df.write_delta(str_path, mode=mode, **kwargs)  # type: ignore[call-overload]
+            df.write_delta(
+                str_path, mode=mode, storage_options=storage_options, **kwargs
+            )  # type: ignore[call-overload]
 
     @staticmethod
-    def read(path: Path) -> pl.LazyFrame:
-        return pl.scan_delta(str(path))
+    def read(
+        path: str | Path,
+        storage_options: dict[str, str] | None = None,
+    ) -> pl.LazyFrame:
+        return pl.scan_delta(str(path), storage_options=storage_options)
 
     @staticmethod
     def append(
-        path: Path,
+        path: str | Path,
         data: pl.DataFrame | pl.LazyFrame,
         allow_schema_evolution: bool,
         model_config: dict,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
         adapter_delta_opts = {"schema_mode": "merge"} if allow_schema_evolution else {}
         write_mode = model_config.get("write_mode", "lazy")
@@ -59,35 +68,40 @@ class DeltaFormat:
             kwargs = get_write_options(
                 pl.LazyFrame.sink_delta,
                 model_config,
-                ignore={"mode", "target"},
+                ignore={"mode", "target", "storage_options"},
                 merge={"delta_write_options": adapter_delta_opts},
             )
-            data.sink_delta(str_path, mode="append", **kwargs)
+            data.sink_delta(
+                str_path, mode="append", storage_options=storage_options, **kwargs
+            )
         else:
             df = data.collect() if isinstance(data, pl.LazyFrame) else data
             kwargs = get_write_options(
                 pl.DataFrame.write_delta,
                 model_config,
-                ignore={"mode", "target"},
+                ignore={"mode", "target", "storage_options"},
                 merge={"delta_write_options": adapter_delta_opts},
             )
-            df.write_delta(str_path, mode="append", **kwargs)
+            df.write_delta(
+                str_path, mode="append", storage_options=storage_options, **kwargs
+            )
 
     @staticmethod
     def merge(
-        path: Path,
+        path: str | Path,
         df: pl.DataFrame,
         keys: list[str],
         except_cols: list[str] | None,
         incremental_predicates: list[str] | None,
         allow_schema_evolution: bool,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
         predicate = " AND ".join(
             f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
         )
         if incremental_predicates:
             predicate += " AND " + " AND ".join(incremental_predicates)
-        dt = DeltaTable(str(path))
+        dt = DeltaTable(str(path), storage_options=storage_options)
         (
             dt.merge(
                 df.to_arrow(),
@@ -102,17 +116,18 @@ class DeltaFormat:
 
     @staticmethod
     def delete_matched(
-        path: Path,
+        path: str | Path,
         df: pl.DataFrame,
         keys: list[str],
         incremental_predicates: list[str] | None,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
         predicate = " AND ".join(
             f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
         )
         if incremental_predicates:
             predicate += " AND " + " AND ".join(incremental_predicates)
-        dt = DeltaTable(str(path))
+        dt = DeltaTable(str(path), storage_options=storage_options)
         (
             dt.merge(
                 df.to_arrow(),
@@ -125,18 +140,22 @@ class DeltaFormat:
         )
 
     @staticmethod
-    def truncate(path: Path) -> None:
-        DeltaTable(str(path)).delete()
+    def truncate(
+        path: str | Path,
+        storage_options: dict[str, str] | None = None,
+    ) -> None:
+        DeltaTable(str(path), storage_options=storage_options).delete()
 
     @staticmethod
     def apply_snapshot(
-        path: Path,
+        path: str | Path,
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
         scd_id_col: str,
+        storage_options: dict[str, str] | None = None,
     ) -> None:
         staging = pl.concat([rows_to_close, rows_to_insert])
-        dt = DeltaTable(str(path))
+        dt = DeltaTable(str(path), storage_options=storage_options)
         (
             dt.merge(
                 staging.to_arrow(),
@@ -150,26 +169,53 @@ class DeltaFormat:
         )
 
     @staticmethod
-    def get_partition_columns(path: Path) -> list[str]:
-        return DeltaTable(str(path)).metadata().partition_columns
+    def get_partition_columns(
+        path: str | Path,
+        storage_options: dict[str, str] | None = None,
+    ) -> list[str]:
+        return (
+            DeltaTable(str(path), storage_options=storage_options)
+            .metadata()
+            .partition_columns
+        )
 
     @staticmethod
-    def set_relation_comment(path: Path, comment: str) -> None:
-        DeltaTable(str(path)).alter.set_table_description(comment)
+    def set_relation_comment(
+        path: str | Path,
+        comment: str,
+        storage_options: dict[str, str] | None = None,
+    ) -> None:
+        DeltaTable(
+            str(path), storage_options=storage_options
+        ).alter.set_table_description(comment)
 
     @staticmethod
-    def get_relation_comment(path: Path) -> str | None:
-        return DeltaTable(str(path)).metadata().description
+    def get_relation_comment(
+        path: str | Path,
+        storage_options: dict[str, str] | None = None,
+    ) -> str | None:
+        return (
+            DeltaTable(str(path), storage_options=storage_options)
+            .metadata()
+            .description
+        )
 
     @staticmethod
-    def set_column_comments(path: Path, comments: dict[str, str]) -> None:
-        dt = DeltaTable(str(path))
+    def set_column_comments(
+        path: str | Path,
+        comments: dict[str, str],
+        storage_options: dict[str, str] | None = None,
+    ) -> None:
+        dt = DeltaTable(str(path), storage_options=storage_options)
         for column, comment in comments.items():
             dt.alter.set_column_metadata(column, {"comment": comment})
 
     @staticmethod
-    def get_column_comments(path: Path) -> dict[str, str]:
-        dt = DeltaTable(str(path))
+    def get_column_comments(
+        path: str | Path,
+        storage_options: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        dt = DeltaTable(str(path), storage_options=storage_options)
         return {
             field.name: field.metadata["comment"]
             for field in dt.schema().fields
