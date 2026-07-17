@@ -1,7 +1,27 @@
 from datetime import timedelta
 
 import polars as pl
-from dbt.tests.util import get_connection, relation_from_name
+from dbt.adapters.polars.relation import PolarsRelation
+from dbt.tests.util import get_connection
+from dbt.tests.util import relation_from_name as _original_relation_from_name
+
+
+def _resolve_relation(adapter, name: str) -> PolarsRelation:
+    """Like relation_from_name but enriches with file_format from _node_configs.
+
+    relation_from_name always produces file_format="delta". This looks up the
+    node config cached by set_relations_cache so the returned relation carries
+    the correct format (parquet, csv, etc.) without needing a connection.
+    """
+    bare = _original_relation_from_name(adapter, name)
+    node_config = getattr(adapter, "_node_configs", {}).get(
+        (bare.database, bare.schema, bare.identifier)
+    )
+    if node_config is not None:
+        return PolarsRelation.create_from(
+            quoting=adapter.config, relation_config=node_config
+        )
+    return bare
 
 
 def polars_relation_row_count(adapter, relation_name: str) -> int:
@@ -11,7 +31,7 @@ def polars_relation_row_count(adapter, relation_name: str) -> int:
     `len(project.run_sql(f"select * from {schema}.{name}", fetch="all"))`.
     """
     with get_connection(adapter):
-        relation = relation_from_name(adapter, relation_name)
+        relation = _resolve_relation(adapter, relation_name)
         return len(
             adapter.get_storage_catalog(relation.database)
             .get_relation(relation)
@@ -28,7 +48,7 @@ def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
     existing schema (e.g. date columns given as ISO strings) before appending.
     """
     with get_connection(adapter):
-        relation = relation_from_name(adapter, relation_name)
+        relation = _resolve_relation(adapter, relation_name)
         catalog = adapter.get_storage_catalog(relation.database)
         existing_schema = catalog.get_relation(relation).collect_schema()
         df = pl.DataFrame(rows).cast(existing_schema)
@@ -38,7 +58,7 @@ def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
 def polars_relation_partition_columns(adapter, relation_name: str) -> list[str]:
     """Partition columns of a relation, read directly via the Polars catalog."""
     with get_connection(adapter):
-        relation = relation_from_name(adapter, relation_name)
+        relation = _resolve_relation(adapter, relation_name)
         return adapter.get_storage_catalog(relation.database).get_partition_columns(
             relation
         )
@@ -57,7 +77,7 @@ def polars_read_relation(
     available). Returns rows as a list of tuples, like a DB-API cursor fetchall.
     """
     with get_connection(adapter):
-        relation = relation_from_name(adapter, relation_name)
+        relation = _resolve_relation(adapter, relation_name)
         df = (
             adapter.get_storage_catalog(relation.database)
             .get_relation(relation)
@@ -78,7 +98,7 @@ def polars_check_relations_equal(adapter, relation_names: list[str]) -> None:
     from the catalog and compares them using Polars instead of executing SQL.
     """
     with get_connection(adapter):
-        relations = [relation_from_name(adapter, name) for name in relation_names]
+        relations = [_resolve_relation(adapter, name) for name in relation_names]
         basis, compares = relations[0], relations[1:]
 
         basis_catalog = adapter.get_storage_catalog(basis.database)
@@ -116,7 +136,7 @@ def polars_update_rows(adapter, update_rows_config: dict) -> None:
     where = update_rows_config.get("where")
 
     with get_connection(adapter):
-        relation = relation_from_name(adapter, name)
+        relation = _resolve_relation(adapter, name)
         catalog = adapter.get_storage_catalog(relation.database)
         df = catalog.get_relation(relation).collect()
 
@@ -155,6 +175,6 @@ def polars_update_rows(adapter, update_rows_config: dict) -> None:
         )
 
     with get_connection(adapter):
-        relation = relation_from_name(adapter, name)
+        relation = _resolve_relation(adapter, name)
         catalog = adapter.get_storage_catalog(relation.database)
         catalog.write_relation(relation, df, [])

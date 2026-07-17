@@ -4,11 +4,10 @@ from pathlib import Path
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt.adapters.polars.catalogs.baseCatalog import (
-    BaseCatalog,
-    CatalogConfig,
-    get_write_options,
-)
+from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
+from dbt.adapters.polars.catalogs.formats.delta import DeltaFormat
+from dbt.adapters.polars.catalogs.formats.file import FileFormat
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
 from deltalake import DeltaTable
@@ -16,6 +15,14 @@ from deltalake import DeltaTable
 import polars as pl
 
 logger = AdapterLogger("polars")
+
+_FILE_FORMATS = frozenset(FILE_FORMATS)
+
+
+def _unsupported_for_format(method: str, fmt: str) -> None:
+    raise DbtRuntimeError(
+        f"{method} is only supported for delta file_format, got '{fmt}'"
+    )
 
 
 @dataclass
@@ -60,6 +67,12 @@ class LocalCatalog(BaseCatalog):
             raise DbtRuntimeError(f"Relation {relation} is missing an identifier")
         return self._schema_path(relation.schema) / relation.identifier
 
+    def _get_path(self, relation: PolarsRelation) -> Path:
+        stem = self._relation_path(relation)
+        if relation.file_format == "delta":
+            return stem
+        return stem.with_suffix(f".{relation.file_format}")
+
     def create_schema(self, relation: PolarsRelation) -> None:
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
@@ -78,14 +91,18 @@ class LocalCatalog(BaseCatalog):
         return [p.name for p in self.absolute_root.iterdir() if p.is_dir()]
 
     def table_exists(self, relation: PolarsRelation) -> bool:
-        return DeltaTable.is_deltatable(str(self._relation_path(relation)))
+        return self._get_path(relation).exists()
 
     def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
-        return pl.scan_delta(str(self._relation_path(relation)))
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            return DeltaFormat.read(path)
+        return FileFormat.read(path, relation.file_format, relation.read_options)
 
     def get_partition_columns(self, relation: PolarsRelation) -> list[str]:
-        dt = DeltaTable(str(self._relation_path(relation)))
-        return dt.metadata().partition_columns
+        if relation.file_format != "delta":
+            return []
+        return DeltaFormat.get_partition_columns(self._get_path(relation))
 
     def write_relation(
         self,
@@ -95,46 +112,43 @@ class LocalCatalog(BaseCatalog):
         model_config: dict | None = None,
     ) -> None:
         model_config = model_config or {}
+        if partition_by and relation.file_format != "delta":
+            raise DbtRuntimeError(
+                f"partition_by is not supported for file_format='{relation.file_format}'. "
+                "Use file_format='delta' to enable partitioning."
+            )
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
-        path = str(self._relation_path(relation))
-
-        adapter_delta_opts: dict = {"schema_mode": "overwrite"}
-        if partition_by:
-            adapter_delta_opts["partition_by"] = partition_by
-        write_mode = model_config.get("write_mode", "lazy")
-        if isinstance(data, pl.LazyFrame) and write_mode == "lazy":
-            kwargs = get_write_options(
-                pl.LazyFrame.sink_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            DeltaFormat.write(
+                path, data, "overwrite", model_config, partition_by or None
             )
-            data.sink_delta(path, mode="overwrite", **kwargs)
         else:
-            df = data.collect() if isinstance(data, pl.LazyFrame) else data
-            kwargs = get_write_options(
-                pl.DataFrame.write_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
-            )
-            df.write_delta(path, mode="overwrite", **kwargs)
+            FileFormat.write(path, data, relation.file_format, model_config)
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
             f"Dropping table if exists {relation.catalog}/"
             f"{relation.schema}/{relation.identifier}"
         )
-        shutil.rmtree(self._relation_path(relation), ignore_errors=True)
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.exists():
+            path.unlink()
 
     def truncate_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
             f"Truncating table {relation.catalog}/"
             f"{relation.schema}/{relation.identifier}"
         )
-        DeltaTable(str(self._relation_path(relation))).delete()
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            DeltaFormat.truncate(path)
+        else:
+            FileFormat.truncate(path, relation.file_format, relation.read_options)
 
     def append_relation(
         self,
@@ -144,26 +158,13 @@ class LocalCatalog(BaseCatalog):
         model_config: dict | None = None,
     ) -> None:
         model_config = model_config or {}
-        path = str(self._relation_path(relation))
-        adapter_delta_opts = {"schema_mode": "merge"} if allow_schema_evolution else {}
-        write_mode = model_config.get("write_mode", "lazy")
-        if isinstance(data, pl.LazyFrame) and write_mode == "lazy":
-            kwargs = get_write_options(
-                pl.LazyFrame.sink_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
-            )
-            data.sink_delta(path, mode="append", **kwargs)
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            DeltaFormat.append(path, data, allow_schema_evolution, model_config)
         else:
-            df = data.collect() if isinstance(data, pl.LazyFrame) else data
-            kwargs = get_write_options(
-                pl.DataFrame.write_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
+            FileFormat.append(
+                path, relation.file_format, data, model_config, relation.read_options
             )
-            df.write_delta(path, mode="append", **kwargs)
 
     def merge_relation(
         self,
@@ -174,23 +175,26 @@ class LocalCatalog(BaseCatalog):
         incremental_predicates: list[str] | None = None,
         allow_schema_evolution: bool = False,
     ) -> None:
-        predicate = " AND ".join(
-            f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
-        )
-        if incremental_predicates:
-            predicate += " AND " + " AND ".join(incremental_predicates)
-        dt = DeltaTable(str(self._relation_path(relation)))
-        (
-            dt.merge(
-                df.to_arrow(),
-                predicate,
-                source_alias="DBT_INTERNAL_SOURCE",
-                target_alias="DBT_INTERNAL_DEST",
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            DeltaFormat.merge(
+                path,
+                df,
+                keys,
+                except_cols,
+                incremental_predicates,
+                allow_schema_evolution,
             )
-            .when_matched_update_all(except_cols=except_cols)
-            .when_not_matched_insert_all()
-            .execute()
-        )
+        else:
+            FileFormat.merge(
+                path,
+                relation.file_format,
+                df,
+                keys,
+                except_cols,
+                incremental_predicates,
+                relation.read_options,
+            )
 
     def delete_matched_relation(
         self,
@@ -199,45 +203,40 @@ class LocalCatalog(BaseCatalog):
         keys: list[str],
         incremental_predicates: list[str] | None = None,
     ) -> None:
-        predicate = " AND ".join(
-            f"DBT_INTERNAL_SOURCE.{k} = DBT_INTERNAL_DEST.{k}" for k in keys
-        )
-        if incremental_predicates:
-            predicate += " AND " + " AND ".join(incremental_predicates)
-        dt = DeltaTable(str(self._relation_path(relation)))
-        (
-            dt.merge(
-                df.to_arrow(),
-                predicate,
-                source_alias="DBT_INTERNAL_SOURCE",
-                target_alias="DBT_INTERNAL_DEST",
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            DeltaFormat.delete_matched(path, df, keys, incremental_predicates)
+        else:
+            FileFormat.delete_matched(
+                path,
+                relation.file_format,
+                df,
+                keys,
+                incremental_predicates,
+                relation.read_options,
             )
-            .when_matched_delete()
-            .execute()
-        )
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        DeltaTable(str(self._relation_path(relation))).alter.set_table_description(
-            comment
-        )
+        if relation.file_format != "delta":
+            _unsupported_for_format("set_relation_comment", relation.file_format)
+        DeltaFormat.set_relation_comment(self._get_path(relation), comment)
 
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None:
-        dt = DeltaTable(str(self._relation_path(relation)))
-        for column, comment in comments.items():
-            dt.alter.set_column_metadata(column, {"comment": comment})
+        if relation.file_format != "delta":
+            _unsupported_for_format("set_column_comments", relation.file_format)
+        DeltaFormat.set_column_comments(self._get_path(relation), comments)
 
     def get_relation_comment(self, relation: PolarsRelation) -> str | None:
-        return DeltaTable(str(self._relation_path(relation))).metadata().description
+        if relation.file_format != "delta":
+            return None
+        return DeltaFormat.get_relation_comment(self._get_path(relation))
 
     def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
-        dt = DeltaTable(str(self._relation_path(relation)))
-        return {
-            field.name: field.metadata["comment"]
-            for field in dt.schema().fields
-            if field.metadata.get("comment")
-        }
+        if relation.file_format != "delta":
+            return {}
+        return DeltaFormat.get_column_comments(self._get_path(relation))
 
     def apply_snapshot_delta(
         self,
@@ -248,22 +247,30 @@ class LocalCatalog(BaseCatalog):
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
-        if rows_to_close.is_empty():
-            self.append_relation(relation, rows_to_insert)
-            return
-        staging = pl.concat([rows_to_close, rows_to_insert])
-        dt = DeltaTable(str(self._relation_path(relation)))
-        (
-            dt.merge(
-                staging.to_arrow(),
-                f"target.{scd_id_col} = source.{scd_id_col}",
-                source_alias="source",
-                target_alias="target",
+        path = self._get_path(relation)
+        if relation.file_format == "delta":
+            if rows_to_close.is_empty():
+                DeltaFormat.append(path, rows_to_insert, False, {})
+                return
+            DeltaFormat.apply_snapshot(path, rows_to_close, rows_to_insert, scd_id_col)
+        else:
+            if rows_to_close.is_empty():
+                FileFormat.append(
+                    path,
+                    relation.file_format,
+                    rows_to_insert,
+                    {},
+                    relation.read_options,
+                )
+                return
+            FileFormat.apply_snapshot(
+                path,
+                relation.file_format,
+                rows_to_close,
+                rows_to_insert,
+                scd_id_col,
+                relation.read_options,
             )
-            .when_matched_update_all()
-            .when_not_matched_insert_all()
-            .execute()
-        )
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
@@ -273,14 +280,29 @@ class LocalCatalog(BaseCatalog):
         schema_path = self._schema_path(schema_relation.schema)
         if not schema_path.exists():
             return []
-        return [
-            schema_relation.create(
-                database=schema_relation.database,
-                schema=schema_relation.schema,
-                identifier=p.name,
-                type=RelationType.Table,
-                catalog=schema_relation.catalog,
-            )
-            for p in schema_path.iterdir()
-            if p.is_dir() and DeltaTable.is_deltatable(str(p))
-        ]
+
+        relations = []
+        for p in schema_path.iterdir():
+            if p.is_dir() and DeltaTable.is_deltatable(str(p)):
+                relations.append(
+                    schema_relation.create(
+                        database=schema_relation.database,
+                        schema=schema_relation.schema,
+                        identifier=p.name,
+                        type=RelationType.Table,
+                        catalog=schema_relation.catalog,
+                        file_format="delta",
+                    )
+                )
+            elif p.is_file() and p.suffix.lstrip(".") in _FILE_FORMATS:
+                relations.append(
+                    schema_relation.create(
+                        database=schema_relation.database,
+                        schema=schema_relation.schema,
+                        identifier=p.stem,
+                        type=RelationType.Table,
+                        catalog=schema_relation.catalog,
+                        file_format=p.suffix.lstrip("."),
+                    )
+                )
+        return relations

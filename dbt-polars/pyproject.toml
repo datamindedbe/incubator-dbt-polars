@@ -63,6 +63,8 @@ addopts = "-n 0"
 markers = [
     "require_profiles(...): only run this test when --profile matches one of the listed names",
     "skip_profiles(...): skip this test when --profile matches one of the listed names",
+    "require_configs(...): only run this test when --config matches one of the listed names",
+    "skip_configs(...): skip this test when --config matches one of the listed names",
 ]
 filterwarnings = [
     "ignore:.*'soft_unicode' has been renamed to 'soft_str'*:DeprecationWarning",

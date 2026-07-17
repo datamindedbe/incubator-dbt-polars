@@ -103,6 +103,7 @@ def _assert_eager_oom(project):
     )
 
 
+@pytest.mark.require_configs("default")
 @pytest.mark.skip_profiles("iceberg", "iceberg-databricks")
 class TestPythonModelOOM(PolarsTestMixin):
     """
@@ -169,6 +170,7 @@ class TestIcebergPythonModelOOM(PolarsTestMixin):
         _assert_streaming_memory(project)
 
 
+@pytest.mark.require_configs("default")
 @pytest.mark.skip_profiles("iceberg", "iceberg-databricks")
 class TestPythonModelEagerOOM(PolarsTestMixin):
     @pytest.fixture(scope="class")

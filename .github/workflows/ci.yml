@@ -31,6 +31,31 @@ jobs:
       - name: Run tests
         run: uv run  --directory dbt-polars --python ${{ matrix.python-version }} pytest -n auto
 
+  test-file-formats:
+    name: "Test / py3.12 / ${{ matrix.config }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ["csv", "parquet"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --python 3.12
+
+      - name: Run tests (${{ matrix.config }})
+        run: uv run --directory dbt-polars --python 3.12 pytest -n auto --config ${{ matrix.config }}
+
   test-iceberg:
     name: "Test iceberg / py${{ matrix.python-version }} / ${{ matrix.deps }}"
     runs-on: ubuntu-latest

@@ -6,6 +6,7 @@ from dbt.tests.util import get_connection, run_dbt
 from tests.conftest import PolarsTestMixin
 
 
+@pytest.mark.require_configs("default")
 class TestNoAtomicTableSwap(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):

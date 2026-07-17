@@ -60,6 +60,7 @@ seeds__partitioned_csv = """id,color
 """
 
 
+@pytest.mark.require_configs("default")
 class TestPartitionByTable(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
@@ -82,6 +83,7 @@ class TestPartitionByTable(PolarsTestMixin):
         assert rows == [(1, "blue"), (2, "red"), (3, "blue")]
 
 
+@pytest.mark.require_configs("default")
 class TestPartitionByTableRepartition(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
@@ -109,6 +111,7 @@ class TestPartitionByTableRepartition(PolarsTestMixin):
         assert rows == [(1, "blue"), (2, "red")]
 
 
+@pytest.mark.require_configs("default")
 class TestPartitionByIncremental(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
@@ -122,6 +125,7 @@ class TestPartitionByIncremental(PolarsTestMixin):
         ) == ["color"]
 
 
+@pytest.mark.require_configs("default")
 class TestPartitionByIncrementalGuard(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
@@ -168,6 +172,19 @@ class TestPartitionBySeed(PolarsTestMixin):
         assert polars_relation_partition_columns(
             project.adapter, "partitioned_seed"
         ) == ["color"]
+
+
+@pytest.mark.skip_configs("default")
+class TestPartitionByFileFormatError(PolarsTestMixin):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"partitioned_table.sql": models__partitioned_table_sql}
+
+    def test__partition_by_unsupported_for_file_format(self, project):
+        results = run_dbt(["run"], expect_pass=False)
+        assert results[0].status == RunStatus.Error
+        assert "partition_by" in results[0].message
+        assert "delta" in results[0].message
 
 
 @pytest.mark.require_profiles("iceberg")
