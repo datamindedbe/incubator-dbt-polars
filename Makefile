@@ -22,7 +22,7 @@ test-azure:
 	uv run --extra azure --directory dbt-polars pytest --profile azure -n 0
 
 test-s3:
-	uv run --extra azure --directory dbt-polars pytest --profile s3 -n 0
+	uv run --extra s3 --directory dbt-polars pytest --profile s3 -n 0
 
 
 xtest:

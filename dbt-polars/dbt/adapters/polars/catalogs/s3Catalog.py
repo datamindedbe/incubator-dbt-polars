@@ -15,10 +15,16 @@ _FILE_FORMATS = frozenset(FILE_FORMATS)
 class S3CatalogConfig(CatalogConfig):
     """Profile config for an AWS S3 (or S3-compatible) catalog.
 
-    All kwargs beyond name/type/bucket/prefix are forwarded as needed: boto3.Session
-    receives the subset matching its signature (aws_access_key_id, region_name,
-    profile_name, …); everything else passes through as object_store storage_options
-    (aws_endpoint_url, aws_allow_http, …).
+    All kwargs beyond name/type/bucket/prefix are forwarded twice: boto3.Session
+    receives the subset matching its signature (for management operations), and
+    delta-rs/polars receive them as storage_options with region_name/profile_name
+    mapped to aws_region/aws_profile (aws_endpoint_url, aws_allow_http, … pass
+    through as-is).
+
+    Credential resolution is delegated to the delta-rs/polars built-in chains
+    (env vars, profiles, IMDS, ECS, web identity), which auto-refresh expiring
+    tokens. Static keys (aws_access_key_id, …) pass through verbatim; give either
+    a profile or static keys, not both.
     """
 
     def __init__(
@@ -83,27 +89,13 @@ class AWSS3Catalog(StorageCatalog):
         return f"s3://{self.config.bucket}/{path}"
 
     def _get_storage_options(self, _uri: str) -> dict[str, str]:
-        creds = self._boto3_session().get_credentials()
-        if creds is None:
-            raise DbtRuntimeError(
-                "No AWS credentials found. Configure via env vars, ~/.aws/credentials, "
-                "or an IAM role."
-            )
-        frozen = creds.get_frozen_credentials()
-        opts: dict[str, str] = {
-            "aws_access_key_id": frozen.access_key,
-            "aws_secret_access_key": frozen.secret_key,
-        }
-        if frozen.token:
-            opts["aws_session_token"] = frozen.token
-        # region_name is a boto3 session kwarg; object_store uses aws_region
-        region = self.config.session_kwargs.get("region_name")
-        if region:
-            opts["aws_region"] = str(region)
-        # Pass through any remaining object_store-specific keys
-        for key in ("aws_endpoint_url", "aws_allow_http"):
-            val = self.config.session_kwargs.get(key)
-            if val:
+        opts: dict[str, str] = {"timeout": "120s"}
+        for key, val in self.config.session_kwargs.items():
+            if key == "region_name":
+                opts["aws_region"] = str(val)
+            elif key == "profile_name":
+                opts["aws_profile"] = str(val)
+            elif key not in ("botocore_session", "aws_account_id"):
                 opts[key] = str(val)
         return opts
 
@@ -129,9 +121,12 @@ class AWSS3Catalog(StorageCatalog):
     # ── schema management ─────────────────────────────────────────────────────
 
     def create_schema(self, relation: PolarsRelation) -> None:
-        logger.debug(
-            f"create_schema (no-op for S3): {relation.catalog}/{relation.schema}"
-        )
+        # S3 has no directories; write a zero-byte marker object (same convention
+        # as the S3 console) so the schema prefix shows up in list_schemas
+        schema = relation.schema or ""
+        key = self._object_prefix(schema) + "/"
+        logger.debug(f"Creating schema {relation.catalog}/{schema}")
+        self._get_s3_client().put_object(Bucket=self.config.bucket, Key=key)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
         schema = relation.schema or ""

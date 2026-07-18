@@ -8,7 +8,10 @@ def azure_blob_catalog(name: str, prefix: str, azure_storage_token: str) -> dict
         "account_name": os.environ.get("AZURE_STORAGE_ACCOUNT", ""),
         "container": os.environ.get("AZURE_STORAGE_CONTAINER", ""),
         "prefix": prefix,
-        "azure_storage_token": azure_storage_token,
+        "credentials": {
+            "exclude_managed_identity_credential": True,
+            # "bearer_token": azure_storage_token,
+        },
     }
 
 
@@ -32,7 +35,7 @@ def azure_schemas_as_containers_catalog(
         "account_name": os.environ.get("AZURE_STORAGE_ACCOUNT", ""),
         "schemas_as_containers": True,
         "prefix": prefix,
-        "azure_storage_token": azure_storage_token,
+        "credentials": {"bearer_token": azure_storage_token},
     }
 
 
