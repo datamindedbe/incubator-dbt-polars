@@ -22,8 +22,7 @@ dependencies = [
     "dbt-adapters>=1.0.0",
     "dbt-common>=1.0.0",
     "dbt-core>=1.11.2",
-    # polars<2: str->Date cast is deprecated in 2.0; pin until adapter is updated
-    "polars[deltalake,pyarrow]>=0.19,<2",
+    "polars[deltalake,pyarrow]>=0.19,<1.43",
     "sqlglot>=1.0.0",
 ]
 
