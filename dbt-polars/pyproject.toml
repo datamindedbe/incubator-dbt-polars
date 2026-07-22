@@ -62,6 +62,7 @@ line-length = 88
 # CI runs with -n auto; keep -n 0 here for local development (easier debugging)
 addopts = "-n 0"
 timeout = 300
+timeout_method = "thread"
 markers = [
     "require_profiles(...): only run this test when --profile matches one of the listed names",
     "skip_profiles(...): skip this test when --profile matches one of the listed names",

@@ -34,6 +34,7 @@ jobs:
   test-file-formats:
     name: "Test / py3.12 / ${{ matrix.config }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     strategy:
       fail-fast: false
       matrix:
