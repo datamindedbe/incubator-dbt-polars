@@ -54,7 +54,7 @@ jobs:
         run: uv sync --python 3.12
 
       - name: Run tests (${{ matrix.config }})
-        run: uv run --directory dbt-polars --python 3.12 pytest -n 0 --config ${{ matrix.config }}
+        run: uv run --directory dbt-polars --python 3.12 pytest -v --setup-show -n 0 --config ${{ matrix.config }}
 
   # test-iceberg:
   #   name: "Test iceberg / py${{ matrix.python-version }} / ${{ matrix.deps }}"

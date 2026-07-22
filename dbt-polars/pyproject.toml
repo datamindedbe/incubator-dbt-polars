@@ -31,6 +31,7 @@ dependencies = [
 dev = [
     "dbt-tests-adapter~=1.20.0",
     "pytest~=9.1.1",
+    "pytest-timeout~=2.3",
     "pytest-xdist~=3.8.0",
     "types-pyyaml>=6.0.12.20260518",
     "azure-identity>=1.25.3",
@@ -60,6 +61,7 @@ line-length = 88
 [tool.pytest.ini_options]
 # CI runs with -n auto; keep -n 0 here for local development (easier debugging)
 addopts = "-n 0"
+timeout = 300
 markers = [
     "require_profiles(...): only run this test when --profile matches one of the listed names",
     "skip_profiles(...): skip this test when --profile matches one of the listed names",
