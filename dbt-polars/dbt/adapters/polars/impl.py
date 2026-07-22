@@ -181,7 +181,11 @@ class PolarsAdapter(BaseAdapter):
         required_schemas: Any = None,
     ) -> None:
         configs = list(relation_configs)
-        self._node_configs = {(c.database, c.schema, c.identifier): c for c in configs}
+        new_entries = {(c.database, c.schema, c.identifier): c for c in configs}
+        if clear:
+            self._node_configs = new_entries
+        else:
+            self._node_configs.update(new_entries)
         super().set_relations_cache(
             configs, clear=clear, required_schemas=required_schemas
         )
@@ -298,7 +302,15 @@ class PolarsAdapter(BaseAdapter):
         self.cache_dropped(relation)
 
     def truncate_relation(self, relation: PolarsRelation) -> None:  # type: ignore[override]
-        self.get_storage_catalog(relation.catalog).truncate_relation(relation)
+        node_config = self._node_configs[
+            (relation.database, relation.schema, relation.identifier)
+        ]
+        model_config: dict = (
+            cast(dict, node_config.config) if node_config.config else {}
+        )
+        self.get_storage_catalog(relation.catalog).truncate_relation(
+            relation, model_config=model_config
+        )
 
     # --- persist_docs ---
     @available
@@ -848,6 +860,7 @@ class PolarsAdapter(BaseAdapter):
                 new_data,
                 keys,
                 incremental_predicates=incremental_predicates or None,
+                model_config=model_config,
             )
             catalog.append_relation(
                 relation,

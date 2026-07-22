@@ -1,6 +1,7 @@
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NoReturn
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
@@ -19,7 +20,7 @@ logger = AdapterLogger("polars")
 _FILE_FORMATS = frozenset(FILE_FORMATS)
 
 
-def _unsupported_for_format(method: str, fmt: str) -> None:
+def _unsupported_for_format(method: str, fmt: str) -> NoReturn:
     raise DbtRuntimeError(
         f"{method} is only supported for delta file_format, got '{fmt}'"
     )
@@ -139,7 +140,9 @@ class LocalCatalog(BaseCatalog):
         elif path.exists():
             path.unlink()
 
-    def truncate_relation(self, relation: PolarsRelation) -> None:
+    def truncate_relation(
+        self, relation: PolarsRelation, model_config: dict | None = None
+    ) -> None:
         logger.debug(
             f"Truncating table {relation.catalog}/"
             f"{relation.schema}/{relation.identifier}"
@@ -148,7 +151,9 @@ class LocalCatalog(BaseCatalog):
         if relation.file_format == "delta":
             DeltaFormat.truncate(path)
         else:
-            FileFormat.truncate(path, relation.file_format, relation.read_options)
+            FileFormat.truncate(
+                path, relation.file_format, relation.read_options, model_config
+            )
 
     def append_relation(
         self,
@@ -209,6 +214,7 @@ class LocalCatalog(BaseCatalog):
         df: pl.DataFrame,
         keys: list[str],
         incremental_predicates: list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None:
         path = self._get_path(relation)
         if relation.file_format == "delta":
@@ -221,6 +227,7 @@ class LocalCatalog(BaseCatalog):
                 keys,
                 incremental_predicates,
                 relation.read_options,
+                model_config,
             )
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:

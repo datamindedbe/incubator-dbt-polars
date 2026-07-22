@@ -72,7 +72,6 @@ class FileFormat:
             if align_casts:
                 df = df.with_columns(align_casts)
 
-        # Only update columns present in df (handles removed columns gracefully)
         update_cols = [
             c
             for c in existing.columns
@@ -80,20 +79,18 @@ class FileFormat:
             and (not except_cols or c not in except_cols)
             and c in df.columns
         ]
-        # New columns from df not yet in existing (schema evolution)
         new_schema_cols = [c for c in df.columns if c not in existing.columns]
 
-        # Update matched rows: override update_cols, keep except_cols unchanged
+        # how="left" means existing value wins for columns not in the update frame,
+        # which is what keeps except_cols unchanged.
         updated = existing.update(df.select([*keys, *update_cols]), on=keys, how="left")
-        # Attach new schema columns for matched rows via join (null for unmatched)
         if new_schema_cols:
             updated = updated.join(
                 df.select([*keys, *new_schema_cols]), on=keys, how="left"
             )
 
-        # Insert rows from df whose key is not in existing
         new_rows = df.join(existing.select(keys), on=keys, how="anti")
-        # Fill columns that exist in existing but not in df with null
+        # Align new_rows to all_cols so concat doesn't produce ragged frames.
         for col in existing.columns:
             if col not in new_rows.columns:
                 new_rows = new_rows.with_columns(
@@ -112,15 +109,18 @@ class FileFormat:
         keys: list[str],
         _incremental_predicates: list[str] | None,
         read_options: dict,
+        model_config: dict | None = None,
     ) -> None:
         existing = FileFormat.read(path, fmt, read_options).collect()
         result = existing.join(df.select(keys), on=keys, how="anti")
-        FileFormat.write(path, result.lazy(), fmt, {})
+        FileFormat.write(path, result.lazy(), fmt, model_config or {})
 
     @staticmethod
-    def truncate(path: Path, fmt: str, read_options: dict) -> None:
+    def truncate(
+        path: Path, fmt: str, read_options: dict, model_config: dict | None = None
+    ) -> None:
         schema = FileFormat.read(path, fmt, read_options).schema
-        FileFormat.write(path, pl.LazyFrame(schema=schema), fmt, {})
+        FileFormat.write(path, pl.LazyFrame(schema=schema), fmt, model_config or {})
 
     @staticmethod
     def apply_snapshot(

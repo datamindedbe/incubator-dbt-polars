@@ -322,7 +322,9 @@ class IcebergCatalog(BaseCatalog):
             for table_id in tables
         ]
 
-    def truncate_relation(self, relation: PolarsRelation) -> None:
+    def truncate_relation(
+        self, relation: PolarsRelation, model_config: dict | None = None
+    ) -> None:
 
         logger.debug(
             f"Truncating table {relation.catalog}/"
@@ -420,6 +422,7 @@ class IcebergCatalog(BaseCatalog):
         df: pl.DataFrame,
         keys: list[str],
         incremental_predicates: list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None:
         if incremental_predicates:
             raise DbtRuntimeError(

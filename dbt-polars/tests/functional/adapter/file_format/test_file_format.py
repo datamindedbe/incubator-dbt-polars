@@ -269,6 +269,25 @@ class TestDeleteInsertDropsWriteOptions(PolarsTestMixin):
         )
         assert rows == [(1, "hello"), (2, "world")]
 
+        # Selecting columns by name masks a corrupted schema — also assert the file
+        # has exactly the right columns (the bug produces a spurious 'id,value' column).
+        relation = PolarsRelation.create(
+            database=project.database,
+            schema=project.test_schema,
+            identifier="delete_insert_csv",
+            type=RelationType.Table,
+            catalog=project.database,
+            file_format="csv",
+            read_options={"separator": ";"},
+        )
+        with get_connection(project.adapter):
+            df = (
+                project.adapter.get_storage_catalog(project.database)
+                .get_relation(relation)
+                .collect()
+            )
+        assert df.columns == ["id", "value"]
+
 
 @pytest.mark.require_profiles("local")
 @pytest.mark.require_configs("default")

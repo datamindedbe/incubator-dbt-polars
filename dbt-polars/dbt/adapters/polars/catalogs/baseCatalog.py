@@ -89,7 +89,9 @@ class BaseCatalog(ABC):
     def get_partition_columns(self, relation: PolarsRelation) -> list[str]: ...
 
     @abstractmethod
-    def truncate_relation(self, relation: PolarsRelation) -> None: ...
+    def truncate_relation(
+        self, relation: PolarsRelation, model_config: dict | None = None
+    ) -> None: ...
 
     @abstractmethod
     def list_relations_without_caching(
@@ -124,6 +126,7 @@ class BaseCatalog(ABC):
         df: pl.DataFrame,
         keys: list[str],
         incremental_predicates: list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None: ...
 
     @abstractmethod
