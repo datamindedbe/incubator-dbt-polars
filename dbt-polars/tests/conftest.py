@@ -6,7 +6,7 @@ import faulthandler
 
 # Dump the full Python stack of every thread to stderr every 60 s.
 # Visible in GitHub Actions logs; helps identify hangs in native code.
-faulthandler.dump_traceback_later(60, repeat=True, file=sys.stderr)
+faulthandler.dump_traceback_later(30, repeat=True, file=sys.stderr)
 
 # Patch check_relations_equal in dbt.tests.util before any test modules are
 # imported, so all dbt base test classes automatically use the Polars-native
