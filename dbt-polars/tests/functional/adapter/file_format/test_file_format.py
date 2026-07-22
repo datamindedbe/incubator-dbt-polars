@@ -1,3 +1,5 @@
+import json
+
 import polars as pl
 import pytest
 from dbt.adapters.contracts.relation import RelationType
@@ -194,3 +196,180 @@ class TestSourceReadOptions(PolarsTestMixin):
             project.adapter, "reader", ["id", "value"], order_by="id"
         )
         assert rows == [(1, "hello"), (2, "world")]
+
+
+_MERGE_CSV_MODEL = """
+{{ config(
+    materialized='incremental',
+    file_format='csv',
+    unique_key='id',
+    incremental_strategy='merge',
+    write_options={'separator': ';'},
+    read_options={'separator': ';'}
+) }}
+SELECT 1 AS id, 'hello' AS value
+UNION ALL
+SELECT 2 AS id, 'world' AS value
+"""
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestMergeDropsWriteOptions(PolarsTestMixin):
+    """Regression: FileFormat.merge hardcodes model_config={} in its final write,
+    so write_options (e.g. CSV separator) are silently dropped after a merge.
+    The file is re-written with the default comma separator, but subsequent reads
+    use read_options={'separator': ';'} and parse the file incorrectly."""
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"merge_csv.sql": _MERGE_CSV_MODEL}
+
+    def test_merge_preserves_write_options(self, project):
+        run_dbt(["run"])  # initial full write — file uses ';'
+        run_dbt(["run"])  # merge run — re-writes file, drops write_options (bug)
+
+        rows = polars_read_relation(
+            project.adapter, "merge_csv", ["id", "value"], order_by="id"
+        )
+        assert rows == [(1, "hello"), (2, "world")]
+
+
+_DELETE_INSERT_CSV_MODEL = """
+{{ config(
+    materialized='incremental',
+    file_format='csv',
+    unique_key='id',
+    incremental_strategy='delete+insert',
+    write_options={'separator': ';'},
+    read_options={'separator': ';'}
+) }}
+SELECT 1 AS id, 'hello' AS value
+UNION ALL
+SELECT 2 AS id, 'world' AS value
+"""
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestDeleteInsertDropsWriteOptions(PolarsTestMixin):
+    """Regression: FileFormat.delete_matched hardcodes model_config={} in its write,
+    corrupting the file separator before append_relation reads it back."""
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"delete_insert_csv.sql": _DELETE_INSERT_CSV_MODEL}
+
+    def test_delete_insert_preserves_write_options(self, project):
+        run_dbt(["run"])  # initial full write — file uses ';'
+        run_dbt(["run"])  # delete+insert — delete_matched writes with ',' (bug)
+
+        rows = polars_read_relation(
+            project.adapter, "delete_insert_csv", ["id", "value"], order_by="id"
+        )
+        assert rows == [(1, "hello"), (2, "world")]
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestApplySnapshotDropsWriteOptions(PolarsTestMixin):
+    """Regression: both branches of apply_snapshot_delta for file formats hardcode
+    model_config={} in FileFormat.write, dropping write_options like CSV separator."""
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {}
+
+    def _make_relation(self, project):
+        return PolarsRelation.create(
+            database=project.database,
+            schema=project.test_schema,
+            identifier="snapshot_csv",
+            type=RelationType.Table,
+            catalog=project.database,
+            file_format="csv",
+            read_options={"separator": ";"},
+        )
+
+    def _model_config(self):
+        return {"write_options": {"separator": ";"}}
+
+    def test_apply_snapshot_preserves_write_options(self, project):
+        relation = self._make_relation(project)
+        initial = pl.DataFrame({"dbt_scd_id": [1, 2], "value": ["old1", "old2"]})
+        rows_to_close = pl.DataFrame({"dbt_scd_id": [1], "value": ["updated1"]})
+        rows_to_insert = pl.DataFrame({"dbt_scd_id": [3], "value": ["new3"]})
+
+        with get_connection(project.adapter):
+            catalog = project.adapter.get_storage_catalog(project.database)
+            catalog.create_schema(relation)
+            catalog.write_relation(relation, initial, [], self._model_config())
+            catalog.apply_snapshot_delta(
+                relation,
+                rows_to_close,
+                rows_to_insert,
+                model_config=self._model_config(),
+            )
+
+        with get_connection(project.adapter):
+            catalog = project.adapter.get_storage_catalog(project.database)
+            df = catalog.get_relation(relation).collect()
+
+        rows = sorted(df.select(["dbt_scd_id", "value"]).rows())
+        assert rows == [(1, "updated1"), (2, "old2"), (3, "new3")]
+
+    def test_apply_snapshot_append_only_preserves_write_options(self, project):
+        relation = PolarsRelation.create(
+            database=project.database,
+            schema=project.test_schema,
+            identifier="snapshot_csv_append",
+            type=RelationType.Table,
+            catalog=project.database,
+            file_format="csv",
+            read_options={"separator": ";"},
+        )
+        initial = pl.DataFrame({"dbt_scd_id": [1], "value": ["existing"]})
+        rows_to_insert = pl.DataFrame({"dbt_scd_id": [2], "value": ["new"]})
+
+        with get_connection(project.adapter):
+            catalog = project.adapter.get_storage_catalog(project.database)
+            catalog.create_schema(relation)
+            catalog.write_relation(relation, initial, [], self._model_config())
+            # rows_to_close is empty → takes the FileFormat.append branch
+            catalog.apply_snapshot_delta(
+                relation,
+                pl.DataFrame(schema=initial.schema),
+                rows_to_insert,
+                model_config=self._model_config(),
+            )
+
+        with get_connection(project.adapter):
+            catalog = project.adapter.get_storage_catalog(project.database)
+            df = catalog.get_relation(relation).collect()
+
+        rows = sorted(df.select(["dbt_scd_id", "value"]).rows())
+        assert rows == [(1, "existing"), (2, "new")]
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestDocsGenerateDropsReadOptions(PolarsTestMixin):
+    """Bug: list_relations_without_caching builds PolarsRelation with read_options={}.
+    When docs generate then calls get_columns_in_relation on the discovered relation,
+    it reads the CSV with the default comma separator instead of ';', producing
+    one mangled column instead of two correct ones."""
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"semicolon_csv.sql": _SEMICOLON_MODEL}
+
+    def test_docs_generate_discovers_correct_columns(self, project):
+        run_dbt(["run"])
+        run_dbt(["docs", "generate"])
+
+        with open("target/catalog.json") as f:
+            catalog = json.load(f)
+
+        node = catalog["nodes"]["model.test.semicolon_csv"]
+        columns = list(node["columns"].keys())
+        assert columns == ["id", "value"]

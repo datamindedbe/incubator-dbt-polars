@@ -58,8 +58,8 @@ class FileFormat:
         df: pl.DataFrame,
         keys: list[str],
         except_cols: list[str] | None,
-        _incremental_predicates: list[str] | None,
         read_options: dict,
+        model_config: dict | None = None,
     ) -> None:
         existing = FileFormat.read(path, fmt, read_options).collect()
 
@@ -102,7 +102,7 @@ class FileFormat:
 
         all_cols = [*existing.columns, *new_schema_cols]
         merged = pl.concat([updated.select(all_cols), new_rows.select(all_cols)])
-        FileFormat.write(path, merged.lazy(), fmt, {})
+        FileFormat.write(path, merged.lazy(), fmt, model_config or {})
 
     @staticmethod
     def delete_matched(
@@ -130,8 +130,9 @@ class FileFormat:
         rows_to_insert: pl.DataFrame,
         scd_id_col: str,
         read_options: dict,
+        model_config: dict | None = None,
     ) -> None:
         existing = FileFormat.read(path, fmt, read_options).collect()
         updated = existing.update(rows_to_close, on=scd_id_col, how="left")
         result = pl.concat([updated, rows_to_insert])
-        FileFormat.write(path, result.lazy(), fmt, {})
+        FileFormat.write(path, result.lazy(), fmt, model_config or {})

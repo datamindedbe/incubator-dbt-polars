@@ -8,6 +8,35 @@ import polars as pl
 
 class DeltaFormat:
     @staticmethod
+    def _write(
+        path: str,
+        data: pl.DataFrame | pl.LazyFrame,
+        mode: str,
+        model_config: dict,
+        adapter_delta_opts: dict,
+    ) -> None:
+        if (
+            isinstance(data, pl.LazyFrame)
+            and model_config.get("write_mode", "lazy") == "lazy"
+        ):
+            kwargs = get_write_options(
+                pl.LazyFrame.sink_delta,
+                model_config,
+                ignore={"mode", "target"},
+                merge={"delta_write_options": adapter_delta_opts},
+            )
+            data.sink_delta(path, mode=mode, **kwargs)  # type: ignore[call-overload]
+        else:
+            df = data.collect() if isinstance(data, pl.LazyFrame) else data
+            kwargs = get_write_options(
+                pl.DataFrame.write_delta,
+                model_config,
+                ignore={"mode", "target"},
+                merge={"delta_write_options": adapter_delta_opts},
+            )
+            df.write_delta(path, mode=mode, **kwargs)  # type: ignore[call-overload]
+
+    @staticmethod
     def write(
         path: Path,
         data: pl.DataFrame | pl.LazyFrame,
@@ -20,26 +49,7 @@ class DeltaFormat:
         }
         if partition_by:
             adapter_delta_opts["partition_by"] = partition_by
-
-        write_mode = model_config.get("write_mode", "lazy")
-        str_path = str(path)
-        if isinstance(data, pl.LazyFrame) and write_mode == "lazy":
-            kwargs = get_write_options(
-                pl.LazyFrame.sink_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
-            )
-            data.sink_delta(str_path, mode=mode, **kwargs)  # type: ignore[call-overload]
-        else:
-            df = data.collect() if isinstance(data, pl.LazyFrame) else data
-            kwargs = get_write_options(
-                pl.DataFrame.write_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
-            )
-            df.write_delta(str_path, mode=mode, **kwargs)  # type: ignore[call-overload]
+        DeltaFormat._write(str(path), data, mode, model_config, adapter_delta_opts)
 
     @staticmethod
     def read(path: Path) -> pl.LazyFrame:
@@ -53,25 +63,7 @@ class DeltaFormat:
         model_config: dict,
     ) -> None:
         adapter_delta_opts = {"schema_mode": "merge"} if allow_schema_evolution else {}
-        write_mode = model_config.get("write_mode", "lazy")
-        str_path = str(path)
-        if isinstance(data, pl.LazyFrame) and write_mode == "lazy":
-            kwargs = get_write_options(
-                pl.LazyFrame.sink_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
-            )
-            data.sink_delta(str_path, mode="append", **kwargs)
-        else:
-            df = data.collect() if isinstance(data, pl.LazyFrame) else data
-            kwargs = get_write_options(
-                pl.DataFrame.write_delta,
-                model_config,
-                ignore={"mode", "target"},
-                merge={"delta_write_options": adapter_delta_opts},
-            )
-            df.write_delta(str_path, mode="append", **kwargs)
+        DeltaFormat._write(str(path), data, "append", model_config, adapter_delta_opts)
 
     @staticmethod
     def merge(

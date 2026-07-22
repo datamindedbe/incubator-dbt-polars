@@ -182,20 +182,22 @@ class PolarsAdapter(BaseAdapter):
     ) -> None:
         configs = list(relation_configs)
         self._node_configs = {(c.database, c.schema, c.identifier): c for c in configs}
-        manifest = self._macro_resolver
-        if manifest is not None and hasattr(manifest, "sources"):
-            self._source_configs = {}
-            for source in manifest.sources.values():
-                cfg = getattr(source, "config", None)
-                self._source_configs[
-                    (source.database, source.schema, source.identifier)
-                ] = {
-                    "file_format": cfg.get("file_format", "delta") if cfg else "delta",
-                    "read_options": (cfg.get("read_options") or {}) if cfg else {},
-                }
         super().set_relations_cache(
             configs, clear=clear, required_schemas=required_schemas
         )
+
+    @available
+    def store_source_configs(self, graph: dict) -> None:
+        if self._source_configs:
+            return
+        for source in graph.get("sources", {}).values():
+            cfg = source.get("config", {})
+            self._source_configs[
+                (source["database"], source["schema"], source["identifier"])
+            ] = {
+                "file_format": cfg.get("file_format", "delta"),
+                "read_options": cfg.get("read_options") or {},
+            }
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         connection = self.connections.get_thread_connection()
@@ -350,6 +352,9 @@ class PolarsAdapter(BaseAdapter):
             "column_type",
             "column_comment",
         ]
+        config_lookup: dict[tuple, RelationConfig] = {
+            (c.database, c.schema, c.identifier): c for c in relation_configs
+        }
         rows: list[dict[str, Any]] = []
         exceptions: list[Exception] = []
 
@@ -359,9 +364,19 @@ class PolarsAdapter(BaseAdapter):
                 schema_relation = self.Relation.create(
                     database=database, schema=schema, catalog=database
                 )
-                for relation in storage_catalog.list_relations_without_caching(
+                for _relation in storage_catalog.list_relations_without_caching(
                     schema_relation
                 ):
+                    node_config = config_lookup.get(
+                        (_relation.database, _relation.schema, _relation.identifier)
+                    )
+                    relation = (
+                        PolarsRelation.create_from(
+                            quoting=self.config, relation_config=node_config
+                        )
+                        if node_config is not None
+                        else _relation
+                    )
                     table_comment = storage_catalog.get_relation_comment(relation)
                     column_comments = storage_catalog.get_column_comments(relation)
                     for index, column in enumerate(
@@ -818,6 +833,7 @@ class PolarsAdapter(BaseAdapter):
                 except_cols=except_cols,
                 incremental_predicates=incremental_predicates or None,
                 allow_schema_evolution=allow_evolution,
+                model_config=model_config,
             )
         elif strategy == "delete+insert":
             if not unique_key:

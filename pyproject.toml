@@ -1,6 +1,9 @@
 [tool.uv.workspace]
 members = ["dbt-polars"]
 
+[tool.uv]
+config-settings = { editable_mode = "compat" }
+
 [dependency-groups]
 dev = [
     "ruff==0.15.19",

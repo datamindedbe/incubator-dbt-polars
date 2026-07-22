@@ -1,4 +1,5 @@
 {% materialization test, adapter='polars' %}
+  {%- do adapter.store_source_configs(graph) -%}
   {%- set language = model['language'] -%}
   {% set relations = [] %}
 

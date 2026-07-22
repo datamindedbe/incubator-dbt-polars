@@ -174,6 +174,7 @@ class LocalCatalog(BaseCatalog):
         except_cols: list[str] | None = None,
         incremental_predicates: list[str] | None = None,
         allow_schema_evolution: bool = False,
+        model_config: dict | None = None,
     ) -> None:
         path = self._get_path(relation)
         if relation.file_format == "delta":
@@ -186,14 +187,20 @@ class LocalCatalog(BaseCatalog):
                 allow_schema_evolution,
             )
         else:
+            if incremental_predicates:
+                raise DbtRuntimeError(
+                    "FileFormats do not support incremental predicates. Switch to "
+                    + "delta format to start using incremental predicates."
+                )
+
             FileFormat.merge(
                 path,
                 relation.file_format,
                 df,
                 keys,
                 except_cols,
-                incremental_predicates,
                 relation.read_options,
+                model_config,
             )
 
     def delete_matched_relation(
@@ -244,7 +251,9 @@ class LocalCatalog(BaseCatalog):
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
         scd_id_col: str = "dbt_scd_id",
+        model_config: dict | None = None,
     ) -> None:
+        model_config = model_config or {}
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
         path = self._get_path(relation)
@@ -259,7 +268,7 @@ class LocalCatalog(BaseCatalog):
                     path,
                     relation.file_format,
                     rows_to_insert,
-                    {},
+                    model_config,
                     relation.read_options,
                 )
                 return
@@ -270,6 +279,7 @@ class LocalCatalog(BaseCatalog):
                 rows_to_insert,
                 scd_id_col,
                 relation.read_options,
+                model_config,
             )
 
     def list_relations_without_caching(
