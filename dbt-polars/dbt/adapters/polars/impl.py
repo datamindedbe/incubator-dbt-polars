@@ -302,9 +302,15 @@ class PolarsAdapter(BaseAdapter):
         self.cache_dropped(relation)
 
     def truncate_relation(self, relation: PolarsRelation) -> None:  # type: ignore[override]
-        node_config = self._node_configs[
+        node_config = self._node_configs.get(
             (relation.database, relation.schema, relation.identifier)
-        ]
+        )
+        if node_config is None:
+            raise DbtRuntimeError(
+                f"Could not find config for relation "
+                f"'{relation.database}.{relation.schema}.{relation.identifier}'. "
+                "This is likely a bug in the dbt-polars adapter."
+            )
         model_config: dict = (
             cast(dict, node_config.config) if node_config.config else {}
         )

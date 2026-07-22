@@ -66,6 +66,7 @@ def _write_relation(
 
 
 @pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
 class SourceSetupMixin(PolarsTestMixin):
     """Writes a CSV source and a delta source (no config key) into the local catalog."""
 
