@@ -171,6 +171,37 @@ class PolarsAdapter(BaseAdapter):
     def __init__(self, config, mp_context):
         super().__init__(config, mp_context)
         self.CatalogAdapters: dict[str, BaseCatalog] = {}
+        self._node_configs: dict[tuple, RelationConfig] = {}
+        self._source_configs: dict[tuple, dict] = {}
+
+    def set_relations_cache(
+        self,
+        relation_configs: Iterable[RelationConfig],
+        clear: bool = False,
+        required_schemas: Any = None,
+    ) -> None:
+        configs = list(relation_configs)
+        new_entries = {(c.database, c.schema, c.identifier): c for c in configs}
+        if clear:
+            self._node_configs = new_entries
+        else:
+            self._node_configs.update(new_entries)
+        super().set_relations_cache(
+            configs, clear=clear, required_schemas=required_schemas
+        )
+
+    @available
+    def store_source_configs(self, graph: dict) -> None:
+        if self._source_configs:
+            return
+        for source in graph.get("sources", {}).values():
+            cfg = source.get("config", {})
+            self._source_configs[
+                (source["database"], source["schema"], source["identifier"])
+            ] = {
+                "file_format": cfg.get("file_format", "delta"),
+                "read_options": cfg.get("read_options") or {},
+            }
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         connection = self.connections.get_thread_connection()
@@ -271,7 +302,21 @@ class PolarsAdapter(BaseAdapter):
         self.cache_dropped(relation)
 
     def truncate_relation(self, relation: PolarsRelation) -> None:  # type: ignore[override]
-        self.get_storage_catalog(relation.catalog).truncate_relation(relation)
+        node_config = self._node_configs.get(
+            (relation.database, relation.schema, relation.identifier)
+        )
+        if node_config is None:
+            raise DbtRuntimeError(
+                f"Could not find config for relation "
+                f"'{relation.database}.{relation.schema}.{relation.identifier}'. "
+                "This is likely a bug in the dbt-polars adapter."
+            )
+        model_config: dict = (
+            cast(dict, node_config.config) if node_config.config else {}
+        )
+        self.get_storage_catalog(relation.catalog).truncate_relation(
+            relation, model_config=model_config
+        )
 
     # --- persist_docs ---
     @available
@@ -325,6 +370,9 @@ class PolarsAdapter(BaseAdapter):
             "column_type",
             "column_comment",
         ]
+        config_lookup: dict[tuple, RelationConfig] = {
+            (c.database, c.schema, c.identifier): c for c in relation_configs
+        }
         rows: list[dict[str, Any]] = []
         exceptions: list[Exception] = []
 
@@ -334,9 +382,19 @@ class PolarsAdapter(BaseAdapter):
                 schema_relation = self.Relation.create(
                     database=database, schema=schema, catalog=database
                 )
-                for relation in storage_catalog.list_relations_without_caching(
+                for _relation in storage_catalog.list_relations_without_caching(
                     schema_relation
                 ):
+                    node_config = config_lookup.get(
+                        (_relation.database, _relation.schema, _relation.identifier)
+                    )
+                    relation = (
+                        PolarsRelation.create_from(
+                            quoting=self.config, relation_config=node_config
+                        )
+                        if node_config is not None
+                        else _relation
+                    )
                     table_comment = storage_catalog.get_relation_comment(relation)
                     column_comments = storage_catalog.get_column_comments(relation)
                     for index, column in enumerate(
@@ -444,15 +502,50 @@ class PolarsAdapter(BaseAdapter):
     def quote(cls, identifier: str) -> str:
         return f'"{identifier}"'
 
+    def _resolve_relation(
+        self, database: str, schema: str, identifier: str
+    ) -> PolarsRelation:
+        node_config = self._node_configs.get((database, schema, identifier))
+        if node_config is not None:
+            return PolarsRelation.create_from(
+                quoting=self.config, relation_config=node_config
+            )
+        source_info = self._source_configs.get((database, schema, identifier))
+        if source_info is None:
+            raise DbtRuntimeError(
+                f"Could not find config for relation '{database}.{schema}.{identifier}'. "
+                "This is likely a bug in the dbt-polars adapter."
+            )
+        return PolarsRelation.create(
+            database=database,
+            schema=schema,
+            identifier=identifier,
+            type=RelationType.Table,
+            catalog=database,
+            file_format=source_info["file_format"],
+            read_options=source_info["read_options"],
+        )
+
     def _build_sql_context(
         self,
         refs: dict[str, PolarsRelation],
         extra_frames: dict[str, pl.LazyFrame] | None = None,
     ) -> pl.SQLContext:
-        frames = {
-            frame_name: self.get_storage_catalog(rel.database).get_relation(rel)
-            for frame_name, rel in refs.items()
-        }
+        connection = self.connections.get_thread_connection()
+        credentials = cast(PolarsCredentials, connection.credentials)
+        default_catalog = credentials.catalog
+
+        frames = {}
+        for frame_name, bare_rel in refs.items():
+            database = bare_rel.database or default_catalog
+            if bare_rel.schema is None or bare_rel.identifier is None:
+                raise DbtRuntimeError(
+                    f"Relation '{frame_name}' is missing schema or identifier."
+                )
+            rel = self._resolve_relation(database, bare_rel.schema, bare_rel.identifier)
+            frames[frame_name] = self.get_storage_catalog(rel.database).get_relation(
+                rel
+            )
         if extra_frames:
             frames.update(extra_frames)
         return pl.SQLContext(frames)
@@ -522,13 +615,7 @@ class PolarsAdapter(BaseAdapter):
                     ' "catalog"."schema"."identifier"'
                 )
             catalog, schema, identifier = parts
-            relation = PolarsRelation.create(
-                database=catalog,
-                schema=schema,
-                identifier=identifier,
-                type=RelationType.Table,
-                catalog=catalog,
-            )
+            relation = self._resolve_relation(catalog, schema, identifier)
             return self.get_storage_catalog(catalog).get_relation(relation)
 
         dbt_obj = namespace["dbtObj"](load_df_function)
@@ -749,7 +836,11 @@ class PolarsAdapter(BaseAdapter):
         elif strategy == "merge":
             if not unique_key:
                 raise DbtRuntimeError("'merge' strategy requires a unique_key")
-            keys = [unique_key] if isinstance(unique_key, str) else unique_key
+            keys = (
+                [unique_key]
+                if isinstance(unique_key, str)
+                else list(dict.fromkeys(unique_key))
+            )
             except_cols = self._resolve_merge_except_cols(
                 new_data, merge_update_columns, merge_exclude_columns
             )
@@ -760,16 +851,22 @@ class PolarsAdapter(BaseAdapter):
                 except_cols=except_cols,
                 incremental_predicates=incremental_predicates or None,
                 allow_schema_evolution=allow_evolution,
+                model_config=model_config,
             )
         elif strategy == "delete+insert":
             if not unique_key:
                 raise DbtRuntimeError("'delete+insert' strategy requires a unique_key")
-            keys = [unique_key] if isinstance(unique_key, str) else unique_key
+            keys = (
+                [unique_key]
+                if isinstance(unique_key, str)
+                else list(dict.fromkeys(unique_key))
+            )
             catalog.delete_matched_relation(
                 relation,
                 new_data,
                 keys,
                 incremental_predicates=incremental_predicates or None,
+                model_config=model_config,
             )
             catalog.append_relation(
                 relation,
@@ -843,15 +940,17 @@ class PolarsAdapter(BaseAdapter):
 
         lazy_result = self._run_python_model(python_code, cte_frames or None)
 
+        model_config = parsed_model.get("config", {})
         target_relation = PolarsRelation.create(
             database=parsed_model["database"],
             schema=parsed_model["schema"],
             identifier=parsed_model["alias"],
             type=RelationType.Table,
             catalog=parsed_model["database"],
+            file_format=model_config.get("file_format", "delta"),
+            read_options=model_config.get("read_options", {}),
         )
         catalog = self.get_storage_catalog(target_relation.catalog)
-        model_config = parsed_model.get("config", {})
 
         partition_by = _normalize_partition_by(model_config.get("partition_by"))
 

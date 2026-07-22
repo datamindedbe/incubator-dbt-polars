@@ -55,6 +55,7 @@ def _write_data_files(
 ) -> None:
     from pyiceberg.io.pyarrow import _dataframe_to_data_files
 
+    counter = counter or itertools.count(0)
     for batch in _iter_arrow_batches(data, model_config):
         if batch.shape[0] == 0:
             continue

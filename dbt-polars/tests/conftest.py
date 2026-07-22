@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import dbt.tests.util
 import pytest
 
+from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
     default_target,
     get_databricks_pyiceberg_catalog,
@@ -14,9 +15,10 @@ from tests.profiles import (
     iceberg_databricks_target,
     iceberg_target,
 )
-from tests.utils import polars_check_relations_equal
+from tests.utils import _resolve_relation, polars_check_relations_equal
 
 dbt.tests.util.check_relations_equal = polars_check_relations_equal
+dbt.tests.util.relation_from_name = _resolve_relation
 
 pytest_plugins = ["dbt.tests.fixtures.project"]
 
@@ -34,16 +36,41 @@ def pytest_addoption(parser):
             "@pytest.mark.skip_profiles(...) to exclude from specific profiles."
         ),
     )
+    parser.addoption(
+        "--config",
+        dest="config_preset",
+        choices=list(CONFIG_PRESETS),
+        default="default",
+        help=(
+            "Named config preset to inject into all models and seeds. "
+            f"Available: {list(CONFIG_PRESETS)}. "
+            "Mark tests with @pytest.mark.require_configs(...) or "
+            "@pytest.mark.skip_configs(...) to filter by preset."
+        ),
+    )
 
 
 def pytest_runtest_setup(item):
     profile = item.config.option.profile
-    require = item.get_closest_marker("require_profiles")
-    if require and profile not in require.args:
-        pytest.skip(f"requires profile in {list(require.args)!r}, active: {profile!r}")
-    skip = item.get_closest_marker("skip_profiles")
-    if skip and profile in skip.args:
+    config_preset = item.config.option.config_preset
+
+    require_profiles = item.get_closest_marker("require_profiles")
+    if require_profiles and profile not in require_profiles.args:
+        pytest.skip(
+            f"requires profile in {list(require_profiles.args)!r}, active: {profile!r}"
+        )
+    skip_profiles = item.get_closest_marker("skip_profiles")
+    if skip_profiles and profile in skip_profiles.args:
         pytest.skip(f"skipped for profile {profile!r}")
+
+    require_configs = item.get_closest_marker("require_configs")
+    if require_configs and config_preset not in require_configs.args:
+        pytest.skip(
+            f"requires config in {list(require_configs.args)!r}, active: {config_preset!r}"
+        )
+    skip_configs = item.get_closest_marker("skip_configs")
+    if skip_configs and config_preset in skip_configs.args:
+        pytest.skip(f"skipped for config preset {config_preset!r}")
 
 
 @pytest.fixture(scope="session")
@@ -110,8 +137,20 @@ class PolarsTestMixin:
     to the Polars adapter (which has no SQL engine)."""
 
     @pytest.fixture(scope="class")
-    def project_config_update(self):
-        return {"models": {"+materialized": "table"}}
+    def project_config_update(self, request):
+        config: dict = {"models": {"+materialized": "table"}}
+        preset_name = request.config.option.config_preset
+        if preset_name:
+            for key, val in CONFIG_PRESETS[preset_name].items():
+                if (
+                    key in config
+                    and isinstance(config[key], dict)
+                    and isinstance(val, dict)
+                ):
+                    config[key] = {**config[key], **val}
+                else:
+                    config[key] = val
+        return config
 
     @pytest.fixture(scope="function")
     def clear_test_schema(self, project):

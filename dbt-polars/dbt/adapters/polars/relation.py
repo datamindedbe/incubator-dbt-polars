@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from dbt.adapters.base.relation import BaseRelation
@@ -9,6 +9,9 @@ from dbt.adapters.contracts.relation import HasQuoting, RelationConfig
 
 @dataclass(frozen=True, eq=False, repr=False)
 class PolarsRelation(BaseRelation):
+    file_format: str = "delta"
+    read_options: dict = field(default_factory=dict)
+
     @classmethod
     def create_from(
         cls: type[PolarsRelation],
@@ -19,13 +22,21 @@ class PolarsRelation(BaseRelation):
         # This override allows using the catalog as an alias for the database
         # property on all relations
 
-        relation = super().create_from(quoting, relation_config, **kwargs)
+        config = relation_config.config
+        catalog = (
+            config.get("catalog") if config else None
+        ) or relation_config.database
+        file_format = config.get("file_format", "delta") if config else "delta"
+        read_options = config.get("read_options", {}) if config else {}
 
-        if not relation.catalog:
-            config = relation_config.config
-            catalog = (
-                config.get("catalog") if config else None
-            ) or relation_config.database
-            if catalog:
-                return relation.replace(catalog=catalog)
+        relation = super().create_from(
+            quoting,
+            relation_config,
+            file_format=file_format,
+            read_options=read_options,
+            **kwargs,
+        )
+
+        if not relation.catalog and catalog:
+            return relation.replace(catalog=catalog)
         return relation

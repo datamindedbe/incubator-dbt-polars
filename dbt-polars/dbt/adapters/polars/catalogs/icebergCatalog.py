@@ -322,7 +322,9 @@ class IcebergCatalog(BaseCatalog):
             for table_id in tables
         ]
 
-    def truncate_relation(self, relation: PolarsRelation) -> None:
+    def truncate_relation(
+        self, relation: PolarsRelation, model_config: dict | None = None
+    ) -> None:
 
         logger.debug(
             f"Truncating table {relation.catalog}/"
@@ -359,6 +361,7 @@ class IcebergCatalog(BaseCatalog):
         except_cols: list[str] | None = None,
         incremental_predicates: list[str] | None = None,
         allow_schema_evolution: bool = False,
+        model_config: dict | None = None,
     ) -> None:
         df = _cast_unsigned_to_signed(df)
         missing_keys = [k for k in keys if k not in df.columns]
@@ -419,6 +422,7 @@ class IcebergCatalog(BaseCatalog):
         df: pl.DataFrame,
         keys: list[str],
         incremental_predicates: list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None:
         if incremental_predicates:
             raise DbtRuntimeError(
@@ -436,6 +440,7 @@ class IcebergCatalog(BaseCatalog):
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
         scd_id_col: str = "dbt_scd_id",
+        model_config: dict | None = None,
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return

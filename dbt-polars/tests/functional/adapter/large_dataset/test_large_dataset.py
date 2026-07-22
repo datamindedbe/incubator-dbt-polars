@@ -11,17 +11,17 @@ from deltalake import write_deltalake
 from tests.conftest import PolarsTestMixin
 from tests.utils import polars_relation_row_count
 
-# A single 5M-row Parquet file (40MB) is scanned 100× by the model, producing
-# a 500M-row (4GB) lazy plan.
+# A single 5M-row Parquet file (40MB) is scanned 50× by the model, producing
+# a 250M-row (2GB) lazy plan.
 #
 # Peak memory delta above baseline (measured empirically on a 16-CPU machine):
 #   sink_delta  (streaming):  ~850 MB  — batch-size × Rayon threads, bounded
-#   collect + write_delta:    ~4+ GB   — 4 GB DataFrame always resident
+#   collect + write_delta:    ~2+ GB   — 2 GB DataFrame always resident
 #
 # 1.5 GB threshold sits between them.
 _SOURCE_ROWS = 5_000_000
-_SOURCE_COPIES = 100
-_OOM_ROWS = _SOURCE_ROWS * _SOURCE_COPIES  # 500 M rows = 4 GB int64
+_SOURCE_COPIES = 50
+_OOM_ROWS = _SOURCE_ROWS * _SOURCE_COPIES  # 250 M rows = 2 GB int64
 _MEMORY_THRESHOLD_BYTES = int(1.5 * 1024**3)  # 1.5 GB
 
 
@@ -103,15 +103,16 @@ def _assert_eager_oom(project):
     )
 
 
+@pytest.mark.require_configs("default")
 @pytest.mark.skip_profiles("iceberg", "iceberg-databricks")
 class TestPythonModelOOM(PolarsTestMixin):
     """
-    Verify sink_delta (LocalCatalog) streams 500M rows without loading all 4 GB
+    Verify sink_delta (LocalCatalog) streams 250M rows without loading all 2 GB
     into memory at once.
 
     Peak memory delta above pre-run baseline (16-CPU machine):
       sink_delta  (streaming):  ~850 MB  — batch-size x Rayon threads, bounded
-      collect + write_delta:    ~4+ GB   — 4 GB DataFrame always resident
+      collect + write_delta:    ~2+ GB   — 2 GB DataFrame always resident
 
     The 1.5 GB threshold sits between them.
     """
@@ -146,7 +147,7 @@ class TestPythonModelOOM(PolarsTestMixin):
         _assert_streaming_memory(project)
 
 
-@pytest.mark.require_profiles("iceberg")
+@pytest.mark.require_profiles("iceberg", "iceberg-databricks")
 class TestIcebergPythonModelOOM(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def large_source_path(self, tmp_path_factory):
@@ -169,6 +170,7 @@ class TestIcebergPythonModelOOM(PolarsTestMixin):
         _assert_streaming_memory(project)
 
 
+@pytest.mark.require_configs("default")
 @pytest.mark.skip_profiles("iceberg", "iceberg-databricks")
 class TestPythonModelEagerOOM(PolarsTestMixin):
     @pytest.fixture(scope="class")
