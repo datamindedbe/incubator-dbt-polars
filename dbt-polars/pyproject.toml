@@ -22,7 +22,7 @@ dependencies = [
     "dbt-adapters>=1.0.0",
     "dbt-common>=1.0.0",
     "dbt-core>=1.11.2",
-    "polars[deltalake,pyarrow]>=1.0.0,<1.43",
+    "polars[deltalake,pyarrow]>=1.0.0,!=1.43.0",
     "sqlglot>=1.0.0",
 ]
 

@@ -1,11 +1,11 @@
-import random
-from datetime import datetime, timezone
-
 # Patch check_relations_equal in dbt.tests.util before any test modules are
 # imported, so all dbt base test classes automatically use the Polars-native
 # comparison (this adapter has no SQL engine to run the EXCEPT-based SQL).
 import dbt.tests.util
+import logging
 import pytest
+import random
+from datetime import datetime, timezone
 
 from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
@@ -18,6 +18,9 @@ from tests.profiles import (
     s3_target,
 )
 from tests.utils import _resolve_relation, polars_check_relations_equal
+
+logger = logging.getLogger(__name__)
+
 
 dbt.tests.util.check_relations_equal = polars_check_relations_equal
 dbt.tests.util.relation_from_name = _resolve_relation
@@ -112,7 +115,7 @@ def dbt_profile_target(
     if profile == "iceberg-databricks":
         return iceberg_databricks_target(databricks_token)
     if profile == "azure":
-        return azure_target(azure_storage_token)
+        return azure_target()
     if profile == "s3":
         return s3_target()
     return default_target()
@@ -259,8 +262,13 @@ class PolarsTestMixin:
                 )
                 try:
                     catalog.drop_schema(relation)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "Failed to drop schema %s/%s during cleanup: %s",
+                        catalog_name,
+                        project.test_schema,
+                        e,
+                    )
             project.created_schemas = []
 
         project.drop_test_schema = drop_all

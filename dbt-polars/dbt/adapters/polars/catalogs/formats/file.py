@@ -32,7 +32,8 @@ class FileFormat:
         spec = FILE_FORMATS[fmt]
         valid = frozenset(inspect.signature(spec.scan).parameters) - {"source", "path"}
         kwargs = {k: v for k, v in read_options.items() if k in valid}
-        kwargs["storage_options"] = storage_options
+        if storage_options is not None:
+            kwargs["storage_options"] = storage_options
         return spec.scan(path, **kwargs)
 
     @staticmethod

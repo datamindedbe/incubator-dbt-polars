@@ -1,7 +1,7 @@
 import os
 
 
-def azure_blob_catalog(name: str, prefix: str, azure_storage_token: str) -> dict:
+def azure_blob_catalog(name: str, prefix: str) -> dict:
     return {
         "type": "azure",
         "name": name,
@@ -10,18 +10,17 @@ def azure_blob_catalog(name: str, prefix: str, azure_storage_token: str) -> dict
         "prefix": prefix,
         "credentials": {
             "exclude_managed_identity_credential": True,
-            # "bearer_token": azure_storage_token,
         },
     }
 
 
-def azure_target(azure_storage_token: str) -> dict:
+def azure_target() -> dict:
     prefix = os.environ.get("AZURE_STORAGE_PREFIX", "dbt-test")
     return {
         "type": "polars",
         "catalogs": [
-            azure_blob_catalog("local", f"{prefix}/local", azure_storage_token),
-            azure_blob_catalog("local2", f"{prefix}/local2", azure_storage_token),
+            azure_blob_catalog("local", f"{prefix}/local"),
+            azure_blob_catalog("local2", f"{prefix}/local2"),
         ],
     }
 

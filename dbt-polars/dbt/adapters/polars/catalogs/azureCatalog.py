@@ -68,8 +68,9 @@ class AzureBlobStorageCatalog(StorageCatalog):
                 "Install it with: pip install 'dbt-polars[azure]'"
             ) from exc
         super().__init__(config, project_root)
-        self._cached_token: AccessToken | None = None  # for _get_storage_options only
+        self._cached_token: AccessToken | None = None
         self._service_client = None  # DataLakeServiceClient | None
+        self._dac = None  # DefaultAzureCredential | None
 
     # ── URI and credential helpers ────────────────────────────────────────────
 
@@ -114,21 +115,26 @@ class AzureBlobStorageCatalog(StorageCatalog):
         base["bearer_token"] = self._default_chain_token()
         return base
 
-    def _default_chain_token(self) -> str:
-        import time
+    def _get_dac(self):
+        if self._dac is None:
+            from azure.identity import DefaultAzureCredential
 
-        from azure.identity import DefaultAzureCredential
-
-        if (
-            self._cached_token is None
-            or self._cached_token.expires_on < time.time() + 300
-        ):
             dac_kwargs = {
                 k: v
                 for k, v in self.config.credentials.items()
                 if k != "storage_options"
             }
-            self._cached_token = DefaultAzureCredential(**dac_kwargs).get_token(
+            self._dac = DefaultAzureCredential(**dac_kwargs)
+        return self._dac
+
+    def _default_chain_token(self) -> str:
+        import time
+
+        if (
+            self._cached_token is None
+            or self._cached_token.expires_on < time.time() + 300
+        ):
+            self._cached_token = self._get_dac().get_token(
                 "https://storage.azure.com/.default"
             )
         return self._cached_token.token
@@ -150,12 +156,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
         elif "sas_token" in creds:
             service = DataLakeServiceClient(f"{url}?{creds['sas_token']}")
         else:
-            from azure.identity import DefaultAzureCredential
-
-            dac_kwargs = {k: v for k, v in creds.items() if k != "storage_options"}
-            service = DataLakeServiceClient(
-                url, credential=DefaultAzureCredential(**dac_kwargs)
-            )
+            service = DataLakeServiceClient(url, credential=self._get_dac())
         self._service_client = service
         return self._service_client
 
