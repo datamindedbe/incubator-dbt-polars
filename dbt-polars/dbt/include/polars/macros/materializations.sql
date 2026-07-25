@@ -4,6 +4,7 @@
 
 
 {% materialization incremental, adapter='polars', supported_languages=['sql', 'python'] %}
+  {%- do adapter.store_source_configs(graph) -%}
   {%- set existing_relation = load_relation(this) -%}
   {%- set target_relation = this.incorporate(type='table') -%}
   {%- set full_refresh_mode = (should_full_refresh()) -%}
@@ -50,6 +51,7 @@
 
 
 {% materialization table, adapter='polars', supported_languages=['sql', 'python'] %}
+  {%- do adapter.store_source_configs(graph) -%}
   {%- set target_relation = this.incorporate(type='table') -%}
   {%- set language = model['language'] -%}
   {%- set partition_by = config.get('partition_by') -%}
@@ -83,6 +85,7 @@
 
 
 {% materialization snapshot, adapter='polars' %}
+  {%- do adapter.store_source_configs(graph) -%}
   {%- set target_relation = this.incorporate(type='table') -%}
 
   {%- do adapter.polars_execute_snapshot(

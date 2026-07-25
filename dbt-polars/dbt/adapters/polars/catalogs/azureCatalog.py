@@ -107,32 +107,25 @@ class AzureBlobStorageCatalog(StorageCatalog):
             path = f"{path}.{relation.file_format}"
         return f"az://{container}/{path}"
 
-    _DELEGATED_CRED_KEYS = (
-        "bearer_token",
-        "account_key",
-        "sas_token",
-        "client_secret",
-        "federated_token_file",
-        "use_azure_cli",
-        "use_managed_identity",
-    )
+    _DELEGATED_CRED_KEYS = ("bearer_token", "account_key", "sas_token")
 
     def _get_storage_options(self, _uri: str) -> dict[str, str]:
-        opts: dict[str, str] = {
+        base: dict[str, str] = {
             "account_name": self.config.account_name,
             "timeout": "120s",
         }
         creds = self.config.credentials
-        if any(k in creds for k in self._DELEGATED_CRED_KEYS):
-            # object_store handles all of these natively (managed identity via
-            # IMDS fallback, so the flag itself is stripped)
-            opts.update(
-                {k: str(v) for k, v in creds.items() if k != "use_managed_identity"}
-            )
-        else:
-            # object_store has no DefaultAzureCredential equivalent; mint a token
-            opts["bearer_token"] = self._default_chain_token()
-        return opts
+
+        override = creds.get("storage_options")
+        if override is not None:
+            return {**base, **override}
+
+        direct = {k: str(v) for k, v in creds.items() if k in self._DELEGATED_CRED_KEYS}
+        if direct:
+            return {**base, **direct}
+
+        base["bearer_token"] = self._default_chain_token()
+        return base
 
     def _default_chain_token(self) -> str:
         import time
@@ -143,9 +136,14 @@ class AzureBlobStorageCatalog(StorageCatalog):
             self._cached_token is None
             or self._cached_token.expires_on < time.time() + 300
         ):
-            self._cached_token = DefaultAzureCredential(
-                **self.config.credentials
-            ).get_token("https://storage.azure.com/.default")
+            dac_kwargs = {
+                k: v
+                for k, v in self.config.credentials.items()
+                if k != "storage_options"
+            }
+            self._cached_token = DefaultAzureCredential(**dac_kwargs).get_token(
+                "https://storage.azure.com/.default"
+            )
         return self._cached_token.token
 
     def _get_service_client(self):
@@ -164,50 +162,12 @@ class AzureBlobStorageCatalog(StorageCatalog):
             service = DataLakeServiceClient(url, credential=creds["account_key"])
         elif "sas_token" in creds:
             service = DataLakeServiceClient(f"{url}?{creds['sas_token']}")
-        elif "client_secret" in creds:
-            from azure.identity import ClientSecretCredential
-
-            service = DataLakeServiceClient(
-                url,
-                credential=ClientSecretCredential(
-                    creds["tenant_id"], creds["client_id"], creds["client_secret"]
-                ),
-            )
-        elif "federated_token_file" in creds:
-            from azure.identity import WorkloadIdentityCredential
-
-            service = DataLakeServiceClient(
-                url,
-                credential=WorkloadIdentityCredential(
-                    tenant_id=creds["tenant_id"],
-                    client_id=creds["client_id"],
-                    token_file_path=creds["federated_token_file"],
-                ),
-            )
-        elif creds.get("use_azure_cli"):
-            from azure.identity import AzureCliCredential
-
-            service = DataLakeServiceClient(url, credential=AzureCliCredential())
-        elif creds.get("use_managed_identity"):
-            from azure.identity import ManagedIdentityCredential
-
-            identity_config = {}
-            if "object_id" in creds:
-                identity_config["object_id"] = creds["object_id"]
-            if "msi_resource_id" in creds:
-                identity_config["msi_res_id"] = creds["msi_resource_id"]
-            service = DataLakeServiceClient(
-                url,
-                credential=ManagedIdentityCredential(
-                    client_id=creds.get("client_id"),
-                    identity_config=identity_config or None,
-                ),
-            )
         else:
             from azure.identity import DefaultAzureCredential
 
+            dac_kwargs = {k: v for k, v in creds.items() if k != "storage_options"}
             service = DataLakeServiceClient(
-                url, credential=DefaultAzureCredential(**creds)
+                url, credential=DefaultAzureCredential(**dac_kwargs)
             )
         self._service_client = service
         return self._service_client

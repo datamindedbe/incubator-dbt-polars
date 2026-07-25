@@ -8,6 +8,7 @@ jobs:
   test:
     name: "Test / py${{ matrix.python-version }} / ${{ matrix.deps }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +35,7 @@ jobs:
   test-file-formats:
     name: "Test / py3.12 / ${{ matrix.config }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     strategy:
       fail-fast: false
       matrix:
@@ -54,11 +56,12 @@ jobs:
         run: uv sync --python 3.12
 
       - name: Run tests (${{ matrix.config }})
-        run: uv run --directory dbt-polars --python 3.12 pytest -n auto --config ${{ matrix.config }}
+        run: uv run --directory dbt-polars --python 3.12 pytest -n 0 --config ${{ matrix.config }}
 
   test-iceberg:
     name: "Test iceberg / py${{ matrix.python-version }} / ${{ matrix.deps }}"
     runs-on: ubuntu-latest
+    timeout-minutes: 4
     strategy:
       fail-fast: false
       matrix:

@@ -105,7 +105,9 @@ class StorageCatalog(BaseCatalog):
                 uri, data, relation.file_format, model_config, storage_options=opts
             )
 
-    def truncate_relation(self, relation: PolarsRelation) -> None:
+    def truncate_relation(
+        self, relation: PolarsRelation, model_config: dict | None = None
+    ) -> None:
         logger.debug(
             f"Truncating table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
@@ -115,7 +117,11 @@ class StorageCatalog(BaseCatalog):
             DeltaFormat.truncate(uri, storage_options=opts)
         else:
             FileFormat.truncate(
-                uri, relation.file_format, relation.read_options, storage_options=opts
+                uri,
+                relation.file_format,
+                relation.read_options,
+                storage_options=opts,
+                model_config=model_config,
             )
 
     def append_relation(
@@ -150,6 +156,7 @@ class StorageCatalog(BaseCatalog):
         except_cols: list[str] | None = None,
         incremental_predicates: list[str] | None = None,
         allow_schema_evolution: bool = False,
+        model_config: dict | None = None,
     ) -> None:
         uri = self._get_uri(relation)
         opts = self._get_storage_options(uri)
@@ -164,15 +171,20 @@ class StorageCatalog(BaseCatalog):
                 storage_options=opts,
             )
         else:
+            if incremental_predicates:
+                raise DbtRuntimeError(
+                    "FileFormats do not support incremental predicates. Switch to "
+                    "delta format to start using incremental predicates."
+                )
             FileFormat.merge(
                 uri,
                 relation.file_format,
                 df,
                 keys,
                 except_cols,
-                incremental_predicates,
                 relation.read_options,
                 storage_options=opts,
+                model_config=model_config,
             )
 
     def delete_matched_relation(
@@ -181,6 +193,7 @@ class StorageCatalog(BaseCatalog):
         df: pl.DataFrame,
         keys: list[str],
         incremental_predicates: list[str] | None = None,
+        model_config: dict | None = None,
     ) -> None:
         uri = self._get_uri(relation)
         opts = self._get_storage_options(uri)
@@ -197,6 +210,7 @@ class StorageCatalog(BaseCatalog):
                 incremental_predicates,
                 relation.read_options,
                 storage_options=opts,
+                model_config=model_config,
             )
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
@@ -239,6 +253,7 @@ class StorageCatalog(BaseCatalog):
         rows_to_close: pl.DataFrame,
         rows_to_insert: pl.DataFrame,
         scd_id_col: str = "dbt_scd_id",
+        model_config: dict | None = None,
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
@@ -257,7 +272,7 @@ class StorageCatalog(BaseCatalog):
                     uri,
                     relation.file_format,
                     rows_to_insert,
-                    {},
+                    model_config or {},
                     relation.read_options,
                     storage_options=opts,
                 )
@@ -270,4 +285,5 @@ class StorageCatalog(BaseCatalog):
                 scd_id_col,
                 relation.read_options,
                 storage_options=opts,
+                model_config=model_config,
             )
