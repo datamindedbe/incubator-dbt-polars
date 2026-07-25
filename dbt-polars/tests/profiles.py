@@ -26,31 +26,6 @@ def azure_target(azure_storage_token: str) -> dict:
     }
 
 
-def azure_schemas_as_containers_catalog(
-    name: str, prefix: str, azure_storage_token: str
-) -> dict:
-    return {
-        "type": "azure",
-        "name": name,
-        "account_name": os.environ.get("AZURE_STORAGE_ACCOUNT", ""),
-        "schemas_as_containers": True,
-        "prefix": prefix,
-        "credentials": {"bearer_token": azure_storage_token},
-    }
-
-
-def azure_schemas_as_containers_target(azure_storage_token: str) -> dict:
-    return {
-        "type": "polars",
-        "catalogs": [
-            azure_schemas_as_containers_catalog("local", "local", azure_storage_token),
-            azure_schemas_as_containers_catalog(
-                "local2", "local2", azure_storage_token
-            ),
-        ],
-    }
-
-
 def local_catalog(name: str, root: str) -> dict:
     return {
         "type": "local",

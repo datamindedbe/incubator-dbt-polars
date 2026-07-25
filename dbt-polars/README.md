@@ -1,43 +1,55 @@
-v<p align="center">
-  <img src="https://raw.githubusercontent.com/dbt-labs/dbt/ec7dee39f793aa4f7dd3dae37282cc87664813e4/etc/dbt-logo-full.svg" alt="dbt logo" width="500"/>
-</p>
+# dbt-polars
 
-**[dbt](https://www.getdbt.com/)** enables data analysts and engineers to transform their data using the same practices that software engineers use to build applications.
+A [dbt](https://www.getdbt.com/) adapter that runs models locally using [Polars](https://pola.rs/). Instead of connecting to a database, dbt-polars reads and writes files — on your local filesystem, Azure Blob Storage, AWS S3, or an Iceberg catalog.
 
-dbt is the T in ELT. Organize, cleanse, denormalize, filter, rename, and pre-aggregate the raw data in your warehouse so that it's ready for analysis.
+## Installation
 
-## Polars
-This repo contains the base code to help you start to build out your dbt-polars adapter plugin, for more information on how to build out the adapter please follow the [docs](https://docs.getdbt.com/docs/contributing/building-a-new-adapter)
+```bash
+pip install dbt-polars
+```
 
-** Note ** this `README` is meant to be replaced with what information would be required to use your adpater once your at a point todo so.
+Extra dependencies are required for cloud and Iceberg backends:
 
-** Note **
-### Adapter Scaffold default Versioning
-This adapter plugin follows [semantic versioning](https://semver.org/). The first version of this plugin is v1.7.0, in order to be compatible with dbt Core v1.7.0.
+```bash
+pip install 'dbt-polars[azure]'    # Azure Blob Storage
+pip install 'dbt-polars[s3]'       # AWS S3
+pip install 'dbt-polars[iceberg]'  # Apache Iceberg (SQLite, REST, Databricks, …)
+```
 
-It's also brand new! For Polars-specific functionality, we will aim for backwards-compatibility wherever possible. We are likely to be iterating more quickly than most major-version-1 software projects. To that end, backwards-incompatible changes will be clearly communicated and limited to minor versions (once every three months).
+## Catalogs
 
- ## Getting Started
+dbt-polars uses **catalogs** to define where data is stored. Each catalog maps to a storage backend. You can configure multiple catalogs in a single profile and reference them from your models.
 
- #### Setting up Locally
-- run `pip install -r dev-requirements.txt`.
-- cd directory into the `dbt-core` you'd like to be testing against and run `make dev`.
+| Catalog | Backend | Status |
+|---|---|---|
+| `local` | Local filesystem | Usable |
+| `iceberg` with SQLite | Iceberg + SQLite metastore | Usable |
+| `iceberg` with REST + Databricks | Iceberg REST API (Unity Catalog) | Experimental |
+| `iceberg` with other backends | Any pyiceberg-supported backend | Experimental |
+| `azure` | Azure Blob Storage / ADLS Gen2 | Experimental |
 
- #### Connect to Github
-- run `git init`.
-- Connect your lcoal code to a Github repo.
+## Quick start
 
-## Join the dbt Community
+A minimal `profiles.yml` for local development:
 
-- Be part of the conversation in the [dbt Community Slack](http://community.getdbt.com/)
-- If one doesn't exist feel free to request a #db-Polars channel be made in the [#channel-requests](https://getdbt.slack.com/archives/C01D8J8AJDA) on dbt community slack channel.
-- Read more on the [dbt Community Discourse](https://discourse.getdbt.com)
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      schema: dev
+      catalogs:
+        - name: my_catalog
+          type: local
+          root: ./data
+```
 
-## Reporting bugs and contributing code
+## Documentation
 
-- Want to report a bug or request a feature? Let us know on [Slack](http://community.getdbt.com/), or open [an issue](https://github.com/dbt-labs/dbt-redshift/issues/new)
-- Want to help us build dbt? Check out the [Contributing Guide](https://github.com/dbt-labs/dbt/blob/HEAD/CONTRIBUTING.md)
-
-## Code of Conduct
-
-Everyone interacting in the dbt project's codebases, issue trackers, chat rooms, and mailing lists is expected to follow the [dbt Code of Conduct](https://community.getdbt.com/code-of-conduct).
+- [Catalog overview and profile reference](docs/index.md)
+- [Local catalog](docs/catalogs/local.md)
+- [Azure catalog](docs/catalogs/azure.md)
+- [Iceberg catalog](docs/catalogs/iceberg.md)
+- [Python models and tests](docs/python-models.md)
+- [Roadmap and known limitations](docs/roadmap.md)

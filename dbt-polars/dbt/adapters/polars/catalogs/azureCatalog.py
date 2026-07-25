@@ -25,7 +25,6 @@ class AzureBlobStorageCatalogConfig(CatalogConfig):
         account_name: str,
         container: str = "",
         prefix: str = "",
-        schemas_as_containers: bool = False,
         credentials: dict | None = None,
     ) -> None:
         self.name = name
@@ -33,17 +32,12 @@ class AzureBlobStorageCatalogConfig(CatalogConfig):
         self.account_name = account_name
         self.container = container
         self.prefix = prefix.strip("/")
-        self.schemas_as_containers = schemas_as_containers
         self.credentials = credentials or {}
 
     def unique_field(self) -> str:
-        if self.schemas_as_containers:
-            return f"{self.account_name}/{self.prefix}"
         return f"{self.account_name}/{self.container}/{self.prefix}"
 
     def connection_keys(self) -> tuple[str, ...]:
-        if self.schemas_as_containers:
-            return ("name", "account_name", "prefix")
         return ("name", "account_name", "container", "prefix")
 
 
@@ -85,14 +79,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
         components.extend(p.strip("/") for p in parts if p)
         return "/".join(components)
 
-    def _container_name(self, schema: str) -> str:
-        """Return the file system (container) to use for a given schema."""
-        return schema if self.config.schemas_as_containers else self.config.container
-
     def _object_path(self, schema: str, *parts: str) -> str:
-        """Return the path within the file system for the given schema + parts."""
-        if self.config.schemas_as_containers:
-            return self._blob_prefix(*parts)
         return self._blob_prefix(schema, *parts)
 
     def _dfs_url(self) -> str:
@@ -101,7 +88,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
     def _get_uri(self, relation: PolarsRelation) -> str:
         schema = relation.schema or ""
         identifier = relation.identifier or ""
-        container = self._container_name(schema)
+        container = self.config.container
         path = self._object_path(schema, identifier)
         if relation.file_format != "delta":
             path = f"{path}.{relation.file_format}"
@@ -190,29 +177,17 @@ class AzureBlobStorageCatalog(StorageCatalog):
 
     def create_schema(self, relation: PolarsRelation) -> None:
         schema = relation.schema or ""
-        if self.config.schemas_as_containers:
-            from azure.core.exceptions import ResourceExistsError
-
-            try:
-                self._get_service_client().create_file_system(schema)
-            except ResourceExistsError:
-                pass
-            logger.debug(f"create_schema: created file system {schema}")
-        else:
-            path = self._object_path(schema)
-            logger.debug(f"create_schema: creating directory {path}")
-            self._get_file_system_client().create_directory(path)
+        path = self._object_path(schema)
+        logger.debug(f"create_schema: creating directory {path}")
+        self._get_file_system_client().create_directory(path)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
         schema = relation.schema or ""
-        file_system = self._container_name(schema)
         path = self._object_path(schema)
         logger.debug(f"Dropping schema {relation.catalog}/{schema}")
-        self._remove_directory(file_system, path)
+        self._remove_directory(self.config.container, path)
 
     def list_schemas(self) -> list[str]:
-        if self.config.schemas_as_containers:
-            return [fs.name for fs in self._get_service_client().list_file_systems()]
         from azure.core.exceptions import ResourceNotFoundError
 
         base = self.config.prefix or ""
@@ -234,7 +209,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
         opts = self._get_storage_options(uri)
         if relation.file_format == "delta":
             return DeltaTable.is_deltatable(uri, storage_options=opts)
-        file_system = self._container_name(schema)
+        file_system = self.config.container
         file_path = f"{self._object_path(schema, identifier)}.{relation.file_format}"
         return (
             self._get_file_system_client(file_system)
@@ -245,7 +220,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
     def drop_relation(self, relation: PolarsRelation) -> None:
         schema = relation.schema or ""
         identifier = relation.identifier or ""
-        file_system = self._container_name(schema)
+        file_system = self.config.container
         logger.debug(
             f"Dropping table if exists {relation.catalog}/{schema}/{identifier}"
         )
@@ -270,7 +245,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
         from azure.core.exceptions import ResourceNotFoundError
 
         schema = schema_relation.schema or ""
-        file_system = self._container_name(schema)
+        file_system = self.config.container
         prefix = self._object_path(schema)
         relations: list[PolarsRelation] = []
 

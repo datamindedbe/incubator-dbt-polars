@@ -9,7 +9,6 @@ import pytest
 
 from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
-    azure_schemas_as_containers_target,
     azure_target,
     default_target,
     get_databricks_pyiceberg_catalog,
@@ -35,7 +34,6 @@ def pytest_addoption(parser):
             "iceberg",
             "iceberg-databricks",
             "azure",
-            "azure-containers",
             "s3",
         ],
         default="local",
@@ -92,7 +90,7 @@ def databricks_token(request):
 
 @pytest.fixture(scope="session")
 def azure_storage_token(request):
-    if request.config.option.profile not in ("azure", "azure-containers"):
+    if request.config.option.profile != "azure":
         return None
     from azure.identity import DefaultAzureCredential
 
@@ -115,8 +113,6 @@ def dbt_profile_target(
         return iceberg_databricks_target(databricks_token)
     if profile == "azure":
         return azure_target(azure_storage_token)
-    if profile == "azure-containers":
-        return azure_schemas_as_containers_target(azure_storage_token)
     if profile == "s3":
         return s3_target()
     return default_target()
@@ -173,32 +169,15 @@ def cleanup_azure_test_schemas(request):
             depth = blob.name.rstrip("/").count("/")
             depth_groups.setdefault(depth, []).append(blob.name)
 
+    def delete_blob(name: str) -> None:
+        try:
+            client.delete_blob(name)
+        except Exception:
+            pass
+
     for depth in sorted(depth_groups.keys(), reverse=True):
         with ThreadPoolExecutor(max_workers=16) as executor:
-            list(executor.map(client.delete_blob, depth_groups[depth]))
-
-
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_azure_containers_test_schemas(request):
-    yield
-    if request.config.option.profile != "azure-containers":
-        return
-    import os
-
-    from azure.identity import DefaultAzureCredential
-    from azure.storage.blob import BlobServiceClient
-
-    account_name = os.environ.get("AZURE_STORAGE_ACCOUNT", "")
-    if not account_name:
-        return
-    service = BlobServiceClient(
-        f"https://{account_name}.blob.core.windows.net",
-        credential=DefaultAzureCredential(exclude_managed_identity_credential=True),
-    )
-    for container in service.list_containers():
-        name = container["name"]
-        if name.startswith("test") and "_azure_containers_" in name:
-            service.delete_container(name)
+            list(executor.map(delete_blob, depth_groups[depth]))
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -263,6 +242,29 @@ class PolarsTestMixin:
                 else:
                     config[key] = val
         return config
+
+    @pytest.fixture(scope="class", autouse=True)
+    def cleanup_all_catalog_schemas(self, project):
+        from dbt.adapters.polars.catalogs import CATALOG_REGISTRY
+
+        def drop_all():
+            credentials = project.adapter.config.credentials
+            for catalog_name, config in credentials.catalog_configs.items():
+                catalog = CATALOG_REGISTRY[config.type](
+                    config, project.adapter.config.project_root
+                )
+                relation = project.adapter.Relation.create(
+                    database=catalog_name,
+                    schema=project.test_schema,
+                )
+                try:
+                    catalog.drop_schema(relation)
+                except Exception:
+                    pass
+            project.created_schemas = []
+
+        project.drop_test_schema = drop_all
+        yield
 
     @pytest.fixture(scope="function")
     def clear_test_schema(self, project):
