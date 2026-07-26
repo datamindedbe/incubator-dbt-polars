@@ -85,8 +85,8 @@ class StorageCatalog(BaseCatalog):
         if partition_by and relation.file_format != "delta":
             raise DbtRuntimeError(
                 "partition_by is not supported "
-                + f"for file_format='{relation.file_format}'."
-                "Use file_format='delta' to enable partitioning."
+                + f"for file_format='{relation.file_format}'. "
+                + "Use file_format='delta' to enable partitioning."
             )
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"

@@ -16,7 +16,7 @@ jobs:
         deps: ["latest", "lowest-direct"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -30,7 +30,7 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests
-        run: uv run  --python ${{ matrix.python-version }} pytest -n auto
+        run: uv run --python ${{ matrix.python-version }} pytest -n auto
 
   test-file-formats:
     name: "Test / py3.12 / ${{ matrix.config }}"
@@ -42,7 +42,7 @@ jobs:
         config: ["csv", "parquet"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -69,7 +69,7 @@ jobs:
         deps: ["latest", "lowest-direct"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
 
@@ -80,14 +80,14 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} --extra iceberg ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests (iceberg catalog)
-        run: uv run --python ${{ matrix.python-version }} pytest  -n auto --profile iceberg
+        run: uv run --python ${{ matrix.python-version }} pytest -n auto --profile iceberg
 
   ruff:
     name: "Ruff"
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:

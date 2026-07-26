@@ -57,4 +57,3 @@ Iceberg catalogs always use the Iceberg format — the `file_format` config has 
 ## Other topics
 
 - [Python models and tests](python-models.md)
-- [Roadmap and known limitations](roadmap.md)
