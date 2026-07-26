@@ -22,7 +22,7 @@ dependencies = [
     "dbt-adapters>=1.0.0",
     "dbt-common>=1.0.0",
     "dbt-core>=1.11.2",
-    "polars[deltalake,pyarrow]>=0.19,<1.43",
+    "polars[deltalake,pyarrow]>=1.0.0,!=1.43.0",
     "sqlglot>=1.0.0",
 ]
 
@@ -40,6 +40,8 @@ dev = [
 # Pinned: iceberg_write_utils.py uses private pyiceberg APIs
 # Test with each new adapter version to see if pyiceberg can be upgraded
 iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
+s3 = ["boto3>=1.20.0"]
+azure = ["azure-storage-file-datalake>=12.0.0", "azure-identity>=1.0.0"]
 
 [build-system]
 requires = ["setuptools>=64"]
@@ -60,8 +62,6 @@ line-length = 88
 [tool.pytest.ini_options]
 # CI runs with -n auto; keep -n 0 here for local development (easier debugging)
 addopts = "-n 0"
-timeout = 300
-timeout_method = "thread"
 markers = [
     "require_profiles(...): only run this test when --profile matches one of the listed names",
     "skip_profiles(...): skip this test when --profile matches one of the listed names",

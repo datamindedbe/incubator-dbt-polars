@@ -1,6 +1,30 @@
 import os
 
 
+def azure_blob_catalog(name: str, prefix: str) -> dict:
+    return {
+        "type": "azure",
+        "name": name,
+        "account_name": os.environ.get("AZURE_STORAGE_ACCOUNT", ""),
+        "container": os.environ.get("AZURE_STORAGE_CONTAINER", ""),
+        "prefix": prefix,
+        "credentials": {
+            "exclude_managed_identity_credential": True,
+        },
+    }
+
+
+def azure_target() -> dict:
+    prefix = os.environ.get("AZURE_STORAGE_PREFIX", "dbt-test")
+    return {
+        "type": "polars",
+        "catalogs": [
+            azure_blob_catalog("local", f"{prefix}/local"),
+            azure_blob_catalog("local2", f"{prefix}/local2"),
+        ],
+    }
+
+
 def local_catalog(name: str, root: str) -> dict:
     return {
         "type": "local",
@@ -42,6 +66,26 @@ def iceberg_target(base_path: str) -> dict:
                 f"sqlite:///{base_path}/local2.db",
                 f"file://{base_path}/wh_local2",
             ),
+        ],
+    }
+
+
+def s3_catalog(name: str, prefix: str) -> dict:
+    return {
+        "type": "s3",
+        "name": name,
+        "bucket": os.environ.get("AWS_S3_BUCKET", ""),
+        "prefix": prefix,
+    }
+
+
+def s3_target() -> dict:
+    prefix = os.environ.get("AWS_S3_PREFIX", "dbt-test")
+    return {
+        "type": "polars",
+        "catalogs": [
+            s3_catalog("local", f"{prefix}/local"),
+            s3_catalog("local2", f"{prefix}/local2"),
         ],
     }
 

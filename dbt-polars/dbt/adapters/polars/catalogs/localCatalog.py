@@ -1,29 +1,19 @@
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
-from dbt.adapters.polars.catalogs.formats.delta import DeltaFormat
-from dbt.adapters.polars.catalogs.formats.file import FileFormat
+from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
 from deltalake import DeltaTable
 
-import polars as pl
-
 logger = AdapterLogger("polars")
 
 _FILE_FORMATS = frozenset(FILE_FORMATS)
-
-
-def _unsupported_for_format(method: str, fmt: str) -> NoReturn:
-    raise DbtRuntimeError(
-        f"{method} is only supported for delta file_format, got '{fmt}'"
-    )
 
 
 @dataclass
@@ -39,7 +29,7 @@ class LocalCatalogConfig(CatalogConfig):
         return ("name", "root")
 
 
-class LocalCatalog(BaseCatalog):
+class LocalCatalog(StorageCatalog):
     config: LocalCatalogConfig
 
     def __init__(self, config: LocalCatalogConfig, project_root: str):
@@ -74,6 +64,12 @@ class LocalCatalog(BaseCatalog):
             return stem
         return stem.with_suffix(f".{relation.file_format}")
 
+    def _get_uri(self, relation: PolarsRelation) -> str:
+        return str(self._get_path(relation))
+
+    def _get_storage_options(self, _uri: str) -> None:
+        return None
+
     def create_schema(self, relation: PolarsRelation) -> None:
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
@@ -94,41 +90,6 @@ class LocalCatalog(BaseCatalog):
     def table_exists(self, relation: PolarsRelation) -> bool:
         return self._get_path(relation).exists()
 
-    def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
-        path = self._get_path(relation)
-        if relation.file_format == "delta":
-            return DeltaFormat.read(path)
-        return FileFormat.read(path, relation.file_format, relation.read_options)
-
-    def get_partition_columns(self, relation: PolarsRelation) -> list[str]:
-        if relation.file_format != "delta":
-            return []
-        return DeltaFormat.get_partition_columns(self._get_path(relation))
-
-    def write_relation(
-        self,
-        relation: PolarsRelation,
-        data: pl.DataFrame | pl.LazyFrame,
-        partition_by: list[str],
-        model_config: dict | None = None,
-    ) -> None:
-        model_config = model_config or {}
-        if partition_by and relation.file_format != "delta":
-            raise DbtRuntimeError(
-                f"partition_by is not supported for file_format='{relation.file_format}'. "
-                "Use file_format='delta' to enable partitioning."
-            )
-        logger.debug(
-            f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
-        )
-        path = self._get_path(relation)
-        if relation.file_format == "delta":
-            DeltaFormat.write(
-                path, data, "overwrite", model_config, partition_by or None
-            )
-        else:
-            FileFormat.write(path, data, relation.file_format, model_config)
-
     def drop_relation(self, relation: PolarsRelation) -> None:
         logger.debug(
             f"Dropping table if exists {relation.catalog}/"
@@ -139,155 +100,6 @@ class LocalCatalog(BaseCatalog):
             shutil.rmtree(path, ignore_errors=True)
         elif path.exists():
             path.unlink()
-
-    def truncate_relation(
-        self, relation: PolarsRelation, model_config: dict | None = None
-    ) -> None:
-        logger.debug(
-            f"Truncating table {relation.catalog}/"
-            f"{relation.schema}/{relation.identifier}"
-        )
-        path = self._get_path(relation)
-        if relation.file_format == "delta":
-            DeltaFormat.truncate(path)
-        else:
-            FileFormat.truncate(
-                path, relation.file_format, relation.read_options, model_config
-            )
-
-    def append_relation(
-        self,
-        relation: PolarsRelation,
-        data: pl.DataFrame | pl.LazyFrame,
-        allow_schema_evolution: bool = False,
-        model_config: dict | None = None,
-    ) -> None:
-        model_config = model_config or {}
-        path = self._get_path(relation)
-        if relation.file_format == "delta":
-            DeltaFormat.append(path, data, allow_schema_evolution, model_config)
-        else:
-            FileFormat.append(
-                path, relation.file_format, data, model_config, relation.read_options
-            )
-
-    def merge_relation(
-        self,
-        relation: PolarsRelation,
-        df: pl.DataFrame,
-        keys: list[str],
-        except_cols: list[str] | None = None,
-        incremental_predicates: list[str] | None = None,
-        allow_schema_evolution: bool = False,
-        model_config: dict | None = None,
-    ) -> None:
-        path = self._get_path(relation)
-        if relation.file_format == "delta":
-            DeltaFormat.merge(
-                path,
-                df,
-                keys,
-                except_cols,
-                incremental_predicates,
-                allow_schema_evolution,
-            )
-        else:
-            if incremental_predicates:
-                raise DbtRuntimeError(
-                    "FileFormats do not support incremental predicates. Switch to "
-                    + "delta format to start using incremental predicates."
-                )
-
-            FileFormat.merge(
-                path,
-                relation.file_format,
-                df,
-                keys,
-                except_cols,
-                relation.read_options,
-                model_config,
-            )
-
-    def delete_matched_relation(
-        self,
-        relation: PolarsRelation,
-        df: pl.DataFrame,
-        keys: list[str],
-        incremental_predicates: list[str] | None = None,
-        model_config: dict | None = None,
-    ) -> None:
-        path = self._get_path(relation)
-        if relation.file_format == "delta":
-            DeltaFormat.delete_matched(path, df, keys, incremental_predicates)
-        else:
-            FileFormat.delete_matched(
-                path,
-                relation.file_format,
-                df,
-                keys,
-                incremental_predicates,
-                relation.read_options,
-                model_config,
-            )
-
-    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        if relation.file_format != "delta":
-            _unsupported_for_format("set_relation_comment", relation.file_format)
-        DeltaFormat.set_relation_comment(self._get_path(relation), comment)
-
-    def set_column_comments(
-        self, relation: PolarsRelation, comments: dict[str, str]
-    ) -> None:
-        if relation.file_format != "delta":
-            _unsupported_for_format("set_column_comments", relation.file_format)
-        DeltaFormat.set_column_comments(self._get_path(relation), comments)
-
-    def get_relation_comment(self, relation: PolarsRelation) -> str | None:
-        if relation.file_format != "delta":
-            return None
-        return DeltaFormat.get_relation_comment(self._get_path(relation))
-
-    def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
-        if relation.file_format != "delta":
-            return {}
-        return DeltaFormat.get_column_comments(self._get_path(relation))
-
-    def apply_snapshot_delta(
-        self,
-        relation: PolarsRelation,
-        rows_to_close: pl.DataFrame,
-        rows_to_insert: pl.DataFrame,
-        scd_id_col: str = "dbt_scd_id",
-        model_config: dict | None = None,
-    ) -> None:
-        model_config = model_config or {}
-        if rows_to_close.is_empty() and rows_to_insert.is_empty():
-            return
-        path = self._get_path(relation)
-        if relation.file_format == "delta":
-            if rows_to_close.is_empty():
-                DeltaFormat.append(path, rows_to_insert, False, {})
-                return
-            DeltaFormat.apply_snapshot(path, rows_to_close, rows_to_insert, scd_id_col)
-        else:
-            if rows_to_close.is_empty():
-                FileFormat.append(
-                    path,
-                    relation.file_format,
-                    rows_to_insert,
-                    model_config,
-                    relation.read_options,
-                )
-                return
-            FileFormat.apply_snapshot(
-                path,
-                relation.file_format,
-                rows_to_close,
-                rows_to_insert,
-                scd_id_col,
-                relation.read_options,
-                model_config,
-            )
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation

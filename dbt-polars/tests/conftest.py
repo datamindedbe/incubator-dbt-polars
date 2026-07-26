@@ -1,21 +1,26 @@
-import random
-from datetime import datetime, timezone
-
 # Patch check_relations_equal in dbt.tests.util before any test modules are
 # imported, so all dbt base test classes automatically use the Polars-native
 # comparison (this adapter has no SQL engine to run the EXCEPT-based SQL).
 import dbt.tests.util
+import logging
 import pytest
+import random
+from datetime import datetime, timezone
 
 from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
+    azure_target,
     default_target,
     get_databricks_pyiceberg_catalog,
     get_databricks_token,
     iceberg_databricks_target,
     iceberg_target,
+    s3_target,
 )
 from tests.utils import _resolve_relation, polars_check_relations_equal
+
+logger = logging.getLogger(__name__)
+
 
 dbt.tests.util.check_relations_equal = polars_check_relations_equal
 dbt.tests.util.relation_from_name = _resolve_relation
@@ -27,7 +32,13 @@ def pytest_addoption(parser):
     parser.addoption(
         "--profile",
         dest="profile",
-        choices=["local", "iceberg", "iceberg-databricks"],
+        choices=[
+            "local",
+            "iceberg",
+            "iceberg-databricks",
+            "azure",
+            "s3",
+        ],
         default="local",
         help=(
             "dbt profile to use for tests (determines the catalog backend). "
@@ -88,6 +99,10 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token):
         return iceberg_target(base)
     if profile == "iceberg-databricks":
         return iceberg_databricks_target(databricks_token)
+    if profile == "azure":
+        return azure_target()
+    if profile == "s3":
+        return s3_target()
     return default_target()
 
 
@@ -112,6 +127,70 @@ def unique_schema(request, prefix) -> str:
 @pytest.fixture(scope="class")
 def project_root(tmpdir_factory):
     return tmpdir_factory.mktemp("project")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_azure_test_schemas(request):
+    yield
+    if request.config.option.profile != "azure":
+        return
+    import os
+
+    from azure.identity import DefaultAzureCredential
+    from azure.storage.blob import BlobServiceClient
+
+    account_name = os.environ.get("AZURE_STORAGE_ACCOUNT", "")
+    container = os.environ.get("AZURE_STORAGE_CONTAINER", "")
+    prefix = os.environ.get("AZURE_STORAGE_PREFIX", "dbt-test")
+    if not account_name or not container:
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    client = BlobServiceClient(
+        f"https://{account_name}.blob.core.windows.net",
+        credential=DefaultAzureCredential(exclude_managed_identity_credential=True),
+    ).get_container_client(container)
+
+    depth_groups: dict[int, list[str]] = {}
+    for blob in client.list_blobs(name_starts_with=f"{prefix}/"):
+        if "/test" in blob.name:
+            depth = blob.name.rstrip("/").count("/")
+            depth_groups.setdefault(depth, []).append(blob.name)
+
+    def delete_blob(name: str) -> None:
+        try:
+            client.delete_blob(name)
+        except Exception:
+            pass
+
+    for depth in sorted(depth_groups.keys(), reverse=True):
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            list(executor.map(delete_blob, depth_groups[depth]))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_s3_test_schemas(request):
+    yield
+    if request.config.option.profile != "s3":
+        return
+    import os
+
+    import boto3
+
+    bucket = os.environ.get("AWS_S3_BUCKET", "")
+    prefix = os.environ.get("AWS_S3_PREFIX", "dbt-test")
+    if not bucket:
+        return
+    s3 = boto3.client("s3")
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/"):
+        objects = [
+            {"Key": obj["Key"]}
+            for obj in page.get("Contents", [])
+            if "/test" in obj["Key"]
+        ]
+        if objects:
+            s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -151,6 +230,34 @@ class PolarsTestMixin:
                 else:
                     config[key] = val
         return config
+
+    @pytest.fixture(scope="class", autouse=True)
+    def cleanup_all_catalog_schemas(self, project):
+        from dbt.adapters.polars.catalogs import CATALOG_REGISTRY
+
+        def drop_all():
+            credentials = project.adapter.config.credentials
+            for catalog_name, config in credentials.catalog_configs.items():
+                catalog = CATALOG_REGISTRY[config.type](
+                    config, project.adapter.config.project_root
+                )
+                relation = project.adapter.Relation.create(
+                    database=catalog_name,
+                    schema=project.test_schema,
+                )
+                try:
+                    catalog.drop_schema(relation)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to drop schema %s/%s during cleanup: %s",
+                        catalog_name,
+                        project.test_schema,
+                        e,
+                    )
+            project.created_schemas = []
+
+        project.drop_test_schema = drop_all
+        yield
 
     @pytest.fixture(scope="function")
     def clear_test_schema(self, project):

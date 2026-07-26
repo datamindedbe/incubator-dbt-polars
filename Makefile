@@ -18,6 +18,13 @@ test-parquet:
 test-ndjson:
 	uv run --directory dbt-polars pytest --profile local --config ndjson -n 0
 
+test-azure:
+	uv run --extra azure --directory dbt-polars pytest --profile azure -n 0
+
+test-s3:
+	uv run --extra s3 --directory dbt-polars pytest --profile s3 -n 0
+
+
 xtest:
 	uv run --directory dbt-polars pytest --profile local -n auto
 
