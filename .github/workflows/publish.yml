@@ -12,6 +12,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
