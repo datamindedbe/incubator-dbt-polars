@@ -1,0 +1,37 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Check version matches tag
+        run: |
+          TOML_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$TOML_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: pyproject.toml has $TOML_VERSION but tag is $TAG_VERSION"
+            exit 1
+          fi
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        run: uv publish

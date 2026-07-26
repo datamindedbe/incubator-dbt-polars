@@ -1,17 +1,67 @@
-[tool.uv.workspace]
-members = ["dbt-polars"]
-
-[tool.uv]
-config-settings = { editable_mode = "compat" }
+[project]
+name = "dbt-polars"
+version = "0.0.1"
+description = "A dbt adapter for running models with Polars"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+# Python 3.14 excluded: dbt-core 1.11.x caps mashumaro<3.15; mashumaro 3.14 has no Python 3.14 support
+requires-python = ">=3.10, <3.14"
+keywords = ["dbt", "polars", "adapter", "data"]
+authors = [
+  {name = "Jonas Crevecoeur", email = "jonas.crevecoeur@dataminded.com"}
+]
+maintainers = [
+  {name = "Jonas Crevecoeur", email = "jonas.crevecoeur@dataminded.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
+dependencies = [
+    "dbt-adapters>=1.0.0",
+    "dbt-common>=1.0.0",
+    "dbt-core>=1.11.2",
+    "polars[deltalake,pyarrow]>=1.0.0,!=1.43.0",
+    "sqlglot>=1.0.0",
+]
 
 [dependency-groups]
 dev = [
+    "dbt-tests-adapter~=1.20.0",
+    "pytest~=9.1.1",
+    "pytest-timeout~=2.3",
+    "pytest-xdist~=3.8.0",
+    "types-pyyaml>=6.0.12.20260518",
+    "azure-identity>=1.25.3",
     "ruff==0.15.19",
-    # mypy and dbt-core 1.11.x have a pathspec conflict: dbt-core needs pathspec<0.13,
-    # but mypy>=1.20 requires pathspec>=1.0.0. Pinned to highest compatible version.
+    # mypy>=1.20 requires pathspec>=1.0.0, but dbt-core 1.11.x caps pathspec<0.13; pin to highest compatible version
     "mypy==1.19.1",
     "prek>=0.4.5",
 ]
+
+[project.optional-dependencies]
+# Pinned: iceberg_write_utils.py uses private pyiceberg APIs
+# Test with each new adapter version to see if pyiceberg can be upgraded
+iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
+s3 = ["boto3>=1.20.0"]
+azure = ["azure-storage-file-datalake>=12.0.0", "azure-identity>=1.0.0"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dbt*"]
+
+[tool.uv]
+config-settings = { editable_mode = "compat" }
 
 [tool.ruff]
 line-length = 88
@@ -20,8 +70,33 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/functional/adapter/simple_snapshot/fixtures.py" = ["E501"]
+
+[tool.pytest.ini_options]
+# CI runs with -n auto; keep -n 0 here for local development (easier debugging)
+addopts = "-n 0"
+markers = [
+    "require_profiles(...): only run this test when --profile matches one of the listed names",
+    "skip_profiles(...): skip this test when --profile matches one of the listed names",
+    "require_configs(...): only run this test when --config matches one of the listed names",
+    "skip_configs(...): skip this test when --config matches one of the listed names",
+]
+filterwarnings = [
+    "ignore:.*'soft_unicode' has been renamed to 'soft_str'*:DeprecationWarning",
+    "ignore:unclosed file .*:ResourceWarning",
+    # dbt-tests-adapter uses class-scoped fixtures as instance methods; fixed upstream eventually
+    "ignore:Class-scoped fixture defined as instance method is deprecated:pytest.PytestRemovedIn10Warning",
+    # Polars SQL engine internally casts date literals; not fixable from our side until Polars 2.0 drops support
+    "ignore:Casting from String to Date is deprecated.*:DeprecationWarning",
+]
+testpaths = [
+    "tests/unit",
+    "tests/functional",
+]
+
 [tool.mypy]
 namespace_packages = true
 ignore_missing_imports = true
 show_error_codes = true
-files = ["dbt-polars/dbt"]
+files = ["dbt"]
