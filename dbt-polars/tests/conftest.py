@@ -91,23 +91,8 @@ def databricks_token(request):
     return get_databricks_token()
 
 
-@pytest.fixture(scope="session")
-def azure_storage_token(request):
-    if request.config.option.profile != "azure":
-        return None
-    from azure.identity import DefaultAzureCredential
-
-    return (
-        DefaultAzureCredential(exclude_managed_identity_credential=True)
-        .get_token("https://storage.azure.com/.default")
-        .token
-    )
-
-
 @pytest.fixture(scope="class")
-def dbt_profile_target(
-    request, tmp_path_factory, databricks_token, azure_storage_token
-):
+def dbt_profile_target(request, tmp_path_factory, databricks_token):
     profile = request.config.option.profile
     if profile == "iceberg":
         base = str(tmp_path_factory.mktemp("iceberg"))

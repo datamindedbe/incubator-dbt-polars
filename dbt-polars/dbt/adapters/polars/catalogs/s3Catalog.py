@@ -155,11 +155,15 @@ class AWSS3Catalog(StorageCatalog):
         schema = relation.schema or ""
         identifier = relation.identifier or ""
         key = f"{self._object_prefix(schema, identifier)}.{relation.file_format}"
+        from botocore.exceptions import ClientError
+
         try:
             self._get_s3_client().head_object(Bucket=self.config.bucket, Key=key)
             return True
-        except Exception:
-            return False
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+                return False
+            raise
 
     def drop_relation(self, relation: PolarsRelation) -> None:
         schema = relation.schema or ""

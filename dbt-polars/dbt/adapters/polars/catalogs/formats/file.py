@@ -19,8 +19,10 @@ class FileFormat:
         kwargs = get_write_options(
             spec.sink, model_config, ignore={"path", "storage_options"}
         )
+        if storage_options is not None:
+            kwargs["storage_options"] = storage_options
         lf = data if isinstance(data, pl.LazyFrame) else data.lazy()
-        spec.sink(lf, path, storage_options=storage_options, **kwargs)
+        spec.sink(lf, path, **kwargs)
 
     @staticmethod
     def read(

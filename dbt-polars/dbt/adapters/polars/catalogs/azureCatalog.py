@@ -204,16 +204,13 @@ class AzureBlobStorageCatalog(StorageCatalog):
             return []
 
     def table_exists(self, relation: PolarsRelation) -> bool:
-        schema = relation.schema or ""
-        identifier = relation.identifier or ""
         uri = self._get_uri(relation)
         opts = self._get_storage_options(uri)
         if relation.file_format == "delta":
             return DeltaTable.is_deltatable(uri, storage_options=opts)
-        file_system = self.config.container
-        file_path = f"{self._object_path(schema, identifier)}.{relation.file_format}"
+        file_path = uri.removeprefix(f"az://{self.config.container}/")
         return (
-            self._get_file_system_client(file_system)
+            self._get_file_system_client(self.config.container)
             .get_file_client(file_path)
             .exists()
         )

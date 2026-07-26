@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from typing import NoReturn
 
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog
@@ -12,7 +13,7 @@ import polars as pl
 logger = AdapterLogger("polars")
 
 
-def _unsupported_for_format(method: str, fmt: str) -> None:
+def _unsupported_for_format(method: str, fmt: str) -> NoReturn:
     raise DbtRuntimeError(
         f"{method} is only supported for delta file_format, got '{fmt}'"
     )
