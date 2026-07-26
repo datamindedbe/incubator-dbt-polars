@@ -219,3 +219,10 @@ __marimo__/
 
 # uv.lock
 uv.lock
+
+# dbt-polars
+logs/
+test.env
+.claude/
+decisions.md
+test_project*/

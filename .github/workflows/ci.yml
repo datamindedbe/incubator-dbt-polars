@@ -16,7 +16,7 @@ jobs:
         deps: ["latest", "lowest-direct"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -30,7 +30,7 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests
-        run: uv run  --directory dbt-polars --python ${{ matrix.python-version }} pytest -n auto
+        run: uv run --python ${{ matrix.python-version }} pytest -n auto
 
   test-file-formats:
     name: "Test / py3.12 / ${{ matrix.config }}"
@@ -42,7 +42,7 @@ jobs:
         config: ["csv", "parquet"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -56,7 +56,7 @@ jobs:
         run: uv sync --python 3.12
 
       - name: Run tests (${{ matrix.config }})
-        run: uv run --directory dbt-polars --python 3.12 pytest -n 0 --config ${{ matrix.config }}
+        run: uv run --python 3.12 pytest -n 0 --config ${{ matrix.config }}
 
   test-iceberg:
     name: "Test iceberg / py${{ matrix.python-version }} / ${{ matrix.deps }}"
@@ -69,7 +69,7 @@ jobs:
         deps: ["latest", "lowest-direct"]
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
 
@@ -80,14 +80,14 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} --extra iceberg ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests (iceberg catalog)
-        run: uv run --directory dbt-polars --python ${{ matrix.python-version }} pytest  -n auto --profile iceberg
+        run: uv run --python ${{ matrix.python-version }} pytest -n auto --profile iceberg
 
   ruff:
     name: "Ruff"
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v8.2.0
         with:
@@ -119,4 +119,4 @@ jobs:
         run: uv sync
 
       - name: mypy
-        run: uv run mypy dbt-polars/dbt/adapters/polars/
+        run: uv run mypy dbt/adapters/polars/
