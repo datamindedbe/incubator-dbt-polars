@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}T
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: astral-sh/setup-uv@v8.2.0
 
@@ -36,4 +36,4 @@ jobs:
         env:
           DATABRICKS_WORKSPACE_URL: ${{ secrets.DATABRICKS_WORKSPACE_URL }}
           DATABRICKS_UC_CATALOG: ${{ secrets.DATABRICKS_UC_CATALOG }}
-        run: uv run --directory dbt-polars --python 3.12 pytest -n auto --profile iceberg-databricks
+        run: uv run --python 3.12 pytest -n auto --profile iceberg-databricks

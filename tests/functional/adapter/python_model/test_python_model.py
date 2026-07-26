@@ -1,0 +1,187 @@
+import os
+
+import pytest
+import yaml
+from dbt.tests.util import run_dbt
+
+from tests.conftest import PolarsTestMixin
+from tests.utils import polars_append_rows, polars_relation_row_count
+
+basic_sql = """
+select 1 as id union all
+select 1 as id union all
+select 1 as id union all
+select 1 as id union all
+select 1 as id union all
+select 1 as id
+"""
+basic_python = """
+def model(dbt, _):
+    dbt.config(
+        materialized='table',
+    )
+    df =  dbt.ref("my_sql_model")
+    df2 = dbt.ref("my_versioned_sql_model", v=1)
+    df3 = dbt.ref("my_versioned_sql_model", version=1)
+    df4 = dbt.ref("test", "my_versioned_sql_model", v=1)
+    df5 = dbt.ref("test", "my_versioned_sql_model", version=1)
+    df6 = dbt.source("test_source", "test_table")
+    df = df.limit(2)
+    return df
+"""
+
+second_sql = """
+select * from {{ref('my_python_model')}}
+"""
+schema_yml = """version: 2
+models:
+  - name: my_versioned_sql_model
+    versions:
+      - v: 1
+
+sources:
+  - name: test_source
+    loader: custom
+    schema: "{{ var(env_var('DBT_TEST_SCHEMA_NAME_VARIABLE')) }}"
+    quoting:
+      identifier: True
+    tags:
+      - my_test_source_tag
+    tables:
+      - name: test_table
+        identifier: source
+"""
+
+seeds__source_csv = """favorite_color,id,first_name,email,ip_address,updated_at
+blue,1,Larry,lking0@miitbeian.gov.cn,'69.135.206.194',2008-09-12 19:08:31
+blue,2,Larry,lperkins1@toplist.cz,'64.210.133.162',1978-05-09 04:15:14
+"""
+
+
+class BasePythonModelTests:
+    @pytest.fixture(scope="class", autouse=True)
+    def setEnvVars(self):
+        os.environ["DBT_TEST_SCHEMA_NAME_VARIABLE"] = "test_run_schema"
+
+        yield
+
+        del os.environ["DBT_TEST_SCHEMA_NAME_VARIABLE"]
+
+    @pytest.fixture(scope="class")
+    def seeds(self):
+        return {"source.csv": seeds__source_csv}
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "schema.yml": schema_yml,
+            "my_sql_model.sql": basic_sql,
+            "my_versioned_sql_model_v1.sql": basic_sql,
+            "my_python_model.py": basic_python,
+            "second_sql_model.sql": second_sql,
+        }
+
+    def test_singular_tests(self, project):
+        # test command
+        vars_dict = {
+            "test_run_schema": project.test_schema,
+        }
+
+        run_dbt(["seed", "--vars", yaml.safe_dump(vars_dict)])
+        results = run_dbt(["run", "--vars", yaml.safe_dump(vars_dict)])
+        assert len(results) == 4
+
+
+m_1 = """
+{{config(materialized='table')}}
+select 1 as id union all
+select 2 as id union all
+select 3 as id union all
+select 4 as id union all
+select 5 as id
+"""
+
+incremental_python = """
+import polars as pl
+
+def model(dbt, _):
+    dbt.config(materialized="incremental", unique_key='id')
+    df = dbt.ref("m_1")
+    if dbt.is_incremental:
+        df = df.filter(pl.col("id") > 5)
+    return df
+"""
+
+
+class BasePythonIncrementalTests:
+    @pytest.fixture(scope="class")
+    def project_config_update(self):
+        return {"models": {"+incremental_strategy": "merge"}}
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"m_1.sql": m_1, "incremental.py": incremental_python}
+
+    def test_incremental(self, project):
+        # create m_1 and run incremental model the first time
+        run_dbt(["run"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+        # running incremental model again will not cause any changes in the result model
+        run_dbt(["run", "-s", "incremental"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+        # add 3 records with one supposed to be filtered out
+        polars_append_rows(project.adapter, "m_1", [{"id": 0}, {"id": 6}, {"id": 7}])
+
+        # validate that incremental model would correctly
+        # add 2 valid records to result model
+        run_dbt(["run", "-s", "incremental"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 7
+
+
+_incremental_append_python = """
+import polars as pl
+
+def model(dbt, _):
+    dbt.config(materialized="incremental")
+    df = dbt.ref("m_1")
+    if dbt.is_incremental:
+        df = df.filter(pl.col("id") > 5)
+    return df
+"""
+
+
+class BasePythonIncrementalFullRefreshTests:
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"m_1.sql": m_1, "incremental.py": _incremental_append_python}
+
+    def test_full_refresh_recreates_table(self, project):
+        # initial run: dbt.is_incremental=False → all 5 rows written
+        run_dbt(["run"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+        # incremental run: dbt.is_incremental=True → filter id>5 → 0 new rows appended
+        run_dbt(["run", "-s", "incremental"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+        # full-refresh: table must be rebuilt from scratch → still 5 rows
+        # bug: without a full_refresh check in submit_python_job the existing table
+        # is kept and the result is appended, producing 10 rows instead of 5
+        run_dbt(["run", "-s", "incremental", "--full-refresh"])
+        assert polars_relation_row_count(project.adapter, "incremental") == 5
+
+
+class TestPythonModel(PolarsTestMixin, BasePythonModelTests):
+    pass
+
+
+class TestPythonIncrementalModel(PolarsTestMixin, BasePythonIncrementalTests):
+    pass
+
+
+class TestPythonIncrementalFullRefresh(
+    PolarsTestMixin, BasePythonIncrementalFullRefreshTests
+):
+    pass

@@ -37,4 +37,4 @@ jobs:
           AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
           AZURE_STORAGE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
           AZURE_STORAGE_PREFIX: ${{ secrets.AZURE_STORAGE_PREFIX }}
-        run: uv run --directory dbt-polars --python 3.12 pytest -n auto --timeout=300 --profile azure
+        run: uv run --python 3.12 pytest -n auto --timeout=300 --profile azure
