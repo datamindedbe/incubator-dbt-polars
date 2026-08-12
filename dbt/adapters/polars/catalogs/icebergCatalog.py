@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 from dbt.adapters.contracts.relation import RelationType
@@ -143,11 +144,14 @@ class IcebergCatalogConfig(CatalogConfig):
         *,
         name: str,
         type: str,
+        schema: str,
         pyiceberg_type: str | None = None,
         **kwargs: object,
     ) -> None:
+
         self.name = name
         self.type = type
+        self.schema = schema
         if pyiceberg_type is not None:
             kwargs = {"type": pyiceberg_type, **kwargs}
         self._catalog_properties: dict[str, object] = kwargs
@@ -159,11 +163,51 @@ class IcebergCatalogConfig(CatalogConfig):
         return ("name",) + tuple(self._catalog_properties.keys())
 
 
+def _resolve_relative_uri(uri: str, prefix: str, project_root: str) -> str:
+    if not uri.startswith(prefix):
+        return uri
+    raw_path = uri[len(prefix) :]
+    if raw_path.startswith("/"):
+        return uri
+    return prefix + str((Path(project_root) / raw_path).resolve())
+
+
+def _resolve_relative_file_uri(uri: str, project_root: str) -> str:
+    """Resolve a `file://`-scheme URI's path against project_root if relative.
+
+    A `file://` URI is only well-formed as absolute (`file:///abs/path`).
+    A relative one (`file://rel/path`) is ambiguous — RFC 3986 parses the
+    first path segment as the authority, and some readers (e.g. polars'
+    object_store-backed scanner) fold that back into the path as if it
+    were rooted at "/", rather than resolving it relative to project_root.
+    """
+    return _resolve_relative_uri(uri, "file://", project_root)
+
+
+def _resolve_relative_sqlite_uri(uri: str, project_root: str) -> str:
+    """Resolve a `sqlite:///`-scheme URI's path against project_root if relative.
+
+    SQLAlchemy's sqlite dialect treats `sqlite:///rel/path` (3 slashes) as
+    relative to the cwd and `sqlite:////abs/path` (4 slashes) as absolute.
+    """
+    return _resolve_relative_uri(uri, "sqlite:///", project_root)
+
+
 class IcebergCatalog(BaseCatalog):
     config: IcebergCatalogConfig
 
     def __init__(self, config: IcebergCatalogConfig, project_root: str) -> None:
-        super().__init__(config, project_root)
+        super().__init__(config)
+        warehouse = config._catalog_properties.get("warehouse")
+        if isinstance(warehouse, str):
+            config._catalog_properties["warehouse"] = _resolve_relative_file_uri(
+                warehouse, project_root
+            )
+        uri = config._catalog_properties.get("uri")
+        if isinstance(uri, str):
+            config._catalog_properties["uri"] = _resolve_relative_sqlite_uri(
+                uri, project_root
+            )
         self._table_cache: dict[tuple[str, str], Any] = {}
         self._known_namespaces: set[str] = set()
 

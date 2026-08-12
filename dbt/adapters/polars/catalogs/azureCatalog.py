@@ -24,12 +24,14 @@ class AzureBlobStorageCatalogConfig(CatalogConfig):
         name: str,
         type: str,
         account_name: str,
+        schema: str,
         container: str = "",
         prefix: str = "",
         credentials: dict | None = None,
     ) -> None:
         self.name = name
         self.type = type
+        self.schema = schema
         self.account_name = account_name
         self.container = container
         self.prefix = prefix.strip("/")
@@ -68,7 +70,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
                 "The azure extra is required for AzureBlobStorageCatalog. "
                 "Install it with: pip install 'dbt-polars[azure]'"
             ) from exc
-        super().__init__(config, project_root)
+        super().__init__(config)
         self._cached_token: AccessToken | None = None
         self._service_client = None  # DataLakeServiceClient | None
         self._dac = None  # DefaultAzureCredential | None

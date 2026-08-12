@@ -1,7 +1,7 @@
 import os
 
 
-def azure_blob_catalog(name: str, prefix: str) -> dict:
+def azure_blob_catalog(name: str, prefix: str, schema: str) -> dict:
     return {
         "type": "azure",
         "name": name,
@@ -11,48 +11,46 @@ def azure_blob_catalog(name: str, prefix: str) -> dict:
         "credentials": {
             "exclude_managed_identity_credential": True,
         },
+        "schema": schema,
     }
 
 
-def azure_target() -> dict:
+def azure_target(schema: str) -> dict:
     prefix = os.environ.get("AZURE_STORAGE_PREFIX", "dbt-test")
     return {
         "type": "polars",
         "catalogs": [
-            azure_blob_catalog("local", f"{prefix}/local"),
-            azure_blob_catalog("local2", f"{prefix}/local2"),
+            azure_blob_catalog("local", f"{prefix}/local", schema),
+            azure_blob_catalog("local2", f"{prefix}/local2", schema),
         ],
     }
 
 
-def local_catalog(name: str, root: str) -> dict:
-    return {
-        "type": "local",
-        "name": name,
-        "root": root,
-    }
+def local_catalog(name: str, root: str, schema: str) -> dict:
+    return {"type": "local", "name": name, "root": root, "schema": schema}
 
 
-def default_target() -> dict:
+def default_target(schema: str) -> dict:
     return {
         "type": "polars",
         "catalogs": [
-            local_catalog(name="local", root="test_root/"),
-            local_catalog(name="local2", root="test_root2/"),
+            local_catalog(name="local", root="test_root/", schema=schema),
+            local_catalog(name="local2", root="test_root2/", schema=schema),
         ],
     }
 
 
-def iceberg_catalog(name: str, uri: str, warehouse: str) -> dict:
+def iceberg_catalog(name: str, uri: str, warehouse: str, schema: str) -> dict:
     return {
         "type": "iceberg",
         "name": name,
         "uri": uri,
         "warehouse": warehouse,
+        "schema": schema,
     }
 
 
-def iceberg_target(base_path: str) -> dict:
+def iceberg_target(base_path: str, schema: str) -> dict:
     return {
         "type": "polars",
         "catalogs": [
@@ -60,32 +58,35 @@ def iceberg_target(base_path: str) -> dict:
                 "local",
                 f"sqlite:///{base_path}/local.db",
                 f"file://{base_path}/wh_local",
+                schema,
             ),
             iceberg_catalog(
                 "local2",
                 f"sqlite:///{base_path}/local2.db",
                 f"file://{base_path}/wh_local2",
+                schema,
             ),
         ],
     }
 
 
-def s3_catalog(name: str, prefix: str) -> dict:
+def s3_catalog(name: str, prefix: str, schema: str) -> dict:
     return {
         "type": "s3",
         "name": name,
         "bucket": os.environ.get("AWS_S3_BUCKET", ""),
         "prefix": prefix,
+        "schema": schema,
     }
 
 
-def s3_target() -> dict:
+def s3_target(schema: str) -> dict:
     prefix = os.environ.get("AWS_S3_PREFIX", "dbt-test")
     return {
         "type": "polars",
         "catalogs": [
-            s3_catalog("local", f"{prefix}/local"),
-            s3_catalog("local2", f"{prefix}/local2"),
+            s3_catalog("local", f"{prefix}/local", schema),
+            s3_catalog("local2", f"{prefix}/local2", schema),
         ],
     }
 
@@ -107,7 +108,7 @@ def get_databricks_token() -> str:
     return response.json()["token_value"]
 
 
-def iceberg_databricks_catalog(token: str) -> dict:
+def iceberg_databricks_catalog(token: str, schema: str) -> dict:
     DATABRICKS_UC_CATALOG = os.environ.get("DATABRICKS_UC_CATALOG")
     DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
 
@@ -118,13 +119,14 @@ def iceberg_databricks_catalog(token: str) -> dict:
         "uri": f"{DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
         "token": token,
         "warehouse": DATABRICKS_UC_CATALOG,
+        "schema": schema,
     }
 
 
-def iceberg_databricks_target(token: str) -> dict:
+def iceberg_databricks_target(token: str, schema: str) -> dict:
     return {
         "type": "polars",
-        "catalogs": [iceberg_databricks_catalog(token)],
+        "catalogs": [iceberg_databricks_catalog(token, schema)],
     }
 
 

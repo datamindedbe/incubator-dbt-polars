@@ -94,18 +94,18 @@ def databricks_token(request):
 
 
 @pytest.fixture(scope="class")
-def dbt_profile_target(request, tmp_path_factory, databricks_token):
+def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schema):
     profile = request.config.option.profile
     if profile == "iceberg":
         base = str(tmp_path_factory.mktemp("iceberg"))
-        return iceberg_target(base)
+        return iceberg_target(base, unique_schema)
     if profile == "iceberg-databricks":
-        return iceberg_databricks_target(databricks_token)
+        return iceberg_databricks_target(databricks_token, unique_schema)
     if profile == "azure":
-        return azure_target()
+        return azure_target(unique_schema)
     if profile == "s3":
-        return s3_target()
-    return default_target()
+        return s3_target(unique_schema)
+    return default_target(unique_schema)
 
 
 @pytest.fixture(scope="class")

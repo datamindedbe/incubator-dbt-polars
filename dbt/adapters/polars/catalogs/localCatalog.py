@@ -21,6 +21,7 @@ _FILE_FORMATS = frozenset(FILE_FORMATS)
 class LocalCatalogConfig(CatalogConfig):
     name: str
     type: str
+    schema: str
     root: str
 
     def unique_field(self) -> str:
@@ -46,7 +47,7 @@ class LocalCatalog(StorageCatalog):
                 "https://github.com/pola-rs/polars/issues/20944. Use a root path "
                 "that resolves to an absolute path without spaces."
             )
-        super().__init__(config, project_root)
+        super().__init__(config)
         self.absolute_root = absolute_root
 
     def _schema_path(self, schema: str) -> Path:

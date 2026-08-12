@@ -204,8 +204,7 @@ class PolarsAdapter(BaseAdapter):
             }
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
-        connection = self.connections.get_thread_connection()
-        credentials = cast(PolarsCredentials, connection.credentials)
+        credentials = cast(PolarsCredentials, self.config.credentials)
 
         # Unquote the catalog name if it's quoted
         if name is not None:
@@ -228,6 +227,14 @@ class PolarsAdapter(BaseAdapter):
         )
 
         return self.CatalogAdapters[name]
+
+    @available
+    def get_default_schema(self, node):
+        catalog = (node.config.get("catalog") if node.config else None) or node.database
+
+        return self.get_storage_catalog(catalog).config.schema
+        # return node.schema
+        # raise Exception(node)
 
     def build_catalog_relation(self, config) -> None:
         return None

@@ -40,6 +40,7 @@ def get_write_options(
 class CatalogConfig(ABC):
     name: str
     type: str
+    schema: str
 
     @abstractmethod
     def unique_field(self) -> str: ...
@@ -54,7 +55,8 @@ class BaseCatalog(ABC):
     Subclasses implement schema and relation management for a specific storage target.
     """
 
-    def __init__(self, config: CatalogConfig, project_root: str):
+    def __init__(self, config: CatalogConfig):
+        self.schema = config.schema
         self.config = config
 
     @abstractmethod
