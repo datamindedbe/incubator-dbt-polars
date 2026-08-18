@@ -55,7 +55,7 @@ class BaseCatalog(ABC):
     Subclasses implement schema and relation management for a specific storage target.
     """
 
-    def __init__(self, config: CatalogConfig):
+    def __init__(self, config: CatalogConfig, project_root: str = ""):
         self.schema = config.schema
         self.config = config
 

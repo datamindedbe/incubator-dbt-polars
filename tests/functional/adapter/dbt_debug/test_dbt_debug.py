@@ -44,12 +44,11 @@ class TestDebugPolars(BaseDebug):
         self.assertGotValue(re.compile(r"\s+profiles\.yml file"), "ERROR invalid")
 
     @pytest.fixture(scope="class")
-    def profiles_config_update(self, dbt_profile_target, unique_schema):
+    def profiles_config_update(self, dbt_profile_target):
         outputs = {
-            "default": {**dbt_profile_target, "schema": unique_schema},
+            "default": dbt_profile_target,
             "bad_catalog": {
                 "type": "polars",
-                "schema": unique_schema,
                 "catalogs": [
                     {"type": "does_not_exist", "name": "local", "root": "test_root/"}
                 ],

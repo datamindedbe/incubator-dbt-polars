@@ -28,7 +28,7 @@ class PolarsCredentials(Credentials):
     schema: str = ""
     catalogs: list[dict[str, Any]] = field(default_factory=list)
 
-    _ALIASES: ClassVar[dict[str, str]] = {}
+    _ALIASES: ClassVar[dict[str, str]] = {"catalog": "database"}
 
     @property
     def type(self) -> str:
@@ -51,7 +51,51 @@ class PolarsCredentials(Credentials):
     def catalog_configs(self) -> dict[str, CatalogConfig]:
         return self._catalog_configs
 
+    @classmethod
+    def __pre_deserialize__(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Fold single-catalog shorthand fields into a one-entry `catalogs` list."""
+        data = dict(data)
+
+        if "catalogs" in data:
+            if data.get("schema"):
+                raise DbtRuntimeError(
+                    "Profile sets 'catalogs' explicitly, so the top-level 'schema' "
+                    "must be removed - set 'schema' on each catalog entry instead."
+                )
+            if data.get("catalog_type"):
+                raise DbtRuntimeError(
+                    "Profile sets both 'catalogs' and 'catalog_type' - 'catalog_type' "
+                    "is only used for the single-catalog shorthand. Move its value "
+                    "into the appropriate catalog entry's 'type'."
+                )
+            return data
+
+        catalog_type = data.pop("catalog_type", None)
+        if catalog_type is None:
+            raise DbtRuntimeError(
+                "Profile must define either 'catalogs' (multi-catalog setup) or "
+                "'catalog_type' plus the catalog's own options (single-catalog "
+                "shorthand)."
+            )
+        name = data.get("database") or "default"
+        reserved = {"database", "schema"}
+        entry = {"name": name, "type": catalog_type}
+        for key in list(data):
+            if key not in reserved:
+                entry[key] = data.pop(key)
+        data["catalogs"] = [entry]
+        return data
+
     def __post_init__(self) -> None:
+        for entry in self.catalogs:
+            if not entry.get("schema"):
+                if not self.schema:
+                    raise DbtRuntimeError(
+                        f"Catalog '{entry.get('name')}' has no schema, and no "
+                        "top-level schema was set on the profile."
+                    )
+                entry["schema"] = self.schema
+
         self._catalog_configs = {
             c["name"]: self._parse_catalog(c) for c in self.catalogs
         }
@@ -65,6 +109,8 @@ class PolarsCredentials(Credentials):
             raise DbtRuntimeError(
                 f"Default catalog '{self.database}' not found in catalogs"
             )
+
+        self.schema = self._catalog_configs[self.database].schema
 
     def _parse_catalog(self, entry: dict[str, Any]) -> CatalogConfig:
         catalog_type = entry.get("type")

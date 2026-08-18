@@ -109,6 +109,31 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
 
 
 @pytest.fixture(scope="class")
+def dbt_profile_data(unique_schema, dbt_profile_target, profiles_config_update):
+    """Override dbt-core's fixture: inject unique_schema into every catalog
+    entry of outputs that set `catalogs` explicitly, since dbt-polars requires
+    each entry to carry its own schema in that case. Applied after
+    profiles_config_update so outputs it defines get the unique schema too.
+    """
+    profile = {
+        "test": {
+            "outputs": {"default": dbt_profile_target},
+            "target": "default",
+        },
+    }
+    if profiles_config_update:
+        profile.update(profiles_config_update)
+
+    for output in profile["test"]["outputs"].values():
+        if "catalogs" in output:
+            output["catalogs"] = [
+                {**catalog, "schema": unique_schema} for catalog in output["catalogs"]
+            ]
+
+    return profile
+
+
+@pytest.fixture(scope="class")
 def prefix(request):
     """Unique schema prefix that varies per test class and active profile."""
     profile = request.config.option.profile

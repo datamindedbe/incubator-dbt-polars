@@ -229,12 +229,11 @@ class PolarsAdapter(BaseAdapter):
         return self.CatalogAdapters[name]
 
     @available
-    def get_default_schema(self, node):
-        catalog = (node.config.get("catalog") if node.config else None) or node.database
+    def get_default_schema(self, node: dict) -> str:
+        config = node.get("config") or {}
+        catalog = config.get("catalog") or node.get("database")
 
         return self.get_storage_catalog(catalog).config.schema
-        # return node.schema
-        # raise Exception(node)
 
     def build_catalog_relation(self, config) -> None:
         return None
