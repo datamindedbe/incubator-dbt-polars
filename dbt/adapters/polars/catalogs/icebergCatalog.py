@@ -198,16 +198,16 @@ class IcebergCatalog(BaseCatalog):
 
     def __init__(self, config: IcebergCatalogConfig, project_root: str) -> None:
         super().__init__(config)
-        warehouse = config._catalog_properties.get("warehouse")
+        properties = dict(config._catalog_properties)
+        warehouse = properties.get("warehouse")
         if isinstance(warehouse, str):
-            config._catalog_properties["warehouse"] = _resolve_relative_file_uri(
+            properties["warehouse"] = _resolve_relative_file_uri(
                 warehouse, project_root
             )
-        uri = config._catalog_properties.get("uri")
+        uri = properties.get("uri")
         if isinstance(uri, str):
-            config._catalog_properties["uri"] = _resolve_relative_sqlite_uri(
-                uri, project_root
-            )
+            properties["uri"] = _resolve_relative_sqlite_uri(uri, project_root)
+        self._catalog_properties = properties
         self._table_cache: dict[tuple[str, str], Any] = {}
         self._known_namespaces: set[str] = set()
 
@@ -218,7 +218,7 @@ class IcebergCatalog(BaseCatalog):
 
             self._catalog_instance = load_catalog(
                 self.config.name,
-                **self.config._catalog_properties,
+                **self._catalog_properties,
             )
         return self._catalog_instance
 

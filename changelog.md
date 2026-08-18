@@ -4,7 +4,7 @@
 
 ### Breaking
 
-- schema parameter required on catalog. Set schema="" to restore old behavior.
+- schema parameter required on catalog, at the root level or per catalog.
 - New profile shape for single- vs multi-catalog setups, see [docs](docs/index.md#profile-structure).
 
 ### Bugs fixed

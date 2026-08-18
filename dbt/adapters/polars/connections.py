@@ -54,7 +54,7 @@ class PolarsCredentials(Credentials):
     @classmethod
     def __pre_deserialize__(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Fold single-catalog shorthand fields into a one-entry `catalogs` list."""
-        data = dict(data)
+        data = dict(super().__pre_deserialize__(data))
 
         if "catalogs" in data:
             if data.get("schema"):

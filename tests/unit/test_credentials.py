@@ -37,9 +37,7 @@ def test_shorthand_names_the_catalog_after_database():
 
 
 def test_shorthand_names_the_catalog_after_the_catalog_alias():
-    # dbt-core translates profile aliases (via `_ALIASES`) before calling
-    # `from_dict` - mirror that here rather than relying on `from_dict` alone.
-    data = PolarsCredentials.translate_aliases(
+    creds = PolarsCredentials.from_dict(
         {
             "catalog": "my_catalog",
             "schema": "my_schema",
@@ -47,7 +45,6 @@ def test_shorthand_names_the_catalog_after_the_catalog_alias():
             "root": "./data",
         }
     )
-    creds = PolarsCredentials.from_dict(data)
 
     assert creds.database == "my_catalog"
     assert list(creds.catalog_configs) == ["my_catalog"]
