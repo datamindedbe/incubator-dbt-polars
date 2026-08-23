@@ -54,14 +54,24 @@ class PolarsCredentials(Credentials):
     @classmethod
     def __pre_deserialize__(cls, data: dict[str, Any]) -> dict[str, Any]:
         """Fold single-catalog shorthand fields into a one-entry `catalogs` list."""
+        data = dict(data)
+        for alias, canonical in cls._ALIASES.items():
+            if alias in data and canonical in data and data[alias] == data[canonical]:
+                del data[alias]
         data = dict(super().__pre_deserialize__(data))
 
         if "catalogs" in data:
-            if data.get("schema"):
-                raise DbtRuntimeError(
-                    "Profile sets 'catalogs' explicitly, so the top-level 'schema' "
-                    "must be removed - set 'schema' on each catalog entry instead."
+            top_schema = data.get("schema")
+            if top_schema:
+                default_name = data.get("database") or data["catalogs"][0].get("name")
+                default_entry = next(
+                    (c for c in data["catalogs"] if c.get("name") == default_name), None
                 )
+                if default_entry is None or default_entry.get("schema") != top_schema:
+                    raise DbtRuntimeError(
+                        "Profile sets 'catalogs' explicitly, so the top-level 'schema' "
+                        "must be removed - set 'schema' on each catalog entry instead."
+                    )
             if data.get("catalog_type"):
                 raise DbtRuntimeError(
                     "Profile sets both 'catalogs' and 'catalog_type' - 'catalog_type' "

@@ -116,3 +116,27 @@ def test_explicit_catalogs_backfills_schema_to_the_default_catalog():
     )
 
     assert creds.schema == "schema_b"
+
+
+def test_credentials_survive_a_to_dict_from_dict_round_trip():
+    for raw in (
+        {
+            "database": "",
+            "schema": "my_schema",
+            "catalog_type": "local",
+            "root": "./data",
+        },
+        {
+            "database": "cat1",
+            "catalogs": [
+                {"name": "cat1", "type": "local", "root": "./data1", "schema": "s1"},
+                {"name": "cat2", "type": "local", "root": "./data2", "schema": "s2"},
+            ],
+        },
+    ):
+        creds = PolarsCredentials.from_dict(raw)
+        creds2 = PolarsCredentials.from_dict(creds.to_dict())
+
+        assert creds2.database == creds.database
+        assert creds2.schema == creds.schema
+        assert creds2.catalogs == creds.catalogs

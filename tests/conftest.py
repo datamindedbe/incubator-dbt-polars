@@ -127,7 +127,8 @@ def dbt_profile_data(unique_schema, dbt_profile_target, profiles_config_update):
     for output in profile["test"]["outputs"].values():
         if "catalogs" in output:
             output["catalogs"] = [
-                {**catalog, "schema": unique_schema} for catalog in output["catalogs"]
+                {**catalog, "schema": catalog.get("schema") or unique_schema}
+                for catalog in output["catalogs"]
             ]
 
     return profile
@@ -270,7 +271,7 @@ class PolarsTestMixin:
                 )
                 relation = project.adapter.Relation.create(
                     database=catalog_name,
-                    schema=project.test_schema,
+                    schema=config.schema,
                 )
                 try:
                     catalog.drop_schema(relation)
@@ -278,7 +279,7 @@ class PolarsTestMixin:
                     logger.warning(
                         "Failed to drop schema %s/%s during cleanup: %s",
                         catalog_name,
-                        project.test_schema,
+                        config.schema,
                         e,
                     )
             project.created_schemas = []

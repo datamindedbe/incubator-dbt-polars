@@ -11,6 +11,7 @@ from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
 from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog
 from dbt.adapters.polars.relation import PolarsRelation
+from dbt.adapters.polars.utils import resolve_relative_path
 
 logger = AdapterLogger("polars")
 
@@ -35,10 +36,7 @@ class LocalCatalog(StorageCatalog):
     config: LocalCatalogConfig
 
     def __init__(self, config: LocalCatalogConfig, project_root: str):
-        root = Path(config.root)
-        if not root.is_absolute():
-            root = Path(project_root) / root
-        absolute_root = root.resolve()
+        absolute_root = resolve_relative_path(config.root, project_root)
         if " " in str(absolute_root):
             raise DbtRuntimeError(
                 f"LocalCatalog root resolves to '{absolute_root}', which contains "
