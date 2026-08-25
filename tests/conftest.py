@@ -94,18 +94,44 @@ def databricks_token(request):
 
 
 @pytest.fixture(scope="class")
-def dbt_profile_target(request, tmp_path_factory, databricks_token):
+def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schema):
     profile = request.config.option.profile
     if profile == "iceberg":
         base = str(tmp_path_factory.mktemp("iceberg"))
-        return iceberg_target(base)
+        return iceberg_target(base, unique_schema)
     if profile == "iceberg-databricks":
-        return iceberg_databricks_target(databricks_token)
+        return iceberg_databricks_target(databricks_token, unique_schema)
     if profile == "azure":
-        return azure_target()
+        return azure_target(unique_schema)
     if profile == "s3":
-        return s3_target()
-    return default_target()
+        return s3_target(unique_schema)
+    return default_target(unique_schema)
+
+
+@pytest.fixture(scope="class")
+def dbt_profile_data(unique_schema, dbt_profile_target, profiles_config_update):
+    """Override dbt-core's fixture: inject unique_schema into every catalog
+    entry of outputs that set `catalogs` explicitly, since dbt-polars requires
+    each entry to carry its own schema in that case. Applied after
+    profiles_config_update so outputs it defines get the unique schema too.
+    """
+    profile = {
+        "test": {
+            "outputs": {"default": dbt_profile_target},
+            "target": "default",
+        },
+    }
+    if profiles_config_update:
+        profile.update(profiles_config_update)
+
+    for output in profile["test"]["outputs"].values():
+        if "catalogs" in output:
+            output["catalogs"] = [
+                {**catalog, "schema": catalog.get("schema") or unique_schema}
+                for catalog in output["catalogs"]
+            ]
+
+    return profile
 
 
 @pytest.fixture(scope="class")
@@ -245,7 +271,7 @@ class PolarsTestMixin:
                 )
                 relation = project.adapter.Relation.create(
                     database=catalog_name,
-                    schema=project.test_schema,
+                    schema=config.schema,
                 )
                 try:
                     catalog.drop_schema(relation)
@@ -253,7 +279,7 @@ class PolarsTestMixin:
                     logger.warning(
                         "Failed to drop schema %s/%s during cleanup: %s",
                         catalog_name,
-                        project.test_schema,
+                        config.schema,
                         e,
                     )
             project.created_schemas = []

@@ -33,11 +33,13 @@ class S3CatalogConfig(CatalogConfig):
         name: str,
         type: str,
         bucket: str,
+        schema: str,
         prefix: str = "",
         **session_kwargs: object,
     ) -> None:
         self.name = name
         self.type = type
+        self.schema = schema
         self.bucket = bucket
         self.prefix = prefix.strip("/")
         self.session_kwargs = session_kwargs
@@ -60,7 +62,7 @@ class AWSS3Catalog(StorageCatalog):
                 "The s3 extra is required for AWSS3Catalog. "
                 "Install it with: pip install 'dbt-polars[s3]'"
             ) from exc
-        super().__init__(config, project_root)
+        super().__init__(config)
         self._s3_client = None
 
     # ── URI and credential helpers ────────────────────────────────────────────

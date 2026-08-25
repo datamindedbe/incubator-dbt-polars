@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from typing import TYPE_CHECKING, Any, overload
 
 from dbt.adapters.contracts.relation import RelationType
@@ -17,6 +18,7 @@ from dbt.adapters.polars.catalogs.iceberg_write_utils import (
     _sync_schema,
 )
 from dbt.adapters.polars.relation import PolarsRelation
+from dbt.adapters.polars.utils import resolve_relative_path
 
 if TYPE_CHECKING:
     from pyiceberg.table import Table
@@ -143,11 +145,14 @@ class IcebergCatalogConfig(CatalogConfig):
         *,
         name: str,
         type: str,
+        schema: str,
         pyiceberg_type: str | None = None,
         **kwargs: object,
     ) -> None:
+
         self.name = name
         self.type = type
+        self.schema = schema
         if pyiceberg_type is not None:
             kwargs = {"type": pyiceberg_type, **kwargs}
         self._catalog_properties: dict[str, object] = kwargs
@@ -159,23 +164,44 @@ class IcebergCatalogConfig(CatalogConfig):
         return ("name",) + tuple(self._catalog_properties.keys())
 
 
+def _resolve_relative_uri(uri: str, prefix: str, project_root: str) -> str:
+    if not uri.startswith(prefix):
+        return uri
+    raw_path = uri[len(prefix) :]
+    if raw_path.startswith("/"):
+        return uri
+    return prefix + str(resolve_relative_path(raw_path, project_root))
+
+
 class IcebergCatalog(BaseCatalog):
     config: IcebergCatalogConfig
 
     def __init__(self, config: IcebergCatalogConfig, project_root: str) -> None:
-        super().__init__(config, project_root)
+        super().__init__(config)
+        properties = dict(config._catalog_properties)
+        for key, value in properties.items():
+            if not isinstance(value, str):
+                continue
+            for prefix in ("file://", "sqlite:///"):
+                if value.startswith(prefix):
+                    properties[key] = _resolve_relative_uri(value, prefix, project_root)
+                    break
+        self._catalog_properties = properties
         self._table_cache: dict[tuple[str, str], Any] = {}
         self._known_namespaces: set[str] = set()
+        self._catalog_lock = threading.Lock()
 
     @property
     def _catalog(self):
         if not hasattr(self, "_catalog_instance"):
-            from pyiceberg.catalog import load_catalog
+            with self._catalog_lock:
+                if not hasattr(self, "_catalog_instance"):
+                    from pyiceberg.catalog import load_catalog
 
-            self._catalog_instance = load_catalog(
-                self.config.name,
-                **self.config._catalog_properties,
-            )
+                    self._catalog_instance = load_catalog(
+                        self.config.name,
+                        **self._catalog_properties,
+                    )
         return self._catalog_instance
 
     def _load_table(self, identifier: tuple[str, str]) -> Table:

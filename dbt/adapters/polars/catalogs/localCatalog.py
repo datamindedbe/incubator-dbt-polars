@@ -11,6 +11,7 @@ from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
 from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog
 from dbt.adapters.polars.relation import PolarsRelation
+from dbt.adapters.polars.utils import resolve_relative_path
 
 logger = AdapterLogger("polars")
 
@@ -21,6 +22,7 @@ _FILE_FORMATS = frozenset(FILE_FORMATS)
 class LocalCatalogConfig(CatalogConfig):
     name: str
     type: str
+    schema: str
     root: str
 
     def unique_field(self) -> str:
@@ -34,10 +36,7 @@ class LocalCatalog(StorageCatalog):
     config: LocalCatalogConfig
 
     def __init__(self, config: LocalCatalogConfig, project_root: str):
-        root = Path(config.root)
-        if not root.is_absolute():
-            root = Path(project_root) / root
-        absolute_root = root.resolve()
+        absolute_root = resolve_relative_path(config.root, project_root)
         if " " in str(absolute_root):
             raise DbtRuntimeError(
                 f"LocalCatalog root resolves to '{absolute_root}', which contains "
@@ -46,7 +45,7 @@ class LocalCatalog(StorageCatalog):
                 "https://github.com/pola-rs/polars/issues/20944. Use a root path "
                 "that resolves to an absolute path without spaces."
             )
-        super().__init__(config, project_root)
+        super().__init__(config)
         self.absolute_root = absolute_root
 
     def _schema_path(self, schema: str) -> Path:

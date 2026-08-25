@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
@@ -171,6 +172,7 @@ class PolarsAdapter(BaseAdapter):
     def __init__(self, config, mp_context):
         super().__init__(config, mp_context)
         self.CatalogAdapters: dict[str, BaseCatalog] = {}
+        self._catalog_adapters_lock = threading.Lock()
         self._node_configs: dict[tuple, RelationConfig] = {}
         self._source_configs: dict[tuple, dict] = {}
 
@@ -204,8 +206,7 @@ class PolarsAdapter(BaseAdapter):
             }
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
-        connection = self.connections.get_thread_connection()
-        credentials = cast(PolarsCredentials, connection.credentials)
+        credentials = cast(PolarsCredentials, self.config.credentials)
 
         # Unquote the catalog name if it's quoted
         if name is not None:
@@ -217,17 +218,28 @@ class PolarsAdapter(BaseAdapter):
         if name in self.CatalogAdapters:
             return self.CatalogAdapters[name]
 
-        if name not in credentials.catalog_configs:
-            raise DbtRuntimeError(f"Unknown catalog {name}")
+        with self._catalog_adapters_lock:
+            if name in self.CatalogAdapters:
+                return self.CatalogAdapters[name]
 
-        config = credentials.catalog_configs.get(name)
-        if config is None:
-            raise DbtRuntimeError(f"Unknown catalog {name}")
-        self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](
-            config, self.config.project_root
-        )
+            if name not in credentials.catalog_configs:
+                raise DbtRuntimeError(f"Unknown catalog {name}")
+
+            config = credentials.catalog_configs.get(name)
+            if config is None:
+                raise DbtRuntimeError(f"Unknown catalog {name}")
+            self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](
+                config, self.config.project_root
+            )
 
         return self.CatalogAdapters[name]
+
+    @available
+    def get_default_schema(self, node: dict) -> str:
+        config = node.get("config") or {}
+        catalog = config.get("catalog") or node.get("database")
+
+        return self.get_storage_catalog(catalog).config.schema
 
     def build_catalog_relation(self, config) -> None:
         return None
