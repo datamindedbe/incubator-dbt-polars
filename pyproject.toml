@@ -1,6 +1,6 @@
 [project]
 name = "dbt-polars"
-version = "0.0.1"
+version = "0.1.0"
 description = "A dbt adapter for running models with Polars"
 readme = "README.md"
 # Python 3.14 excluded: dbt-core 1.11.x caps mashumaro<3.15; mashumaro 3.14 has no Python 3.14 support
