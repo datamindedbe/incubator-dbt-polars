@@ -507,7 +507,7 @@ class BaseDocsGenReferences(BaseGenerateProject):
             id_type="Int64",
             text_type="String",
             time_type="Datetime(time_unit='us', time_zone=None)",
-            bigint_type="Int32",
+            bigint_type="Int64",
             view_type="BASE TABLE",
             table_type="BASE TABLE",
             model_stats=no_stats(),

@@ -30,7 +30,7 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests
-        run: uv run --python ${{ matrix.python-version }} pytest -n auto
+        run: uv run --no-sync --python ${{ matrix.python-version }} pytest -n auto
 
   test-file-formats:
     name: "Test / py3.12 / ${{ matrix.config }}"
@@ -80,7 +80,7 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} --extra iceberg ${{ matrix.deps == 'lowest-direct' && '--resolution=lowest-direct' || '' }}
 
       - name: Run tests (iceberg catalog)
-        run: uv run --python ${{ matrix.python-version }} pytest -n auto --profile iceberg
+        run: uv run --no-sync --python ${{ matrix.python-version }} pytest -n auto --profile iceberg
 
   ruff:
     name: "Ruff"
