@@ -1,19 +1,35 @@
 fixed:
   type: polars
 prompts:
-  host:
-    hint: "your host name"
-  port:
-    default: 5432
-    type: "int"
-  user:
-    hint: "dev username"
-  password:
-    hint: "dev password"
-    hide_input: true
-  dbname:
-    hint: "default database"
+  schema:
+    hint: "default schema name"
+    default: "main"
   threads:
     hint: "1 or more"
     type: "int"
     default: 1
+  _choose_catalog_type:
+    local:
+      _fixed_catalog_type: local
+      root:
+        hint: "root path for local storage"
+        default: "./data"
+    s3:
+      _fixed_catalog_type: s3
+      bucket:
+        hint: "S3 bucket name"
+      prefix:
+        hint: "key prefix inside the bucket (optional)"
+        default: ""
+    azure:
+      _fixed_catalog_type: azure
+      account_name:
+        hint: "Azure storage account name"
+      container:
+        hint: "container name (optional)"
+        default: ""
+      prefix:
+        hint: "path prefix inside the container (optional)"
+        default: ""
+    iceberg:
+      _fixed_catalog_type: iceberg

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.1
+
+### Documentation
+
+- Add getting started guide
+
+### Fixes
+
+- dbt init prompts for setting up a profile
+
 ## v0.1.0
 
 ### Implements

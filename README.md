@@ -30,7 +30,9 @@ dbt-polars uses **catalogs** to define where data is stored. Each catalog maps t
 
 ## Quick start
 
-A minimal `profiles.yml` for local development:
+See the [Getting started](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/demos/getting_started.md) guide.
+
+A minimal `profiles.yml` for local development is:
 
 ```yaml
 my_project:
@@ -39,17 +41,17 @@ my_project:
     dev:
       type: polars
       schema: dev
-      catalogs:
-        - name: my_catalog
-          type: local
-          root: ./data
+
+      catalog_type: local
+      root: ./data
 ```
 
 ## Documentation
 
-- [Catalog overview and profile reference](docs/index.md)
-- [Local catalog](docs/catalogs/local.md)
-- [Azure catalog](docs/catalogs/azure.md)
-- [Iceberg catalog](docs/catalogs/iceberg.md)
-- [Python models and tests](docs/python-models.md)
-- [Roadmap and known limitations](docs/roadmap.md)
+- [Getting started](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/demos/getting_started.md)
+- [Catalog overview and profile reference](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/index.md)
+- [Local catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/local.md)
+- [Azure catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/azure.md)
+- [Iceberg catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/iceberg.md)
+- [Python models and tests](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/python-models.md)
+- [Roadmap and known limitations](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/roadmap.md)
