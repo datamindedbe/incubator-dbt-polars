@@ -23,7 +23,12 @@ def parse_and_rewrite(sql: str) -> tuple[str, dict[str, PolarsRelation]]:
     Returns the rewritten SQL and a dict mapping flat table name to
     PolarsRelation.
     """
-    ast = sqlglot.parse_one(sql)
+    # Parsed/regenerated as duckdb: sqlglot's default (dialect-agnostic) generator
+    # rewrites array literals like `[1, 2, 3]` into `ARRAY(1, 2, 3)` call syntax,
+    # which Polars' SQL engine doesn't understand (it only accepts bracket
+    # literals). duckdb's dialect round-trips bracket syntax unchanged and is
+    # otherwise compatible with the SQL Polars accepts.
+    ast = sqlglot.parse_one(sql, read="duckdb")
     parsed: exp.Expr = ast
 
     qualified_tables = _find_qualified_tables(parsed)
@@ -116,7 +121,7 @@ def _replace_qualified_tables_with_flat_names(
         )
 
     rewritten_ast = ast.transform(replace_table)
-    return rewritten_ast.sql(), relation_by_flat_name
+    return rewritten_ast.sql(dialect="duckdb"), relation_by_flat_name
 
 
 def _raise_if_a_column_unsafely_qualifies_a_colliding_name(

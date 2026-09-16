@@ -501,7 +501,21 @@ class PolarsAdapter(BaseAdapter):
                 if converter is None:
                     continue
                 type_str = converter(agate_table, col_idx)
-            casts.append(pl.col(col_name).cast(_resolve_polars_type(type_str)))
+            target_type = _resolve_polars_type(type_str)
+            if target_type in (pl.Date, pl.Datetime) and df[col_name].dtype == pl.Utf8:
+                # An explicit `+column_types` override (e.g. seed config) leaves the
+                # column as raw CSV text, so a plain strict cast rejects any timestamp
+                # not in Polars' exact ISO format (e.g. a space instead of 'T'). Parse
+                # leniently instead, matching the datetime strings dbt-core seeds
+                # commonly use ('YYYY-MM-DD HH:MM:SS').
+                parsed = pl.col(col_name).str.to_datetime(strict=False)
+                casts.append(
+                    (parsed.cast(pl.Date) if target_type is pl.Date else parsed).alias(
+                        col_name
+                    )
+                )
+            else:
+                casts.append(pl.col(col_name).cast(target_type))
 
         if casts:
             df = df.with_columns(casts)
@@ -1332,6 +1346,25 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table_from_data(
             df.to_dicts(), df.columns
         )
+
+    @available
+    def run_sql_for_tests(self, sql, fetch, conn=None):
+        df = self._run_sql(sql)
+        rows = df.rows()
+        if fetch == "one":
+            return rows[0] if rows else None
+        if fetch == "all":
+            return rows
+        return None
+
+    def validate_sql(self, sql: str) -> AdapterResponse:
+        # Polars has no EXPLAIN-style dry-run, so this actually executes the query
+        # (cheap here — it's local compute, not a billed warehouse query).
+        try:
+            self._run_sql(sql)
+        except Exception as e:
+            raise DbtRuntimeError(str(e)) from e
+        return AdapterResponse(_message="OK")
 
 
 # may require more build out to make more user friendly to confer with team

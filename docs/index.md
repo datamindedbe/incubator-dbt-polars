@@ -88,3 +88,4 @@ Iceberg catalogs always use the Iceberg format — the `file_format` config has 
 ## Other topics
 
 - [Python models and tests](python-models.md)
+- [SQL macro support](sql-macros.md) — which of dbt's generic SQL macros work on dbt-polars, and why the rest don't

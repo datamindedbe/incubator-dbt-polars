@@ -173,6 +173,9 @@ Example 3 of 3 of required macros that does not have a default implementation.
 */
 
 {% macro polars__current_timestamp() -%}
-'''Returns current UTC time'''
-{# docs show not to be implemented currently. #}
-{% endmacro %}
+    {{ exceptions.raise_not_implemented(
+        "current_timestamp() is not supported by dbt-polars: Polars' SQL engine has "
+        "no current_timestamp()/now() function. If you need the current timestamp, "
+        "use a Python model (polars) instead of a SQL model."
+    ) }}
+{%- endmacro %}

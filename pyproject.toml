@@ -24,11 +24,11 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "dbt-adapters>=1.0.0",
+    "dbt-adapters>=1.23.0",
     "dbt-common>=1.0.0",
     "dbt-core>=1.11.2",
-    "polars[deltalake,pyarrow]>=1.0.0,!=1.43.0",
-    "sqlglot>=1.0.0",
+    "polars[deltalake,pyarrow]>=1.44.0",
+    "sqlglot>=18.0.0",
 ]
 
 [dependency-groups]
@@ -58,6 +58,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["dbt*"]
+
+[tool.setuptools.package-data]
+"dbt.include.polars" = ["*.yml", "macros/*.sql", "macros/**/*.sql"]
 
 [tool.uv]
 config-settings = { editable_mode = "compat" }
