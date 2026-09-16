@@ -24,11 +24,11 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "dbt-adapters>=1.0.0",
+    "dbt-adapters>=1.23.0",
     "dbt-common>=1.0.0",
     "dbt-core>=1.11.2",
     "polars[deltalake,pyarrow]>=1.44.0",
-    "sqlglot>=3.0.0",
+    "sqlglot>=18.0.0",
 ]
 
 [dependency-groups]
