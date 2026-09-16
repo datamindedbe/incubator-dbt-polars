@@ -41,11 +41,16 @@ _NULL_DTYPE_XFAIL_REASON = (
 )
 
 
+# The xfail above documents a Delta-specific failure mode; under other file
+# formats an all-NULL column doesn't hit that Delta write limitation, so these
+# classes only make sense under the default (Delta) config.
+@pytest.mark.require_configs("default")
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=_NULL_DTYPE_XFAIL_REASON)
 class TestMixedNullCompare(BaseMixedNullCompare):
     pass
 
 
+@pytest.mark.require_configs("default")
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=_NULL_DTYPE_XFAIL_REASON)
 class TestNullCompare(BaseNullCompare):
     pass

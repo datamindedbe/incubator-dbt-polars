@@ -16,5 +16,6 @@ class BaseArrayConstruct(BaseArrayUtils):
         }
 
 
+@pytest.mark.skip_configs("csv")  # CSV can't store nested/array data
 class TestArrayConstruct(BaseArrayConstruct):
     pass

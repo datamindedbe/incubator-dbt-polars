@@ -83,5 +83,10 @@ class BaseExcept(BaseUtils):
         )
 
 
+# CSV and ndjson have no embedded schema: an empty relation round-trips with no
+# type information (CSV infers every column as str; ndjson can't infer at all),
+# so the id join in these except models fails on empty operands. Parquet embeds
+# a real schema even for zero rows, so it isn't affected.
+@pytest.mark.skip_configs("csv", "ndjson")
 class TestExcept(BaseExcept):
     pass

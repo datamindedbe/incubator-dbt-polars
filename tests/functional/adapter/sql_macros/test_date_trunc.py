@@ -23,5 +23,9 @@ class BaseDateTrunc(BaseUtils):
         }
 
 
+# CSV and ndjson have no native date/datetime type: reading a written timestamp
+# back gives a plain string, which the model's strict_cast(Date) can't parse.
+# Parquet and Delta both preserve the real Datetime dtype.
+@pytest.mark.skip_configs("csv", "ndjson")
 class TestDateTrunc(BaseDateTrunc):
     pass

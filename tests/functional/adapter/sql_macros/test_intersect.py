@@ -81,5 +81,8 @@ class BaseIntersect(BaseUtils):
         )
 
 
+# Same empty-relation type-loss issue as test_except: CSV and ndjson round-trip
+# an empty operand's columns with no type information, breaking the id join.
+@pytest.mark.skip_configs("csv", "ndjson")
 class TestIntersect(BaseIntersect):
     pass
