@@ -90,7 +90,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(scope="session")
 def databricks_token(request):
-    if request.config.option.profile != "iceberg-databricks":
+    if request.config.option.profile not in ("iceberg-databricks", "databricks"):
         return None
     return get_databricks_token()
 
@@ -108,7 +108,7 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
     if profile == "s3":
         return s3_target(unique_schema)
     if profile == "databricks":
-        return databricks_target(unique_schema)
+        return databricks_target(databricks_token, unique_schema)
     return default_target(unique_schema)
 
 
