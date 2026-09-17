@@ -67,6 +67,29 @@ def is_already_exists_error(exc: Exception, error_code: str) -> bool:
     return getattr(exc, "error_code", None) == error_code
 
 
+def quote_identifier(name: str) -> str:
+    return "`" + name.replace("`", "``") + "`"
+
+
+def quoted_full_name(catalog_name: str, schema: str, identifier: str) -> str:
+    return ".".join(quote_identifier(p) for p in (catalog_name, schema, identifier))
+
+
+def escape_sql_string(value: str) -> str:
+    return value.replace("'", "''")
+
+
+def comment_on_table_sql(quoted_name: str, comment: str) -> str:
+    return f"COMMENT ON TABLE {quoted_name} IS '{escape_sql_string(comment)}'"
+
+
+def alter_column_comment_sql(quoted_name: str, column: str, comment: str) -> str:
+    return (
+        f"ALTER TABLE {quoted_name} ALTER COLUMN {quote_identifier(column)} "
+        f"COMMENT '{escape_sql_string(comment)}'"
+    )
+
+
 class DatabricksCatalogConfig(CatalogConfig):
     """Config for the Databricks/Unity Catalog backend.
 
@@ -149,6 +172,9 @@ class DatabricksCatalog(StorageCatalog):
         self.catalog_root: str | None = None
         # full_name -> (table_id, storage_location)
         self.table_metadata: dict[str, tuple[str, str]] = {}
+        # full_name confirmed not registered yet, so a fresh write_relation
+        # doesn't re-check via REST 2-3x over before it registers the table
+        self.confirmed_not_registered: set[str] = set()
         # storage uri -> table_id, so _get_storage_options(uri) can find the table
         self.storage_uri_to_table_id: dict[str, str] = {}
         self.uris_pending_creation: set[str] = set()
@@ -204,6 +230,13 @@ class DatabricksCatalog(StorageCatalog):
     def table_full_name(self, relation: PolarsRelation) -> str:
         return f"{self.config.catalog_name}.{relation.schema}.{relation.identifier}"
 
+    def quoted_full_name(self, relation: PolarsRelation) -> str:
+        if relation.schema is None or relation.identifier is None:
+            raise DbtRuntimeError(f"Relation {relation} is missing a schema/identifier")
+        return quoted_full_name(
+            self.config.catalog_name, relation.schema, relation.identifier
+        )
+
     def schema_full_name(self, schema: str) -> str:
         return f"{self.config.catalog_name}.{schema}"
 
@@ -237,12 +270,15 @@ class DatabricksCatalog(StorageCatalog):
         self.table_metadata[full_name] = (table_id, storage_location)
         self.storage_uri_to_table_id[storage_location] = table_id
         self.registered_tables.add(full_name)
+        self.confirmed_not_registered.discard(full_name)
 
     def registered_table_info(self, relation: PolarsRelation) -> tuple[str, str] | None:
         """Return (table_id, storage_location) for an already-registered table."""
         full = self.table_full_name(relation)
         if full in self.table_metadata:
             return self.table_metadata[full]
+        if full in self.confirmed_not_registered:
+            return None
         from databricks.sdk.errors import NotFound
 
         try:
@@ -250,6 +286,7 @@ class DatabricksCatalog(StorageCatalog):
                 "GET", f"/api/2.1/unity-catalog/tables/{full}"
             )
         except NotFound:
+            self.confirmed_not_registered.add(full)
             return None
         self.remember_table(full, info["table_id"], info["storage_location"])
         return self.table_metadata[full]
@@ -275,45 +312,43 @@ class DatabricksCatalog(StorageCatalog):
         )
         return self.vend_path_credentials(uri, "PATH_READ_WRITE")
 
-    def vend_table_credentials(self, table_id: str) -> dict[str, str]:
-        cached = self.table_credential_cache.get(table_id)
+    def vend_credentials(
+        self,
+        cache: dict[str, tuple[dict[str, str], float]],
+        cache_key: str,
+        endpoint: str,
+        body: dict,
+    ) -> dict[str, str]:
+        cached = cache.get(cache_key)
         now = time.time()
         if cached is not None and cached[1] > now + 300:
             return cached[0]
 
-        response = self.unity_catalog_request(
-            "POST",
-            "/api/2.0/unity-catalog/temporary-table-credentials",
-            body={"table_id": table_id, "operation": "READ_WRITE"},
-        )
+        response = self.unity_catalog_request("POST", endpoint, body=body)
         opts = map_vended_credentials(response)
         expiry = (
             response["expiration_time"] / 1000.0
             if response.get("expiration_time")
             else now + 3600
         )
-        self.table_credential_cache[table_id] = (opts, expiry)
+        cache[cache_key] = (opts, expiry)
         return opts
+
+    def vend_table_credentials(self, table_id: str) -> dict[str, str]:
+        return self.vend_credentials(
+            self.table_credential_cache,
+            table_id,
+            "/api/2.0/unity-catalog/temporary-table-credentials",
+            {"table_id": table_id, "operation": "READ_WRITE"},
+        )
 
     def vend_path_credentials(self, uri: str, operation: str) -> dict[str, str]:
-        cached = self.path_credential_cache.get(uri)
-        now = time.time()
-        if cached is not None and cached[1] > now + 300:
-            return cached[0]
-
-        response = self.unity_catalog_request(
-            "POST",
+        return self.vend_credentials(
+            self.path_credential_cache,
+            uri,
             "/api/2.0/unity-catalog/temporary-path-credentials",
-            body={"url": uri, "operation": operation},
+            {"url": uri, "operation": operation},
         )
-        opts = map_vended_credentials(response)
-        expiry = (
-            response["expiration_time"] / 1000.0
-            if response.get("expiration_time")
-            else now + 3600
-        )
-        self.path_credential_cache[uri] = (opts, expiry)
-        return opts
 
     # ── schema management ────────────────────────────────────────────────────────
 
@@ -333,9 +368,26 @@ class DatabricksCatalog(StorageCatalog):
                 body={"name": schema, "catalog_name": self.config.catalog_name},
             )
         except DatabricksError as exc:
-            if not is_already_exists_error(exc, "SCHEMA_ALREADY_EXISTS"):
+            # A concurrent creator (another thread in this run, or an entirely
+            # different process) may have won the race using an error shape
+            # is_already_exists_error doesn't recognize - confirm via a fresh
+            # GET rather than assuming failure.
+            if not is_already_exists_error(
+                exc, "SCHEMA_ALREADY_EXISTS"
+            ) and not self.schema_exists_now(schema):
                 raise
         self.known_schemas.add(schema)
+
+    def schema_exists_now(self, schema: str) -> bool:
+        from databricks.sdk.errors import NotFound
+
+        try:
+            self.unity_catalog_request(
+                "GET", f"/api/2.1/unity-catalog/schemas/{self.schema_full_name(schema)}"
+            )
+            return True
+        except NotFound:
+            return False
 
     def drop_schema(self, relation: PolarsRelation) -> None:
         from databricks.sdk.errors import NotFound
@@ -442,6 +494,7 @@ class DatabricksCatalog(StorageCatalog):
             pass
         self.registered_tables.discard(full_name)
         self.table_metadata.pop(full_name, None)
+        self.confirmed_not_registered.add(full_name)
         self.storage_uri_to_table_id.pop(uri, None)
         self.table_credential_cache.pop(table_id, None)
         self.delete_storage(uri, opts)
@@ -450,8 +503,16 @@ class DatabricksCatalog(StorageCatalog):
         from deltalake import DeltaTable
 
         try:
-            if DeltaTable.is_deltatable(uri, storage_options=opts):
-                DeltaTable(uri, storage_options=opts).delete()
+            if not DeltaTable.is_deltatable(uri, storage_options=opts):
+                return
+            dt = DeltaTable(uri, storage_options=opts)
+            dt.delete()
+            # Physically remove the now-tombstoned data files. This still
+            # leaves the (tiny) _delta_log commit history behind - Delta has
+            # no operation that removes that.
+            dt.vacuum(
+                retention_hours=0, enforce_retention_duration=False, dry_run=False
+            )
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"Could not clean up storage at {uri}: {exc}")
 
@@ -464,6 +525,12 @@ class DatabricksCatalog(StorageCatalog):
         partition_by: list[str],
         model_config: dict | None = None,
     ) -> None:
+        if relation.file_format != "delta":
+            raise DbtRuntimeError(
+                "file_format is not a supported config for the databricks "
+                f"catalog (got {relation.file_format!r} for {relation}) - "
+                "tables are always registered as Delta in Unity Catalog."
+            )
         model_config = model_config or {}
         self.create_schema(relation)
 
@@ -480,13 +547,14 @@ class DatabricksCatalog(StorageCatalog):
         finally:
             self.uris_pending_creation.discard(uri)
 
-        self.register_table(relation, uri, data)
+        self.register_table(relation, uri, data, partition_by)
 
     def register_table(
         self,
         relation: PolarsRelation,
         uri: str,
         data: pl.DataFrame | pl.LazyFrame,
+        partition_by: list[str],
     ) -> None:
         from databricks.sdk.errors import DatabricksError
 
@@ -497,16 +565,17 @@ class DatabricksCatalog(StorageCatalog):
         columns = []
         for i, (name, dtype) in enumerate(schema.items()):
             type_name, type_text, type_json = polars_dtype_to_uc_type(dtype)
-            columns.append(
-                {
-                    "name": name,
-                    "type_name": type_name,
-                    "type_text": type_text,
-                    "type_json": type_json,
-                    "position": i,
-                    "nullable": True,
-                }
-            )
+            column = {
+                "name": name,
+                "type_name": type_name,
+                "type_text": type_text,
+                "type_json": type_json,
+                "position": i,
+                "nullable": True,
+            }
+            if name in partition_by:
+                column["partition_index"] = partition_by.index(name)
+            columns.append(column)
 
         body = {
             "name": relation.identifier,
@@ -582,8 +651,9 @@ class DatabricksCatalog(StorageCatalog):
         current_comment, _ = self.current_unity_catalog_docs(full)
         if (current_comment or "") == (comment or ""):
             return
-        escaped = comment.replace("'", "''")
-        self.run_sql_statement(f"COMMENT ON TABLE {full} IS '{escaped}'")
+        self.run_sql_statement(
+            comment_on_table_sql(self.quoted_full_name(relation), comment)
+        )
 
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
@@ -599,8 +669,8 @@ class DatabricksCatalog(StorageCatalog):
             for col, desired in comments.items()
             if (current_columns.get(col) or "") != (desired or "")
         }
+        if not diffs:
+            return
+        quoted_name = self.quoted_full_name(relation)
         for col, comment in diffs.items():
-            escaped = comment.replace("'", "''")
-            self.run_sql_statement(
-                f"ALTER TABLE {full} ALTER COLUMN {col} COMMENT '{escaped}'"
-            )
+            self.run_sql_statement(alter_column_comment_sql(quoted_name, col, comment))

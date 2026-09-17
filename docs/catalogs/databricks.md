@@ -19,6 +19,9 @@ Unity Catalog's native comment fields (see Persisting docs below).
 >   (e.g. created with `CREATE CATALOG ... MANAGED LOCATION '...'`). New
 >   tables' paths are derived from the catalog's own storage root plus the
 >   schema and table name, rather than taking a location in profile config.
+> - **`file_format` is not configurable for this catalog.** Tables are always
+>   registered as Delta in Unity Catalog; setting `file_format` to anything
+>   other than `delta` on a model raises an error.
 
 ## Installation
 
@@ -100,6 +103,11 @@ they are not satisfied by `ALL PRIVILEGES` or by catalog/owner status.
 A new table is written to `<catalog storage_root>/<schema>/<table_name>` and
 registered in Unity Catalog as `<catalog_name>.<schema>.<table_name>`.
 
+Dropping a table (or schema) unregisters it from Unity Catalog and vacuums its
+underlying storage with no retention, physically removing the data files.
+The small `_delta_log` transaction-log files are left behind - Delta has no
+operation that removes those.
+
 ## Persisting docs
 
 Table/column descriptions from dbt's `persist_docs` are always written to the
@@ -117,3 +125,35 @@ REST and skips the SQL warehouse entirely when nothing changed, so a normal
 `dbt run` with unchanged docs never starts it up. Leave it unset to keep this
 catalog fully compute-free; Unity Catalog's own comment fields then simply
 never get populated.
+
+## Orphaned storage
+
+dbt-polars only cleans up storage through its own `drop_relation`/`drop_schema`
+code path (see Table layout above). If a table gets removed some other way -
+deleted in the Databricks UI, dropped via SQL from a notebook, deleted by
+another tool entirely - its data files are left behind with no built-in
+detection, since dbt-polars has no record that it ever existed.
+
+An automated cleanup/audit command (list a schema's storage, diff against
+what's registered in Unity Catalog, delete the orphans) was investigated but
+turned out not to be achievable through the REST-plus-credential-vending
+model this catalog is built on, for two independent reasons:
+
+- Unity Catalog's path-based credential vending refuses catalog-root and
+  schema-root paths for *any* operation, including plain `PATH_READ` - it
+  rejects them as overlapping with managed storage. Without read access at
+  that granularity there is no way to list a schema's actual storage
+  contents via REST, so orphans can't be discovered in the first place.
+- Even for a single, already-known table path, deleting its files with
+  path-vended credentials failed on Azure with a `403 Signed Directory Depth
+  Invalid` error during `vacuum`'s bulk delete - the vended SAS token's
+  fixed directory-depth signature doesn't cover the depth a batch delete
+  touches.
+
+A blind, time-based storage lifecycle policy (e.g. "delete anything untouched
+for 90 days") is not a safe substitute either: Delta's data files are never
+modified after they're written, so file age can't tell an abandoned table
+apart from a stable table that's simply being read, not rewritten.
+
+For now, cleaning up orphaned storage is a manual step - review and delete it
+directly through the Databricks UI or your cloud provider's console/CLI.
