@@ -37,3 +37,29 @@ jobs:
           DATABRICKS_WORKSPACE_URL: ${{ secrets.DATABRICKS_WORKSPACE_URL }}
           DATABRICKS_UC_CATALOG: ${{ secrets.DATABRICKS_UC_CATALOG }}
         run: uv run --python 3.12 pytest -n auto --profile iceberg-databricks
+
+  test-databricks:
+    name: "Test databricks"
+    if: github.event.label.name == 'databricks verified'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --python 3.12 --extra databricks
+
+      - name: Run tests (databricks catalog)
+        env:
+          DATABRICKS_WORKSPACE_URL: ${{ secrets.DATABRICKS_WORKSPACE_URL }}
+          DATABRICKS_UC_CATALOG: ${{ secrets.DATABRICKS_UC_CATALOG }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+        run: uv run --python 3.12 pytest -n auto --profile databricks

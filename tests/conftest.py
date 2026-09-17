@@ -11,6 +11,7 @@ import pytest
 from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
     azure_target,
+    databricks_target,
     default_target,
     get_databricks_pyiceberg_catalog,
     get_databricks_token,
@@ -39,6 +40,7 @@ def pytest_addoption(parser):
             "iceberg-databricks",
             "azure",
             "s3",
+            "databricks",
         ],
         default="local",
         help=(
@@ -105,6 +107,8 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
         return azure_target(unique_schema)
     if profile == "s3":
         return s3_target(unique_schema)
+    if profile == "databricks":
+        return databricks_target(unique_schema)
     return default_target(unique_schema)
 
 

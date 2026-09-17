@@ -53,5 +53,6 @@ my_project:
 - [Local catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/local.md)
 - [Azure catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/azure.md)
 - [Iceberg catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/iceberg.md)
+- [Databricks catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/databricks.md)
 - [Python models and tests](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/python-models.md)
 - [Roadmap and known limitations](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/roadmap.md)
