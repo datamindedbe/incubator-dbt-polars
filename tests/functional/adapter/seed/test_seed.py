@@ -145,7 +145,7 @@ class TestSimpleSeedWithBOMIceberg(BaseSimpleSeedWithBOM):
         )
 
 
-@pytest.mark.skip_profiles("iceberg-databricks")
+@pytest.mark.skip_profiles("iceberg-databricks", "databricks")
 class TestSeedWithExplicitCatalogParsing:
     """Manifest parsing must not raise DbtCatalogIntegrationNotFoundError
     when seeds carry an explicit +catalog config."""
@@ -167,7 +167,7 @@ class TestSeedWithExplicitCatalogParsing:
         util.run_dbt(["parse"])
 
 
-@pytest.mark.skip_profiles("iceberg-databricks")
+@pytest.mark.skip_profiles("iceberg-databricks", "databricks")
 class TestSeedWithExplicitCatalog:
     """Verify that a seed with an explicit catalog config is written
     to the correct catalog."""

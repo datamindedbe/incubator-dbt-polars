@@ -27,6 +27,7 @@ dbt-polars uses **catalogs** to define where data is stored. Each catalog maps t
 | `iceberg` with REST + Databricks | Iceberg REST API (Unity Catalog) | Experimental |
 | `iceberg` with other backends | Any pyiceberg-supported backend | Experimental |
 | `azure` | Azure Blob Storage / ADLS Gen2 | Experimental |
+| `databricks` | Unity Catalog REST API + credential vending | Experimental |
 
 ## Quick start
 
@@ -53,5 +54,6 @@ my_project:
 - [Local catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/local.md)
 - [Azure catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/azure.md)
 - [Iceberg catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/iceberg.md)
+- [Databricks catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/databricks.md)
 - [Python models and tests](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/python-models.md)
 - [Roadmap and known limitations](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/roadmap.md)

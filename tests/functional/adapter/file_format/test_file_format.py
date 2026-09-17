@@ -22,6 +22,7 @@ SELECT * FROM {{ ref('source_model') }}
 """
 
 
+@pytest.mark.require_profiles("local")
 class TestNodeConfigForNonExecutedModel(PolarsTestMixin):
     """Verify that _node_configs carries file_format not in the execution set.
 

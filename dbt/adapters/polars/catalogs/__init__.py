@@ -3,6 +3,10 @@ from dbt.adapters.polars.catalogs.azureCatalog import (
     AzureBlobStorageCatalogConfig,
 )
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.catalogs.databricksCatalog import (
+    DatabricksCatalog,
+    DatabricksCatalogConfig,
+)
 from dbt.adapters.polars.catalogs.icebergCatalog import (
     IcebergCatalog,
     IcebergCatalogConfig,
@@ -15,10 +19,12 @@ CATALOG_CONFIG_REGISTRY: dict[str, type[CatalogConfig]] = {
     "iceberg": IcebergCatalogConfig,
     "azure": AzureBlobStorageCatalogConfig,
     "s3": S3CatalogConfig,
+    "databricks": DatabricksCatalogConfig,
 }
 CATALOG_REGISTRY: dict[str, type[BaseCatalog]] = {
     "local": LocalCatalog,
     "iceberg": IcebergCatalog,
     "azure": AzureBlobStorageCatalog,
     "s3": AWSS3Catalog,
+    "databricks": DatabricksCatalog,
 }

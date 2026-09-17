@@ -11,6 +11,7 @@ import pytest
 from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
     azure_target,
+    databricks_target,
     default_target,
     get_databricks_pyiceberg_catalog,
     get_databricks_token,
@@ -39,6 +40,7 @@ def pytest_addoption(parser):
             "iceberg-databricks",
             "azure",
             "s3",
+            "databricks",
         ],
         default="local",
         help=(
@@ -88,7 +90,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(scope="session")
 def databricks_token(request):
-    if request.config.option.profile != "iceberg-databricks":
+    if request.config.option.profile not in ("iceberg-databricks", "databricks"):
         return None
     return get_databricks_token()
 
@@ -105,6 +107,8 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
         return azure_target(unique_schema)
     if profile == "s3":
         return s3_target(unique_schema)
+    if profile == "databricks":
+        return databricks_target(databricks_token, unique_schema)
     return default_target(unique_schema)
 
 
@@ -235,6 +239,54 @@ def cleanup_databricks_test_schemas(request, databricks_token):
             for table_id in catalog.list_tables(namespace):
                 catalog.purge_table(table_id)
             catalog.drop_namespace(namespace)
+        except Exception:
+            pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_databricks_catalog_test_schemas(request, databricks_token):
+    """Session-wide sweep of leftover `databricks` catalog test schemas.
+
+    Per-class cleanup (PolarsTestMixin.cleanup_all_catalog_schemas) only knows
+    about each catalog's own configured schema, so it misses schemas created
+    via a model's own `schema=` config (e.g. sqlmodels/identifier_collisions
+    tests using `schema_a`), and test classes that don't mix in
+    PolarsTestMixin at all get no per-class cleanup - notably dbt-core's own
+    BaseDebug-derived tests, whose `project` fixture teardown call to
+    `drop_test_schema()` is wrapped in a try/except that silently swallows the
+    failure it hits for the `debug` command (a known dbt-core testing-
+    framework limitation, not specific to this adapter). This sweep catches
+    both cases, mirroring cleanup_azure_test_schemas/cleanup_s3_test_schemas.
+    """
+    yield
+    if request.config.option.profile != "databricks":
+        return
+    import os
+
+    from dbt.adapters.polars.catalogs.databricksCatalog import (
+        DatabricksCatalog,
+        DatabricksCatalogConfig,
+    )
+    from dbt.adapters.polars.relation import PolarsRelation
+
+    catalog_name = os.environ.get("DATABRICKS_UC_CATALOG", "")
+    if not catalog_name:
+        return
+    config = DatabricksCatalogConfig(
+        name="cleanup",
+        type="databricks",
+        schema="cleanup",
+        catalog_name=catalog_name,
+        host=os.environ.get("DATABRICKS_WORKSPACE_URL"),
+        token=databricks_token,
+    )
+    catalog = DatabricksCatalog(config, "")
+    for schema_name in catalog.list_schemas():
+        if not schema_name.startswith("test"):
+            continue
+        relation = PolarsRelation.create(database=catalog_name, schema=schema_name)
+        try:
+            catalog.drop_schema(relation)
         except Exception:
             pass
 

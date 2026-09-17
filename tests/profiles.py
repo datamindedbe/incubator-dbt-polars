@@ -130,6 +130,25 @@ def iceberg_databricks_target(token: str, schema: str) -> dict:
     }
 
 
+def databricks_catalog(token: str, name: str, schema: str) -> dict:
+    return {
+        "type": "databricks",
+        "name": name,
+        "catalog_name": os.environ.get("DATABRICKS_UC_CATALOG", ""),
+        "host": os.environ.get("DATABRICKS_WORKSPACE_URL"),
+        "token": token,
+        "persist_docs_http_path": os.environ.get("DATABRICKS_PERSIST_DOCS_HTTP_PATH"),
+        "schema": schema,
+    }
+
+
+def databricks_target(token: str, schema: str) -> dict:
+    return {
+        "type": "polars",
+        "catalogs": [databricks_catalog(token, "local", schema)],
+    }
+
+
 def get_databricks_pyiceberg_catalog(token: str):
     from pyiceberg.catalog import load_catalog
 
