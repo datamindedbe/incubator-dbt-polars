@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.0
+
+### Implements
+
+- Databricks catalog on top of the Unity Catalog Rest API.
+
 ## v0.1.1
 
 ### Documentation
