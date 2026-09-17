@@ -84,7 +84,7 @@ Iceberg catalogs always use the Iceberg format — the `file_format` config has 
 - [Local](catalogs/local.md) — reads and writes files on the local filesystem
 - [Azure](catalogs/azure.md) — reads and writes files on Azure Blob Storage / ADLS Gen2
 - [Iceberg](catalogs/iceberg.md) — Apache Iceberg tables via pyiceberg
-- [Databricks](catalogs/databricks.md) — Unity Catalog tables via REST, no Databricks compute
+- [Databricks](catalogs/databricks.md) — Unity Catalog tables via REST, compute-free (an optional SQL warehouse can persist docs into Unity Catalog's native comments)
 
 ## Other topics
 

@@ -147,7 +147,6 @@ class DatabricksCatalog(StorageCatalog):
         self.registered_tables: set[str] = set()
         self.known_schemas: set[str] = set()
         self.catalog_root: str | None = None
-        self.schema_storage_roots: dict[str, str] = {}
         # full_name -> (table_id, storage_location)
         self.table_metadata: dict[str, tuple[str, str]] = {}
         # storage uri -> table_id, so _get_storage_options(uri) can find the table
@@ -208,31 +207,29 @@ class DatabricksCatalog(StorageCatalog):
     def schema_full_name(self, schema: str) -> str:
         return f"{self.config.catalog_name}.{schema}"
 
-    def catalog_storage_root(self) -> str | None:
+    def catalog_storage_root(self) -> str:
         if self.catalog_root is not None:
             return self.catalog_root
         info = self.unity_catalog_request(
             "GET", f"/api/2.1/unity-catalog/catalogs/{self.config.catalog_name}"
         )
-        self.catalog_root = (info.get("storage_root") or "").rstrip("/") or None
-        return self.catalog_root
-
-    def schema_storage_root(self, schema: str) -> str:
-        if schema in self.schema_storage_roots:
-            return self.schema_storage_roots[schema]
-        info = self.unity_catalog_request(
-            "GET", f"/api/2.1/unity-catalog/schemas/{self.schema_full_name(schema)}"
-        )
         root = (info.get("storage_root") or "").rstrip("/")
         if not root:
             raise DbtRuntimeError(
-                f"Schema {self.schema_full_name(schema)} has no storage location "
-                "in Unity Catalog. Configure a managed location on the catalog or "
-                "schema (e.g. `CREATE CATALOG/SCHEMA ... MANAGED LOCATION '...'`) "
-                "before writing external tables through it."
+                f"Catalog {self.config.catalog_name} has no storage location in "
+                "Unity Catalog. Configure a managed location on it (e.g. "
+                "`CREATE CATALOG ... MANAGED LOCATION '...'`) before writing "
+                "external tables through it."
             )
-        self.schema_storage_roots[schema] = root
+        self.catalog_root = root
         return root
+
+    def schema_storage_root(self, schema: str) -> str:
+        # Computed directly from the catalog's own storage_root rather than
+        # setting/reading one on the schema itself - doing that would require
+        # the CREATE MANAGED STORAGE privilege on top of EXTERNAL_USE_LOCATION/
+        # CREATE_EXTERNAL_TABLE, which this catalog otherwise never needs.
+        return f"{self.catalog_storage_root()}/{schema}"
 
     def remember_table(
         self, full_name: str, table_id: str, storage_location: str
@@ -329,13 +326,11 @@ class DatabricksCatalog(StorageCatalog):
         from databricks.sdk.errors import DatabricksError
 
         logger.debug(f"Creating schema {relation.catalog}/{schema}")
-        body = {"name": schema, "catalog_name": self.config.catalog_name}
-        catalog_root = self.catalog_storage_root()
-        if catalog_root:
-            body["storage_root"] = f"{catalog_root}/{schema}"
         try:
             self.unity_catalog_request(
-                "POST", "/api/2.1/unity-catalog/schemas", body=body
+                "POST",
+                "/api/2.1/unity-catalog/schemas",
+                body={"name": schema, "catalog_name": self.config.catalog_name},
             )
         except DatabricksError as exc:
             if not is_already_exists_error(exc, "SCHEMA_ALREADY_EXISTS"):
@@ -372,7 +367,6 @@ class DatabricksCatalog(StorageCatalog):
         except NotFound:
             pass
         self.known_schemas.discard(schema)
-        self.schema_storage_roots.pop(schema, None)
 
     def list_schemas(self) -> list[str]:
         return [
