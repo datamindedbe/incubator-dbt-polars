@@ -9,7 +9,7 @@ from deltalake import DeltaTable
 
 from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog
+from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.utils import resolve_relative_path
 
@@ -60,14 +60,14 @@ class LocalCatalog(StorageCatalog):
 
     def _get_path(self, relation: PolarsRelation) -> Path:
         stem = self._relation_path(relation)
-        if relation.file_format == "delta":
+        if file_format_of(relation) == "delta":
             return stem
-        return stem.with_suffix(f".{relation.file_format}")
+        return stem.with_suffix(f".{file_format_of(relation)}")
 
-    def _get_uri(self, relation: PolarsRelation) -> str:
+    def get_uri(self, relation: PolarsRelation) -> str:
         return str(self._get_path(relation))
 
-    def _get_storage_options(self, _uri: str) -> None:
+    def get_storage_options(self, _uri: str) -> None:
         return None
 
     def create_schema(self, relation: PolarsRelation) -> None:
@@ -96,7 +96,7 @@ class LocalCatalog(StorageCatalog):
             f"{relation.schema}/{relation.identifier}"
         )
         path = self._get_path(relation)
-        if relation.file_format == "delta":
+        if file_format_of(relation) == "delta":
             shutil.rmtree(path, ignore_errors=True)
         elif path.exists():
             path.unlink()
@@ -120,7 +120,6 @@ class LocalCatalog(StorageCatalog):
                         identifier=p.name,
                         type=RelationType.Table,
                         catalog=schema_relation.catalog,
-                        file_format="delta",
                     )
                 )
             elif p.is_file() and p.suffix.lstrip(".") in _FILE_FORMATS:

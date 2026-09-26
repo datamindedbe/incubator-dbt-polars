@@ -8,7 +8,7 @@ Python tests, and SQL tests.
 The delta source has no config: key at all — this tests that the default
 file_format ("delta") is applied when a source carries no explicit config.
 
-TestSourceCrossCatalog additionally writes a source into the secondary local2
+TestSourceCrossCatalog additionally writes a source into the secondary
 catalog and verifies a model in the default local catalog can read from it,
 exercising the cross-catalog lookup path.
 """
@@ -19,8 +19,8 @@ from dbt.adapters.contracts.relation import RelationType
 from dbt.tests.util import get_connection, run_dbt
 
 from dbt.adapters.polars.relation import PolarsRelation
-from tests.conftest import PolarsTestMixin
-from tests.utils import polars_read_relation
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
+from dbt.adapters.polars.testing.utils import polars_read_relation
 
 _SOURCE_DATA = pl.DataFrame({"id": [1, 2, 3], "name": ["Alice", "Bob", "Charlie"]})
 
@@ -40,7 +40,7 @@ _SCHEMA_YML_CROSS_CATALOG = """
 version: 2
 sources:
   - name: external
-    database: local2
+    database: secondary
     schema: "{{ target.schema }}"
     tables:
       - name: people_csv
@@ -73,8 +73,8 @@ class SourceSetupMixin(PolarsTestMixin):
 
     @pytest.fixture(scope="class", autouse=True)
     def write_source_data(self, project):
-        _write_relation(project, "local", "people_csv", "csv")
-        _write_relation(project, "local", "people_delta", "delta")
+        _write_relation(project, "primary", "people_csv", "csv")
+        _write_relation(project, "primary", "people_delta", "delta")
 
 
 class TestSourceInSqlModel(SourceSetupMixin):
@@ -253,19 +253,19 @@ SELECT * FROM {{ source('raw', 'people_csv') }}
 
 @pytest.mark.require_profiles("local")
 class TestSourceCrossCatalog(PolarsTestMixin):
-    """A source declared with database: local2 is read by a model in the default
+    """A source declared with database: secondary is read by a model in the default
     local catalog, verifying that _source_configs uses the source's own catalog
     for the lookup key rather than the executing model's catalog."""
 
     @pytest.fixture(scope="class", autouse=True)
     def write_source_data(self, project):
-        _write_relation(project, "local2", "people_csv", "csv")
+        _write_relation(project, "secondary", "people_csv", "csv")
 
     @pytest.fixture(scope="class")
     def models(self):
         return {
             "schema.yml": _SCHEMA_YML_CROSS_CATALOG,
-            "from_local2.sql": """
+            "from_secondary.sql": """
 {{ config(materialized='table') }}
 SELECT * FROM {{ source('external', 'people_csv') }}
 """,
@@ -274,6 +274,6 @@ SELECT * FROM {{ source('external', 'people_csv') }}
     def test_model_reads_source_from_secondary_catalog(self, project):
         run_dbt(["run"])
         rows = polars_read_relation(
-            project.adapter, "from_local2", ["id", "name"], order_by="id"
+            project.adapter, "from_secondary", ["id", "name"], order_by="id"
         )
         assert rows == [(1, "Alice"), (2, "Bob"), (3, "Charlie")]

@@ -8,7 +8,7 @@ from dbt_common.exceptions import DbtRuntimeError
 import polars as pl
 from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
 from dbt.adapters.polars.catalogs.databricks_types import polars_dtype_to_uc_type
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog
+from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
 from dbt.adapters.polars.relation import PolarsRelation
 
 logger = AdapterLogger("polars")
@@ -175,7 +175,7 @@ class DatabricksCatalog(StorageCatalog):
         # full_name confirmed not registered yet, so a fresh write_relation
         # doesn't re-check via REST 2-3x over before it registers the table
         self.confirmed_not_registered: set[str] = set()
-        # storage uri -> table_id, so _get_storage_options(uri) can find the table
+        # storage uri -> table_id, so get_storage_options(uri) can find the table
         self.storage_uri_to_table_id: dict[str, str] = {}
         self.uris_pending_creation: set[str] = set()
         self.path_credential_cache: dict[str, tuple[dict[str, str], float]] = {}
@@ -291,7 +291,7 @@ class DatabricksCatalog(StorageCatalog):
         self.remember_table(full, info["table_id"], info["storage_location"])
         return self.table_metadata[full]
 
-    def _get_uri(self, relation: PolarsRelation) -> str:
+    def get_uri(self, relation: PolarsRelation) -> str:
         info = self.registered_table_info(relation)
         if info is not None:
             return info[1]
@@ -301,7 +301,7 @@ class DatabricksCatalog(StorageCatalog):
 
     # ── credential vending ───────────────────────────────────────────────────────
 
-    def _get_storage_options(self, uri: str) -> dict[str, str] | None:
+    def get_storage_options(self, uri: str) -> dict[str, str] | None:
         table_id = self.storage_uri_to_table_id.get(uri)
         if table_id is not None:
             return self.vend_table_credentials(table_id)
@@ -466,7 +466,6 @@ class DatabricksCatalog(StorageCatalog):
                     identifier=t["name"],
                     type=RelationType.Table,
                     catalog=schema_relation.catalog,
-                    file_format="delta",
                 )
             )
         return result
@@ -525,17 +524,17 @@ class DatabricksCatalog(StorageCatalog):
         partition_by: list[str],
         model_config: dict | None = None,
     ) -> None:
-        if relation.file_format != "delta":
+        if file_format_of(relation) != "delta":
             raise DbtRuntimeError(
                 "file_format is not a supported config for the databricks "
-                f"catalog (got {relation.file_format!r} for {relation}) - "
+                f"catalog (got {file_format_of(relation)!r} for {relation}) - "
                 "tables are always registered as Delta in Unity Catalog."
             )
         model_config = model_config or {}
         self.create_schema(relation)
 
         already_registered = self.table_exists(relation)
-        uri = self._get_uri(relation)
+        uri = self.get_uri(relation)
 
         if already_registered:
             super().write_relation(relation, data, partition_by, model_config)

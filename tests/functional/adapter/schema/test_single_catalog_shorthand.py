@@ -3,7 +3,7 @@ from dbt.adapters.contracts.relation import RelationType
 from dbt.tests.util import get_connection, run_dbt
 
 from dbt.adapters.polars.relation import PolarsRelation
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 _MODEL = """
 {{ config(materialized='table') }}

@@ -9,7 +9,7 @@ from dbt.adapters.contracts.relation import HasQuoting, RelationConfig
 
 @dataclass(frozen=True, eq=False, repr=False)
 class PolarsRelation(BaseRelation):
-    file_format: str = "delta"
+    file_format: str | None = None
     read_options: dict = field(default_factory=dict)
 
     @classmethod
@@ -26,7 +26,7 @@ class PolarsRelation(BaseRelation):
         catalog = (
             config.get("catalog") if config else None
         ) or relation_config.database
-        file_format = config.get("file_format", "delta") if config else "delta"
+        file_format = config.get("file_format") if config else None
         read_options = config.get("read_options", {}) if config else {}
 
         relation = super().create_from(

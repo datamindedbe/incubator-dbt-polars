@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Implements
+
+- Custom catalogs as separate packages, see [docs](docs/catalogs/custom.md).
+- Reusable catalog tests for catalog implementations (`dbt.adapters.polars.testing`).
+
 ## v0.2.0
 
 ### Implements

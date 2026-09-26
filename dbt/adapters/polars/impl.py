@@ -26,7 +26,7 @@ from dbt_common.clients.agate_helper import (
 from dbt_common.exceptions import CompilationError, DbtRuntimeError
 
 import polars as pl
-from dbt.adapters.polars.catalogs import CATALOG_REGISTRY, BaseCatalog
+from dbt.adapters.polars.catalogs import BaseCatalog, create_catalog
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
@@ -201,7 +201,7 @@ class PolarsAdapter(BaseAdapter):
             self._source_configs[
                 (source["database"], source["schema"], source["identifier"])
             ] = {
-                "file_format": cfg.get("file_format", "delta"),
+                "file_format": cfg.get("file_format"),
                 "read_options": cfg.get("read_options") or {},
             }
 
@@ -228,7 +228,7 @@ class PolarsAdapter(BaseAdapter):
             config = credentials.catalog_configs.get(name)
             if config is None:
                 raise DbtRuntimeError(f"Unknown catalog {name}")
-            self.CatalogAdapters[name] = CATALOG_REGISTRY[config.type](
+            self.CatalogAdapters[name] = create_catalog(
                 config, self.config.project_root
             )
 
@@ -256,10 +256,10 @@ class PolarsAdapter(BaseAdapter):
         return False
 
     # --- Catalog operations ---
-    def create_schema(self, relation: PolarsRelation) -> None:  # type: ignore[override]
+    def create_schema(self, relation: PolarsRelation) -> None:
         self.get_storage_catalog(relation.catalog).create_schema(relation)
 
-    def drop_schema(self, relation: PolarsRelation) -> None:  # type: ignore[override]
+    def drop_schema(self, relation: PolarsRelation) -> None:
         self.get_storage_catalog(relation.catalog).drop_schema(relation)
         self.cache.drop_schema(relation.database, relation.schema)
 
@@ -283,7 +283,7 @@ class PolarsAdapter(BaseAdapter):
             polars_goal, polars_current
         )
 
-    def get_columns_in_relation(self, relation: PolarsRelation) -> list[Column]:  # type: ignore[override]
+    def get_columns_in_relation(self, relation: PolarsRelation) -> list[Column]:
         catalog = self.get_storage_catalog(relation.catalog)
         if not catalog.table_exists(relation):
             return []
@@ -292,7 +292,7 @@ class PolarsAdapter(BaseAdapter):
 
     def list_relations_without_caching(
         self,
-        schema_relation: PolarsRelation,  # type: ignore[override]
+        schema_relation: PolarsRelation,
     ) -> list[BaseRelation]:
         return cast(
             list[BaseRelation],
@@ -313,7 +313,7 @@ class PolarsAdapter(BaseAdapter):
         self.get_storage_catalog(relation.catalog).drop_relation(relation)
         self.cache_dropped(relation)
 
-    def truncate_relation(self, relation: PolarsRelation) -> None:  # type: ignore[override]
+    def truncate_relation(self, relation: PolarsRelation) -> None:
         node_config = self._node_configs.get(
             (relation.database, relation.schema, relation.identifier)
         )
@@ -444,7 +444,7 @@ class PolarsAdapter(BaseAdapter):
     def convert_number_type(cls, agate_table: agate.Table, col_idx: int) -> str:
         import agate
 
-        decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))  # type: ignore[attr-defined]
+        decimals = agate_table.aggregate(agate.MaxPrecision(col_idx))
         return "Float64" if decimals else "Int64"
 
     @classmethod
@@ -974,7 +974,7 @@ class PolarsAdapter(BaseAdapter):
             identifier=parsed_model["alias"],
             type=RelationType.Table,
             catalog=parsed_model["database"],
-            file_format=model_config.get("file_format", "delta"),
+            file_format=model_config.get("file_format"),
             read_options=model_config.get("read_options", {}),
         )
         catalog = self.get_storage_catalog(target_relation.catalog)

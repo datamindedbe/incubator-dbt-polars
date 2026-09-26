@@ -1,7 +1,10 @@
 import pytest
 from dbt.tests.util import check_result_nodes_by_name, run_dbt
 
-from tests.functional.adapter.basic.files import test_failing_sql, test_passing_sql
+from dbt.adapters.polars.testing.catalog.files import (
+    test_failing_sql,
+    test_passing_sql,
+)
 
 
 class BaseSingularTests:

@@ -9,8 +9,8 @@ import pytest
 from dbt.tests.util import run_dbt
 from deltalake import write_deltalake
 
-from tests.conftest import PolarsTestMixin
-from tests.utils import polars_relation_row_count
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
+from dbt.adapters.polars.testing.utils import polars_relation_row_count
 
 # A single 5M-row Parquet file (40MB) is scanned 50× by the model, producing
 # a 250M-row (2GB) lazy plan.
@@ -31,6 +31,18 @@ import polars as pl
 
 def model(dbt, _):
     dbt.config(materialized='table')
+    return (
+        pl.concat([pl.scan_parquet("{source_path}") for _ in range({copies})])
+        .with_columns(((pl.col("id") - pl.col("id").mean()) /
+        pl.col("id").std()).alias("id"))
+    )
+"""
+
+_large_python_model_iceberg_template = """\
+import polars as pl
+
+def model(dbt, _):
+    dbt.config(materialized='table', write_options={{'batch_size': 10_000_000}})
     return (
         pl.concat([pl.scan_parquet("{source_path}") for _ in range({copies})])
         .with_columns(((pl.col("id") - pl.col("id").mean()) /
@@ -161,7 +173,7 @@ class TestIcebergPythonModelOOM(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self, large_source_path):
         return {
-            "large_model.py": _large_python_model_template.format(
+            "large_model.py": _large_python_model_iceberg_template.format(
                 source_path=large_source_path,
                 copies=_SOURCE_COPIES,
             )

@@ -124,10 +124,11 @@ def _build_key_delete_filter(keys: list[str], df: pl.DataFrame):
     from pyiceberg.expressions import And, EqualTo, In, Or
 
     if len(keys) == 1:
-        return In(keys[0], df[keys[0]].to_list())
+        return In(keys[0], df[keys[0]].to_list())  # type: ignore[misc,call-arg,arg-type]
 
     row_filters = [
-        And(*[EqualTo(k, row[k]) for k in keys]) for row in df.select(keys).to_dicts()
+        And(*[EqualTo(k, row[k]) for k in keys])  # type: ignore[misc,call-arg,arg-type]
+        for row in df.select(keys).to_dicts()
     ]
     return Or(*row_filters) if len(row_filters) > 1 else row_filters[0]
 

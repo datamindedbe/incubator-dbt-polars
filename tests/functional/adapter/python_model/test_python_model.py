@@ -4,8 +4,11 @@ import pytest
 import yaml
 from dbt.tests.util import run_dbt
 
-from tests.conftest import PolarsTestMixin
-from tests.utils import polars_append_rows, polars_relation_row_count
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
+from dbt.adapters.polars.testing.utils import (
+    polars_append_rows,
+    polars_relation_row_count,
+)
 
 basic_sql = """
 select 1 as id union all

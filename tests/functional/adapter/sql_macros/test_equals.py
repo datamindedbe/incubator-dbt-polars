@@ -1,7 +1,7 @@
 import pytest
 from dbt.tests.util import relation_from_name, run_dbt
 
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 from tests.functional.adapter.sql_macros.base_utils import macros__equals_sql
 from tests.functional.adapter.sql_macros.fixture_equals import (
     MODELS__EQUAL_VALUES_SQL,

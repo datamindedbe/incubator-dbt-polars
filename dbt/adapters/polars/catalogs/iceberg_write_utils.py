@@ -115,7 +115,8 @@ def _overwrite_scd_ids_and_append(
     schema = transaction.table_metadata.schema()
     file_counter = itertools.count(0)
     with transaction.update_snapshot().overwrite() as snapshot_writer:
-        for task in tbl.scan(row_filter=In(scd_id_col, scd_ids)).plan_files():
+        scd_id_filter = In(scd_id_col, scd_ids)  # type: ignore[misc,call-arg,arg-type]
+        for task in tbl.scan(row_filter=scd_id_filter).plan_files():
             all_rows = pl.DataFrame(
                 ArrowScan(
                     table_metadata=transaction.table_metadata,

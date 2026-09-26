@@ -1,7 +1,7 @@
 import pytest
 from dbt.tests.util import run_dbt
 
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 macros__equals_sql = """
 {% macro equals(expr1, expr2) -%}
