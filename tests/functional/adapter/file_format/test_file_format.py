@@ -6,8 +6,8 @@ from dbt.adapters.contracts.relation import RelationType
 from dbt.tests.util import get_connection, run_dbt
 
 from dbt.adapters.polars.relation import PolarsRelation
-from tests.conftest import PolarsTestMixin
-from tests.utils import polars_read_relation
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
+from dbt.adapters.polars.testing.utils import polars_read_relation
 
 _SOURCE_MODEL = """
 {{ config(materialized='table', file_format='parquet') }}

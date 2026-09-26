@@ -8,13 +8,13 @@ from dbt.tests.util import (
     run_dbt,
 )
 
-from tests.functional.adapter.basic.files import (
+from dbt.adapters.polars.testing.catalog.files import (
     base_ephemeral_sql,
     ephemeral_table_sql,
     schema_base_yml,
     seeds_base_csv,
 )
-from tests.utils import polars_relation_row_count
+from dbt.adapters.polars.testing.utils import polars_relation_row_count
 
 
 class BaseEphemeral:

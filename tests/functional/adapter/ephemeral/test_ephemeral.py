@@ -8,7 +8,7 @@ from dbt.tests.adapter.ephemeral import test_ephemeral
 from dbt.tests.adapter.ephemeral.test_ephemeral import BaseEphemeral, BaseEphemeralMulti
 
 from dbt.adapters.polars.impl import PolarsAdapter
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 
 class TestEphemeralMulti(BaseEphemeralMulti, PolarsTestMixin):

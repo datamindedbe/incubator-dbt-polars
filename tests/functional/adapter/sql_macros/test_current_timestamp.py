@@ -4,7 +4,7 @@ import pytest
 from dbt.exceptions import CompilationError
 from dbt.tests.util import relation_from_name, run_dbt
 
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 models__current_ts_sql = """
 select {{ dbt.current_timestamp() }} as current_ts_column

@@ -12,9 +12,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from dbt.adapters.events.logging import AdapterLogger
-
 import polars as pl
+from dbt.adapters.events.logging import AdapterLogger
 
 logger = AdapterLogger("polars")
 

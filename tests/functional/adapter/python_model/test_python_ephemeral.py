@@ -1,8 +1,8 @@
 import pytest
 from dbt.tests.util import run_dbt
 
-from tests.conftest import PolarsTestMixin
-from tests.utils import polars_read_relation
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
+from dbt.adapters.polars.testing.utils import polars_read_relation
 
 ephemeral_sql = """
 {{ config(materialized='ephemeral') }}

@@ -1,10 +1,11 @@
 [project]
 name = "dbt-polars"
-version = "0.2.0"
+version = "0.3.0"
 description = "A dbt adapter for running models with Polars"
 readme = "README.md"
 # Python 3.14 excluded: dbt-core 1.11.x caps mashumaro<3.15; mashumaro 3.14 has no Python 3.14 support
 requires-python = ">=3.10, <3.14"
+license = "Apache-2.0"
 keywords = ["dbt", "polars", "adapter", "data"]
 authors = [
   {name = "Jonas Crevecoeur", email = "jonas.crevecoeur@dataminded.com"}
@@ -13,9 +14,8 @@ maintainers = [
   {name = "Jonas Crevecoeur", email = "jonas.crevecoeur@dataminded.com"}
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -27,15 +27,21 @@ dependencies = [
     "dbt-adapters>=1.23.0",
     "dbt-common>=1.0.0",
     "dbt-core>=1.11.2",
+    "dbt-polars-catalog-local",
     "polars[deltalake,pyarrow]>=1.44.0",
     "sqlglot>=18.0.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
+Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
+Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
 
 [dependency-groups]
 dev = [
+    "dbt-polars-catalog-s3",
+    "dbt-polars-catalog-azure",
+    "dbt-polars-catalog-databricks",
     "dbt-tests-adapter~=1.20.0",
     "pytest~=9.1.1",
     "pytest-timeout~=2.3",
@@ -52,12 +58,12 @@ dev = [
 # Pinned: iceberg_write_utils.py uses private pyiceberg APIs
 # Test with each new adapter version to see if pyiceberg can be upgraded
 iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
-s3 = ["boto3>=1.20.0"]
-azure = ["azure-storage-file-datalake>=12.0.0", "azure-identity>=1.0.0"]
-databricks = ["databricks-sdk>=0.30.0"]
+s3 = ["dbt-polars-catalog-s3"]
+azure = ["dbt-polars-catalog-azure"]
+databricks = ["dbt-polars-catalog-databricks"]
 
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -69,6 +75,15 @@ include = ["dbt*"]
 [tool.uv]
 config-settings = { editable_mode = "compat" }
 
+[tool.uv.workspace]
+members = ["catalogs/*"]
+
+[tool.uv.sources]
+dbt-polars-catalog-local = { workspace = true }
+dbt-polars-catalog-s3 = { workspace = true }
+dbt-polars-catalog-azure = { workspace = true }
+dbt-polars-catalog-databricks = { workspace = true }
+
 [tool.ruff]
 line-length = 88
 target-version = "py310"
@@ -77,7 +92,7 @@ target-version = "py310"
 select = ["E", "F", "W", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/functional/adapter/simple_snapshot/fixtures.py" = ["E501"]
+"dbt/adapters/polars/testing/data_operations/simple_snapshot/fixtures.py" = ["E501"]
 
 [tool.pytest.ini_options]
 # CI runs with -n auto; keep -n 0 here for local development (easier debugging)
@@ -99,10 +114,11 @@ filterwarnings = [
 testpaths = [
     "tests/unit",
     "tests/functional",
+    "catalogs/*/tests",
 ]
 
 [tool.mypy]
 namespace_packages = true
 ignore_missing_imports = true
 show_error_codes = true
-files = ["dbt"]
+files = ["dbt", "catalogs/*/dbt_polars_catalog_*"]

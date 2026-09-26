@@ -1,13 +1,10 @@
-# Patch check_relations_equal in dbt.tests.util before any test modules are
-# imported, so all dbt base test classes automatically use the Polars-native
-# comparison (this adapter has no SQL engine to run the EXCEPT-based SQL).
-import logging
-import random
-from datetime import datetime, timezone
-
-import dbt.tests.util
 import pytest
 
+from dbt.adapters.polars.testing.mixin import (
+    is_removable_test_schema,
+    new_schema_prefix,
+    polars_profile_data,
+)
 from tests.config_presets import CONFIG_PRESETS
 from tests.profiles import (
     azure_target,
@@ -19,15 +16,8 @@ from tests.profiles import (
     iceberg_target,
     s3_target,
 )
-from tests.utils import _resolve_relation, polars_check_relations_equal
 
-logger = logging.getLogger(__name__)
-
-
-dbt.tests.util.check_relations_equal = polars_check_relations_equal
-dbt.tests.util.relation_from_name = _resolve_relation
-
-pytest_plugins = ["dbt.tests.fixtures.project"]
+pytest_plugins = ["dbt.adapters.polars.testing.plugin"]
 
 
 def pytest_addoption(parser):
@@ -114,51 +104,31 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
 
 @pytest.fixture(scope="class")
 def dbt_profile_data(unique_schema, dbt_profile_target, profiles_config_update):
-    """Override dbt-core's fixture: inject unique_schema into every catalog
-    entry of outputs that set `catalogs` explicitly, since dbt-polars requires
-    each entry to carry its own schema in that case. Applied after
-    profiles_config_update so outputs it defines get the unique schema too.
-    """
-    profile = {
-        "test": {
-            "outputs": {"default": dbt_profile_target},
-            "target": "default",
-        },
-    }
-    if profiles_config_update:
-        profile.update(profiles_config_update)
-
-    for output in profile["test"]["outputs"].values():
-        if "catalogs" in output:
-            output["catalogs"] = [
-                {**catalog, "schema": catalog.get("schema") or unique_schema}
-                for catalog in output["catalogs"]
-            ]
-
-    return profile
-
-
-@pytest.fixture(scope="class")
-def prefix(request):
-    """Unique schema prefix that varies per test class and active profile."""
-    profile = request.config.option.profile
-    _randint = random.randint(0, 9999)
-    _runtime_timedelta = datetime.now(timezone.utc).replace(tzinfo=None) - datetime(
-        1970, 1, 1, 0, 0, 0
+    return polars_profile_data(
+        unique_schema, dbt_profile_target, profiles_config_update
     )
-    _runtime = int(_runtime_timedelta.total_seconds() * 1e6)
-    return f"test{_runtime}{_randint:04}_{profile.replace('-', '_')}"
 
 
 @pytest.fixture(scope="class")
-def unique_schema(request, prefix) -> str:
-    test_file = request.module.__name__.split(".")[-1]
-    return f"{prefix}_{test_file}"
+def prefix() -> str:
+    return new_schema_prefix()
 
 
 @pytest.fixture(scope="class")
-def project_root(tmpdir_factory):
-    return tmpdir_factory.mktemp("project")
+def polars_project_config(request) -> dict:
+    config: dict = {"models": {"+materialized": "table"}}
+    for key, val in CONFIG_PRESETS[request.config.option.config_preset].items():
+        if key in config and isinstance(config[key], dict) and isinstance(val, dict):
+            config[key] = {**config[key], **val}
+        else:
+            config[key] = val
+    return config
+
+
+def schema_segment(object_path: str, storage_prefix: str) -> str:
+    """Schema name from an object path laid out as <prefix>/<catalog>/<schema>/..."""
+    parts = object_path[len(storage_prefix) + 1 :].split("/")
+    return parts[1] if len(parts) > 1 else ""
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -185,7 +155,7 @@ def cleanup_azure_test_schemas(request):
 
     depth_groups: dict[int, list[str]] = {}
     for blob in client.list_blobs(name_starts_with=f"{prefix}/"):
-        if "/test" in blob.name:
+        if is_removable_test_schema(schema_segment(blob.name, prefix)):
             depth = blob.name.rstrip("/").count("/")
             depth_groups.setdefault(depth, []).append(blob.name)
 
@@ -219,7 +189,7 @@ def cleanup_s3_test_schemas(request):
         objects = [
             {"Key": obj["Key"]}
             for obj in page.get("Contents", [])
-            if "/test" in obj["Key"]
+            if is_removable_test_schema(schema_segment(obj["Key"], prefix))
         ]
         if objects:
             s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
@@ -232,8 +202,7 @@ def cleanup_databricks_test_schemas(request, databricks_token):
         return
     catalog = get_databricks_pyiceberg_catalog(databricks_token)
     for namespace in catalog.list_namespaces():
-        ns_name = namespace[0]
-        if not ns_name.startswith("test"):
+        if not is_removable_test_schema(namespace[0]):
             continue
         try:
             for table_id in catalog.list_tables(namespace):
@@ -263,16 +232,13 @@ def cleanup_databricks_catalog_test_schemas(request, databricks_token):
         return
     import os
 
-    from dbt.adapters.polars.catalogs.databricksCatalog import (
-        DatabricksCatalog,
-        DatabricksCatalogConfig,
-    )
+    from dbt.adapters.polars.catalogs import create_catalog, resolve_catalog_plugin
     from dbt.adapters.polars.relation import PolarsRelation
 
     catalog_name = os.environ.get("DATABRICKS_UC_CATALOG", "")
     if not catalog_name:
         return
-    config = DatabricksCatalogConfig(
+    config = resolve_catalog_plugin("databricks").config_class(
         name="cleanup",
         type="databricks",
         schema="cleanup",
@@ -280,76 +246,12 @@ def cleanup_databricks_catalog_test_schemas(request, databricks_token):
         host=os.environ.get("DATABRICKS_WORKSPACE_URL"),
         token=databricks_token,
     )
-    catalog = DatabricksCatalog(config, "")
+    catalog = create_catalog(config, "")
     for schema_name in catalog.list_schemas():
-        if not schema_name.startswith("test"):
+        if not is_removable_test_schema(schema_name):
             continue
         relation = PolarsRelation.create(database=catalog_name, schema=schema_name)
         try:
             catalog.drop_schema(relation)
         except Exception:
             pass
-
-
-class PolarsTestMixin:
-    """Overrides SQL-based fixtures from dbt base test classes that don't apply
-    to the Polars adapter (which has no SQL engine)."""
-
-    @pytest.fixture(scope="class")
-    def project_config_update(self, request):
-        config: dict = {"models": {"+materialized": "table"}}
-        preset_name = request.config.option.config_preset
-        if preset_name:
-            for key, val in CONFIG_PRESETS[preset_name].items():
-                if (
-                    key in config
-                    and isinstance(config[key], dict)
-                    and isinstance(val, dict)
-                ):
-                    config[key] = {**config[key], **val}
-                else:
-                    config[key] = val
-        return config
-
-    @pytest.fixture(scope="class", autouse=True)
-    def cleanup_all_catalog_schemas(self, project):
-        from dbt.adapters.polars.catalogs import CATALOG_REGISTRY
-
-        def drop_all():
-            credentials = project.adapter.config.credentials
-            for catalog_name, config in credentials.catalog_configs.items():
-                catalog = CATALOG_REGISTRY[config.type](
-                    config, project.adapter.config.project_root
-                )
-                relation = project.adapter.Relation.create(
-                    database=catalog_name,
-                    schema=config.schema,
-                )
-                try:
-                    catalog.drop_schema(relation)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to drop schema %s/%s during cleanup: %s",
-                        catalog_name,
-                        config.schema,
-                        e,
-                    )
-            project.created_schemas = []
-
-        project.drop_test_schema = drop_all
-        yield
-
-    @pytest.fixture(scope="function")
-    def clear_test_schema(self, project):
-        yield
-        relation = project.adapter.Relation.create(
-            database=project.database,
-            schema=project.test_schema,
-        )
-        project.adapter.drop_schema(relation)
-
-    # Uncomment to keep all schemas -- useful for debugging
-    # @pytest.fixture(scope="class", autouse=True)
-    # def keep_test_schema(self, project):
-    #     project.drop_test_schema = lambda: None
-    #     yield

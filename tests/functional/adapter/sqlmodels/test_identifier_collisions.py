@@ -2,7 +2,7 @@ import pytest
 from dbt.artifacts.schemas.results import RunStatus
 from dbt.tests.util import get_connection, relation_from_name, run_dbt
 
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 
 class TestCteNameCollision(PolarsTestMixin):

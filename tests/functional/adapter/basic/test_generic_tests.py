@@ -1,7 +1,7 @@
 import pytest
 from dbt.tests.util import run_dbt, run_dbt_and_capture
 
-from tests.functional.adapter.basic.files import (
+from dbt.adapters.polars.testing.catalog.files import (
     base_table_sql,
     generic_test_seed_yml,
     generic_test_table_yml,

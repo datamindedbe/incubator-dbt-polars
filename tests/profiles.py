@@ -20,8 +20,8 @@ def azure_target(schema: str) -> dict:
     return {
         "type": "polars",
         "catalogs": [
-            azure_blob_catalog("local", f"{prefix}/local", schema),
-            azure_blob_catalog("local2", f"{prefix}/local2", schema),
+            azure_blob_catalog("primary", f"{prefix}/primary", schema),
+            azure_blob_catalog("secondary", f"{prefix}/secondary", schema),
         ],
     }
 
@@ -34,8 +34,8 @@ def default_target(schema: str) -> dict:
     return {
         "type": "polars",
         "catalogs": [
-            local_catalog(name="local", root="test_root/", schema=schema),
-            local_catalog(name="local2", root="test_root2/", schema=schema),
+            local_catalog(name="primary", root="test_root/", schema=schema),
+            local_catalog(name="secondary", root="test_root2/", schema=schema),
         ],
     }
 
@@ -55,15 +55,15 @@ def iceberg_target(base_path: str, schema: str) -> dict:
         "type": "polars",
         "catalogs": [
             iceberg_catalog(
-                "local",
-                f"sqlite:///{base_path}/local.db",
-                f"file://{base_path}/wh_local",
+                "primary",
+                f"sqlite:///{base_path}/primary.db",
+                f"file://{base_path}/wh_primary",
                 schema,
             ),
             iceberg_catalog(
-                "local2",
-                f"sqlite:///{base_path}/local2.db",
-                f"file://{base_path}/wh_local2",
+                "secondary",
+                f"sqlite:///{base_path}/secondary.db",
+                f"file://{base_path}/wh_secondary",
                 schema,
             ),
         ],
@@ -85,8 +85,8 @@ def s3_target(schema: str) -> dict:
     return {
         "type": "polars",
         "catalogs": [
-            s3_catalog("local", f"{prefix}/local", schema),
-            s3_catalog("local2", f"{prefix}/local2", schema),
+            s3_catalog("primary", f"{prefix}/primary", schema),
+            s3_catalog("secondary", f"{prefix}/secondary", schema),
         ],
     }
 
@@ -145,7 +145,7 @@ def databricks_catalog(token: str, name: str, schema: str) -> dict:
 def databricks_target(token: str, schema: str) -> dict:
     return {
         "type": "polars",
-        "catalogs": [databricks_catalog(token, "local", schema)],
+        "catalogs": [databricks_catalog(token, "primary", schema)],
     }
 
 

@@ -56,6 +56,7 @@ my_project:
 | `catalog_name` | Yes | Name of the Unity Catalog catalog to register tables in. |
 | `host` | No | Workspace URL. Omit to let `databricks-sdk` resolve it from the environment. |
 | `persist_docs_http_path` | No | A SQL warehouse's HTTP path (see Persisting docs below). |
+| `table_format` | No | Table format to write. Only `delta` (the default) is supported for now. |
 | *(anything else)* | No | Forwarded to `databricks.sdk.Config` - see Authentication below. |
 
 ## Authentication

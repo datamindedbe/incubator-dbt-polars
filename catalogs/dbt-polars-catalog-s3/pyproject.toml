@@ -1,0 +1,69 @@
+[project]
+name = "dbt-polars-catalog-s3"
+dynamic = ["version", "dependencies", "readme"]
+description = "AWS S3 catalog for dbt-polars"
+requires-python = ">=3.10, <3.14"
+license = "Apache-2.0"
+keywords = ["dbt", "polars", "catalog", "s3", "aws"]
+authors = [
+  {name = "Jonas Crevecoeur", email = "jonas.crevecoeur@dataminded.com"}
+]
+maintainers = [
+  {name = "Jonas Crevecoeur", email = "jonas.crevecoeur@dataminded.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
+
+[project.urls]
+Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
+Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
+Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
+
+[build-system]
+requires = ["hatchling", "tomli; python_version < '3.11'"]
+build-backend = "hatchling.build"
+
+# Version, readme and a dbt-polars==<version> pin come from the core project,
+# see hatch_build.py.
+[tool.hatch.metadata.hooks.custom]
+dependencies = ["boto3>=1.20.0"]
+
+[tool.hatch.build.targets.sdist.force-include]
+"../../README.md" = "README.md"
+
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "hatch_build.py" },
+    { file = "../../pyproject.toml" },
+    { file = "../../README.md" },
+]
+
+[tool.uv.sources]
+dbt-polars = { workspace = true }
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+
+[tool.ruff.lint]
+extend-select = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"dbt.adapters.polars.catalogs.baseCatalog".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.catalogs.storageCatalog".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.catalogs.formats".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.catalogs.icebergCatalog".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.catalogs.iceberg_write_utils".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.connections".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.impl".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.relation".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.sql_rewrite".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.utils".msg = "Use the public API from dbt.adapters.polars.catalogs"

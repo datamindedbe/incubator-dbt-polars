@@ -2,13 +2,14 @@ from typing import TYPE_CHECKING
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt_common.exceptions import DbtRuntimeError
+from dbt.adapters.polars.catalogs import (
+    FILE_FORMATS,
+    CatalogConfig,
+    PolarsRelation,
+    StorageCatalog,
+    file_format_of,
+)
 from deltalake import DeltaTable
-
-from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
-from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog
-from dbt.adapters.polars.relation import PolarsRelation
 
 if TYPE_CHECKING:
     from azure.core.credentials import AccessToken
@@ -62,14 +63,6 @@ class AzureBlobStorageCatalog(StorageCatalog):
     def __init__(
         self, config: AzureBlobStorageCatalogConfig, project_root: str
     ) -> None:
-        try:
-            import azure.identity  # noqa: F401
-            import azure.storage.filedatalake  # noqa: F401
-        except ImportError as exc:
-            raise DbtRuntimeError(
-                "The azure extra is required for AzureBlobStorageCatalog. "
-                "Install it with: pip install 'dbt-polars[azure]'"
-            ) from exc
         super().__init__(config)
         self._cached_token: AccessToken | None = None
         self._service_client = None  # DataLakeServiceClient | None
@@ -89,18 +82,18 @@ class AzureBlobStorageCatalog(StorageCatalog):
     def _dfs_url(self) -> str:
         return f"https://{self.config.account_name}.dfs.core.windows.net"
 
-    def _get_uri(self, relation: PolarsRelation) -> str:
+    def get_uri(self, relation: PolarsRelation) -> str:
         schema = relation.schema or ""
         identifier = relation.identifier or ""
         container = self.config.container
         path = self._object_path(schema, identifier)
-        if relation.file_format != "delta":
-            path = f"{path}.{relation.file_format}"
+        if file_format_of(relation) != "delta":
+            path = f"{path}.{file_format_of(relation)}"
         return f"az://{container}/{path}"
 
     _DELEGATED_CRED_KEYS = ("bearer_token", "account_key", "sas_token")
 
-    def _get_storage_options(self, _uri: str) -> dict[str, str]:
+    def get_storage_options(self, _uri: str) -> dict[str, str]:
         base: dict[str, str] = {
             "account_name": self.config.account_name,
             "timeout": "120s",
@@ -207,9 +200,9 @@ class AzureBlobStorageCatalog(StorageCatalog):
             return []
 
     def table_exists(self, relation: PolarsRelation) -> bool:
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             return DeltaTable.is_deltatable(uri, storage_options=opts)
         file_path = uri.removeprefix(f"az://{self.config.container}/")
         return (
@@ -225,13 +218,13 @@ class AzureBlobStorageCatalog(StorageCatalog):
         logger.debug(
             f"Dropping table if exists {relation.catalog}/{schema}/{identifier}"
         )
-        if relation.file_format == "delta":
+        if file_format_of(relation) == "delta":
             self._remove_directory(file_system, self._object_path(schema, identifier))
         else:
             from azure.core.exceptions import ResourceNotFoundError
 
             file_path = (
-                f"{self._object_path(schema, identifier)}.{relation.file_format}"
+                f"{self._object_path(schema, identifier)}.{file_format_of(relation)}"
             )
             try:
                 self._get_file_system_client(file_system).get_file_client(
@@ -264,7 +257,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
             if path.is_directory:
                 uri = f"az://{file_system}/{path.name}"
                 if DeltaTable.is_deltatable(
-                    uri, storage_options=self._get_storage_options(uri)
+                    uri, storage_options=self.get_storage_options(uri)
                 ):
                     relations.append(
                         schema_relation.create(
@@ -273,7 +266,6 @@ class AzureBlobStorageCatalog(StorageCatalog):
                             identifier=name,
                             type=RelationType.Table,
                             catalog=schema_relation.catalog,
-                            file_format="delta",
                         )
                     )
             else:

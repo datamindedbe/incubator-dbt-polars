@@ -1,5 +1,6 @@
-import polars as pl
 from dbt.tests.util import get_connection, relation_from_name
+
+import polars as pl
 
 
 def get_records(project, table, select=None, where=None):

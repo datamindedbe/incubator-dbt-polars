@@ -1,7 +1,7 @@
 import pytest
 from dbt.tests.util import check_result_nodes_by_name, run_dbt
 
-from tests.functional.adapter.basic.files import (
+from dbt.adapters.polars.testing.catalog.files import (
     ephemeral_with_cte_sql,
     schema_base_yml,
     seeds_base_csv,

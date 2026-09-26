@@ -4,7 +4,7 @@ import time
 import pytest
 from dbt.tests.util import get_connection, run_dbt
 
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 # A single table_exists() check is discarded as inconclusive if it takes longer
 # than this to return - under load, a slow response reflects scheduling/network

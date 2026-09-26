@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -14,7 +15,7 @@ from dbt.adapters.events.logging import AdapterLogger
 from dbt_common.clients.agate_helper import empty_table
 from dbt_common.exceptions import DbtDatabaseError, DbtRuntimeError
 
-from dbt.adapters.polars.catalogs import CATALOG_CONFIG_REGISTRY, CatalogConfig
+from dbt.adapters.polars.catalogs import CatalogConfig, resolve_catalog_plugin
 
 if TYPE_CHECKING:
     import agate
@@ -124,12 +125,22 @@ class PolarsCredentials(Credentials):
 
     def _parse_catalog(self, entry: dict[str, Any]) -> CatalogConfig:
         catalog_type = entry.get("type")
+        if not isinstance(catalog_type, str):
+            raise DbtRuntimeError(f"Catalog '{entry.get('name')}' has no 'type'")
 
-        if catalog_type not in CATALOG_CONFIG_REGISTRY:
-            raise DbtRuntimeError(f"Unknown catalog type: {catalog_type}")
-
-        config_cls = CATALOG_CONFIG_REGISTRY[catalog_type]
-        return config_cls(**{k: v for k, v in entry.items()})
+        config_class = resolve_catalog_plugin(catalog_type).config_class
+        try:
+            return config_class(**entry)
+        except TypeError as exc:
+            # Only report profile errors; a TypeError from inside __init__ is re-raised
+            try:
+                inspect.signature(config_class).bind(**entry)
+            except TypeError as options_error:
+                raise DbtRuntimeError(
+                    f"Invalid options for catalog '{entry.get('name')}' "
+                    f"(type '{catalog_type}'): {options_error}"
+                ) from exc
+            raise
 
 
 class PolarsHandle:

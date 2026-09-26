@@ -1,7 +1,7 @@
 name: CI (Databricks)
 
 on:
-  pull_request_target:
+  pull_request:
     types: [labeled]
 
 jobs:
@@ -15,8 +15,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: astral-sh/setup-uv@v8.2.0
 
@@ -28,14 +26,14 @@ jobs:
 
       - uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Run tests (iceberg-databricks catalog)
         env:
-          DATABRICKS_WORKSPACE_URL: ${{ secrets.DATABRICKS_WORKSPACE_URL }}
-          DATABRICKS_UC_CATALOG: ${{ secrets.DATABRICKS_UC_CATALOG }}
+          DATABRICKS_WORKSPACE_URL: ${{ vars.DATABRICKS_WORKSPACE_URL }}
+          DATABRICKS_UC_CATALOG: ${{ vars.DATABRICKS_UC_CATALOG }}
         run: uv run --python 3.12 pytest -n auto --profile iceberg-databricks
 
   test-databricks:
@@ -48,8 +46,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: astral-sh/setup-uv@v8.2.0
 
@@ -61,12 +57,12 @@ jobs:
 
       - uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Run tests (databricks catalog)
         env:
-          DATABRICKS_WORKSPACE_URL: ${{ secrets.DATABRICKS_WORKSPACE_URL }}
-          DATABRICKS_UC_CATALOG: ${{ secrets.DATABRICKS_UC_CATALOG }}
+          DATABRICKS_WORKSPACE_URL: ${{ vars.DATABRICKS_WORKSPACE_URL }}
+          DATABRICKS_UC_CATALOG: ${{ vars.DATABRICKS_UC_CATALOG }}
         run: uv run --python 3.12 pytest -n auto --profile databricks

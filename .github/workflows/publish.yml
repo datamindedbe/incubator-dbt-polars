@@ -12,7 +12,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
-      contents: read
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +31,41 @@ jobs:
             exit 1
           fi
 
+      - name: Extract release notes from changelog
+        run: |
+          awk -v heading="## $GITHUB_REF_NAME" '
+            $0 == heading {found = 1; next}
+            found && /^## / {exit}
+            found {print}
+          ' changelog.md > "$RUNNER_TEMP/release_notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release_notes.md"; then
+            echo "No '## $GITHUB_REF_NAME' section in changelog.md"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/release_notes.md"
+
       - name: Build
-        run: uv build
+        run: uv build --all-packages
+
+      # Catalog packages take their version from pyproject.toml, see catalogs/*/hatch_build.py
+      - name: Check all packages have the tag version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          ls dist
+          for file in dist/*; do
+            case "$file" in
+              *-"$TAG_VERSION"-*.whl | *-"$TAG_VERSION".tar.gz) ;;
+              *) echo "Unexpected version in $file (tag is $TAG_VERSION)"; exit 1 ;;
+            esac
+          done
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/release_notes.md"
 
       - name: Publish to PyPI
         run: uv publish

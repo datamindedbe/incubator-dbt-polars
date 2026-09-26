@@ -1,12 +1,13 @@
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt_common.exceptions import DbtRuntimeError
+from dbt.adapters.polars.catalogs import (
+    FILE_FORMATS,
+    CatalogConfig,
+    PolarsRelation,
+    StorageCatalog,
+    file_format_of,
+)
 from deltalake import DeltaTable
-
-from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
-from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog
-from dbt.adapters.polars.relation import PolarsRelation
 
 logger = AdapterLogger("polars")
 
@@ -55,13 +56,6 @@ class AWSS3Catalog(StorageCatalog):
     config: S3CatalogConfig
 
     def __init__(self, config: S3CatalogConfig, project_root: str) -> None:
-        try:
-            import boto3  # noqa: F401
-        except ImportError as exc:
-            raise DbtRuntimeError(
-                "The s3 extra is required for AWSS3Catalog. "
-                "Install it with: pip install 'dbt-polars[s3]'"
-            ) from exc
         super().__init__(config)
         self._s3_client = None
 
@@ -83,15 +77,15 @@ class AWSS3Catalog(StorageCatalog):
         }
         return boto3.Session(**kwargs)
 
-    def _get_uri(self, relation: PolarsRelation) -> str:
+    def get_uri(self, relation: PolarsRelation) -> str:
         schema = relation.schema or ""
         identifier = relation.identifier or ""
         path = self._object_prefix(schema, identifier)
-        if relation.file_format != "delta":
-            path = f"{path}.{relation.file_format}"
+        if file_format_of(relation) != "delta":
+            path = f"{path}.{file_format_of(relation)}"
         return f"s3://{self.config.bucket}/{path}"
 
-    def _get_storage_options(self, _uri: str) -> dict[str, str]:
+    def get_storage_options(self, _uri: str) -> dict[str, str]:
         opts: dict[str, str] = {"timeout": "120s"}
         for key, val in self.config.session_kwargs.items():
             if key == "region_name":
@@ -151,13 +145,13 @@ class AWSS3Catalog(StorageCatalog):
         return list(schemas)
 
     def table_exists(self, relation: PolarsRelation) -> bool:
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             return DeltaTable.is_deltatable(uri, storage_options=opts)
         schema = relation.schema or ""
         identifier = relation.identifier or ""
-        key = f"{self._object_prefix(schema, identifier)}.{relation.file_format}"
+        key = f"{self._object_prefix(schema, identifier)}.{file_format_of(relation)}"
         from botocore.exceptions import ClientError
 
         try:
@@ -174,12 +168,14 @@ class AWSS3Catalog(StorageCatalog):
         logger.debug(
             f"Dropping table if exists {relation.catalog}/{schema}/{identifier}"
         )
-        if relation.file_format == "delta":
+        if file_format_of(relation) == "delta":
             self._delete_objects_with_prefix(
                 self._object_prefix(schema, identifier) + "/"
             )
         else:
-            key = f"{self._object_prefix(schema, identifier)}.{relation.file_format}"
+            key = (
+                f"{self._object_prefix(schema, identifier)}.{file_format_of(relation)}"
+            )
             self._get_s3_client().delete_object(Bucket=self.config.bucket, Key=key)
 
     def list_relations_without_caching(
@@ -191,7 +187,7 @@ class AWSS3Catalog(StorageCatalog):
         paginator = s3.get_paginator("list_objects_v2")
         relations: list[PolarsRelation] = []
 
-        opts = self._get_storage_options(f"s3://{self.config.bucket}/{prefix}")
+        opts = self.get_storage_options(f"s3://{self.config.bucket}/{prefix}")
 
         for page in paginator.paginate(
             Bucket=self.config.bucket, Prefix=prefix, Delimiter="/"
@@ -209,7 +205,6 @@ class AWSS3Catalog(StorageCatalog):
                             identifier=dir_name,
                             type=RelationType.Table,
                             catalog=schema_relation.catalog,
-                            file_format="delta",
                         )
                     )
 

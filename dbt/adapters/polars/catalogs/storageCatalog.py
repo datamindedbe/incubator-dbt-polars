@@ -12,6 +12,12 @@ from dbt.adapters.polars.relation import PolarsRelation
 
 logger = AdapterLogger("polars")
 
+DEFAULT_FILE_FORMAT = "delta"
+
+
+def file_format_of(relation: PolarsRelation) -> str:
+    return relation.file_format or DEFAULT_FILE_FORMAT
+
 
 def _unsupported_for_format(method: str, fmt: str) -> NoReturn:
     raise DbtRuntimeError(
@@ -20,18 +26,18 @@ def _unsupported_for_format(method: str, fmt: str) -> NoReturn:
 
 
 class StorageCatalog(BaseCatalog):
-    """Intermediate ABC that owns format dispatch and storage_options injection.
+    """Base class for catalogs that store Delta tables or files at a URI.
 
-    Subclasses implement _get_uri, _get_storage_options, and all schema-management
+    Subclasses implement get_uri, get_storage_options, and all schema-management
     methods (create_schema, drop_schema, list_schemas, table_exists, drop_relation,
     list_relations_without_caching). Data-path methods are provided here.
     """
 
     @abstractmethod
-    def _get_uri(self, relation: PolarsRelation) -> str: ...
+    def get_uri(self, relation: PolarsRelation) -> str: ...
 
     @abstractmethod
-    def _get_storage_options(self, uri: str) -> dict[str, str] | None: ...
+    def get_storage_options(self, uri: str) -> dict[str, str] | None: ...
 
     # ── schema management — abstract, each backend implements ─────────────────
 
@@ -58,20 +64,20 @@ class StorageCatalog(BaseCatalog):
     # ── data-path methods ─────────────────────────────────────────────────────
 
     def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             return DeltaFormat.read(uri, storage_options=opts)
         return FileFormat.read(
-            uri, relation.file_format, relation.read_options, storage_options=opts
+            uri, file_format_of(relation), relation.read_options, storage_options=opts
         )
 
     def get_partition_columns(self, relation: PolarsRelation) -> list[str]:
-        if relation.file_format != "delta":
+        if file_format_of(relation) != "delta":
             return []
-        uri = self._get_uri(relation)
+        uri = self.get_uri(relation)
         return DeltaFormat.get_partition_columns(
-            uri, storage_options=self._get_storage_options(uri)
+            uri, storage_options=self.get_storage_options(uri)
         )
 
     def write_relation(
@@ -82,18 +88,18 @@ class StorageCatalog(BaseCatalog):
         model_config: dict | None = None,
     ) -> None:
         model_config = model_config or {}
-        if partition_by and relation.file_format != "delta":
+        if partition_by and file_format_of(relation) != "delta":
             raise DbtRuntimeError(
                 "partition_by is not supported "
-                + f"for file_format='{relation.file_format}'. "
+                + f"for file_format='{file_format_of(relation)}'. "
                 + "Use file_format='delta' to enable partitioning."
             )
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
         )
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             DeltaFormat.write(
                 uri,
                 data,
@@ -104,7 +110,7 @@ class StorageCatalog(BaseCatalog):
             )
         else:
             FileFormat.write(
-                uri, data, relation.file_format, model_config, storage_options=opts
+                uri, data, file_format_of(relation), model_config, storage_options=opts
             )
 
     def truncate_relation(
@@ -114,14 +120,14 @@ class StorageCatalog(BaseCatalog):
             "Truncating table "
             + f"{relation.catalog}/{relation.schema}/{relation.identifier}"
         )
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             DeltaFormat.truncate(uri, storage_options=opts)
         else:
             FileFormat.truncate(
                 uri,
-                relation.file_format,
+                file_format_of(relation),
                 relation.read_options,
                 storage_options=opts,
                 model_config=model_config,
@@ -135,16 +141,16 @@ class StorageCatalog(BaseCatalog):
         model_config: dict | None = None,
     ) -> None:
         model_config = model_config or {}
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             DeltaFormat.append(
                 uri, data, allow_schema_evolution, model_config, storage_options=opts
             )
         else:
             FileFormat.append(
                 uri,
-                relation.file_format,
+                file_format_of(relation),
                 data,
                 model_config,
                 relation.read_options,
@@ -161,9 +167,9 @@ class StorageCatalog(BaseCatalog):
         allow_schema_evolution: bool = False,
         model_config: dict | None = None,
     ) -> None:
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             DeltaFormat.merge(
                 uri,
                 df,
@@ -181,7 +187,7 @@ class StorageCatalog(BaseCatalog):
                 )
             FileFormat.merge(
                 uri,
-                relation.file_format,
+                file_format_of(relation),
                 df,
                 keys,
                 except_cols,
@@ -198,16 +204,16 @@ class StorageCatalog(BaseCatalog):
         incremental_predicates: list[str] | None = None,
         model_config: dict | None = None,
     ) -> None:
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             DeltaFormat.delete_matched(
                 uri, df, keys, incremental_predicates, storage_options=opts
             )
         else:
             FileFormat.delete_matched(
                 uri,
-                relation.file_format,
+                file_format_of(relation),
                 df,
                 keys,
                 incremental_predicates,
@@ -217,37 +223,37 @@ class StorageCatalog(BaseCatalog):
             )
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        if relation.file_format != "delta":
-            _unsupported_for_format("set_relation_comment", relation.file_format)
-        uri = self._get_uri(relation)
+        if file_format_of(relation) != "delta":
+            _unsupported_for_format("set_relation_comment", file_format_of(relation))
+        uri = self.get_uri(relation)
         DeltaFormat.set_relation_comment(
-            uri, comment, storage_options=self._get_storage_options(uri)
+            uri, comment, storage_options=self.get_storage_options(uri)
         )
 
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None:
-        if relation.file_format != "delta":
-            _unsupported_for_format("set_column_comments", relation.file_format)
-        uri = self._get_uri(relation)
+        if file_format_of(relation) != "delta":
+            _unsupported_for_format("set_column_comments", file_format_of(relation))
+        uri = self.get_uri(relation)
         DeltaFormat.set_column_comments(
-            uri, comments, storage_options=self._get_storage_options(uri)
+            uri, comments, storage_options=self.get_storage_options(uri)
         )
 
     def get_relation_comment(self, relation: PolarsRelation) -> str | None:
-        if relation.file_format != "delta":
+        if file_format_of(relation) != "delta":
             return None
-        uri = self._get_uri(relation)
+        uri = self.get_uri(relation)
         return DeltaFormat.get_relation_comment(
-            uri, storage_options=self._get_storage_options(uri)
+            uri, storage_options=self.get_storage_options(uri)
         )
 
     def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
-        if relation.file_format != "delta":
+        if file_format_of(relation) != "delta":
             return {}
-        uri = self._get_uri(relation)
+        uri = self.get_uri(relation)
         return DeltaFormat.get_column_comments(
-            uri, storage_options=self._get_storage_options(uri)
+            uri, storage_options=self.get_storage_options(uri)
         )
 
     def apply_snapshot_delta(
@@ -260,9 +266,9 @@ class StorageCatalog(BaseCatalog):
     ) -> None:
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
-        uri = self._get_uri(relation)
-        opts = self._get_storage_options(uri)
-        if relation.file_format == "delta":
+        uri = self.get_uri(relation)
+        opts = self.get_storage_options(uri)
+        if file_format_of(relation) == "delta":
             if rows_to_close.is_empty():
                 DeltaFormat.append(uri, rows_to_insert, False, {}, storage_options=opts)
                 return
@@ -273,7 +279,7 @@ class StorageCatalog(BaseCatalog):
             if rows_to_close.is_empty():
                 FileFormat.append(
                     uri,
-                    relation.file_format,
+                    file_format_of(relation),
                     rows_to_insert,
                     model_config or {},
                     relation.read_options,
@@ -282,7 +288,7 @@ class StorageCatalog(BaseCatalog):
                 return
             FileFormat.apply_snapshot(
                 uri,
-                relation.file_format,
+                file_format_of(relation),
                 rows_to_close,
                 rows_to_insert,
                 scd_id_col,

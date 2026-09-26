@@ -119,4 +119,4 @@ jobs:
         run: uv sync
 
       - name: mypy
-        run: uv run mypy dbt/adapters/polars/
+        run: uv run mypy

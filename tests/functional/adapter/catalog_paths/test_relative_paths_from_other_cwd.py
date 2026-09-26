@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from dbt.tests.util import run_dbt
 
-from tests.conftest import PolarsTestMixin
+from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 _MODEL = """
 {{ config(materialized='table') }}
