@@ -106,7 +106,11 @@ def polars_check_relations_equal(
 
         basis_catalog = adapter.get_storage_catalog(basis.database)
         basis_df = basis_catalog.get_relation(basis).collect()
-        col_names = [c for c in basis_df.columns if not c.lower().startswith("dbt_")]
+        col_names = [
+            c
+            for c in basis_df.columns
+            if not c.lower().startswith("dbt_") or compare_snapshot_cols
+        ]
         basis_df = basis_df.select(col_names)
 
         for compare_rel in compares:

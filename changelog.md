@@ -6,11 +6,15 @@
 
 - Catalogs are now published as separate packages
 - Move tests into a package module (`dbt.adapters.polars.testing`) for reusability in catalogs maintained outside this repo
-- [Databricks Catalog]: Add field  `table_format` in the profile. Only allowed value is `Delta`.
+- [Databricks Catalog]: Add field  `table_format` in the profile. Only allowed value is `delta`.
 
 ### Other improvements
 
 - Stop using `pull_request_target` in CI
+
+### Documentation
+
+- [Readme] Add list of key dbt-polars features
 
 ## v0.2.0
 
@@ -43,7 +47,7 @@
 ### Breaking
 
 - schema parameter required on catalog, at the root level or per catalog.
-- New profile shape for single- vs multi-catalog setups, see [docs](docs/index.md#profile-structure).
+- New profile shape for single- vs multi-catalog setups, see [docs](docs/catalog-overview.md#profile-structure).
 
 ###  fixed
 

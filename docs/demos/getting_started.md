@@ -192,7 +192,7 @@ def model(dbt, _) -> pl.DataFrame:
         materialized="incremental",
         incremental_strategy="delete+insert",
         unique_key="date",
-        file_format="csv",  # see docs/index.md#supported-file-formats for other options
+        file_format="csv",  # see docs/catalog-overview.md#supported-file-formats for other options
     )
 
     # in practice use an environment variable for this
@@ -235,7 +235,7 @@ The materialization config instructs dbt-polars to:
 
 ## See also
 
-- [Catalog overview and profile reference](../index.md)
+- [Catalog overview and profile reference](../catalog-overview.md)
 - [Local catalog](../catalogs/local.md)
 - [Python models and tests](../python-models.md)
 - [SQL macro support](../sql-macros.md)

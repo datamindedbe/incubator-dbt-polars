@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -131,10 +132,15 @@ class PolarsCredentials(Credentials):
         try:
             return config_class(**entry)
         except TypeError as exc:
-            raise DbtRuntimeError(
-                f"Invalid options for catalog '{entry.get('name')}' "
-                f"(type '{catalog_type}'): {exc}"
-            ) from exc
+            # Only report profile errors; a TypeError from inside __init__ is re-raised
+            try:
+                inspect.signature(config_class).bind(**entry)
+            except TypeError as options_error:
+                raise DbtRuntimeError(
+                    f"Invalid options for catalog '{entry.get('name')}' "
+                    f"(type '{catalog_type}'): {options_error}"
+                ) from exc
+            raise
 
 
 class PolarsHandle:

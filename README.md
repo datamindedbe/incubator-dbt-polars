@@ -1,6 +1,16 @@
 # dbt-polars
 
-A [dbt](https://www.getdbt.com/) adapter that runs models locally using [Polars](https://pola.rs/). Instead of connecting to a database, dbt-polars reads and writes files — on your local filesystem, Azure Blob Storage, AWS S3, or an Iceberg catalog.
+dbt-polars integrates the flexibility and performance of Polars with the data governance and lineage capabilities of dbt.
+
+Key features of **dbt-polars**:
+
+* **Run anywhere**: Polars runs on any compute platform, so you’re not locked into an expensive data warehouse.
+* **Flexible**: Available catalogs let you connect to local storage, Iceberg catalogs, Databricks, and more.
+* **Extensible**: Create a custom catalog to fit your unique storage and warehouse needs.
+* **First-class Python models**: Run Python models with the same performance and capabilities as SQL models.
+* **Mix Python and SQL**: Choose the language that best fits the transformation.
+* **dbt-native**: Bring lineage, documentation, and data testing into your workflow.
+* **Ingestion**: Build efficient, incremental API ingestion with Python models and keep the entire pipeline visible in the lineage graph.
 
 ## Installation
 
@@ -11,9 +21,9 @@ pip install dbt-polars
 Extra dependencies are required for cloud and Iceberg backends:
 
 ```bash
-pip install 'dbt-polars[azure]'    # Azure Blob Storage
-pip install 'dbt-polars[s3]'       # AWS S3
-pip install 'dbt-polars[iceberg]'  # Apache Iceberg (SQLite, REST, Databricks, …)
+pip install 'dbt-polars[azure]'       # Azure Blob Storage
+pip install 'dbt-polars[databricks]'  # Azure Blob Storage
+pip install 'dbt-polars[iceberg]'     # Apache Iceberg (SQLite, REST, Databricks, …)
 ```
 
 ## Catalogs
@@ -50,11 +60,10 @@ my_project:
 ## Documentation
 
 - [Getting started](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/demos/getting_started.md)
-- [Catalog overview and profile reference](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/index.md)
+- [Catalog overview and profile reference](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalog-overview.md)
 - [Local catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/local.md)
 - [Azure catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/azure.md)
 - [Iceberg catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/iceberg.md)
 - [Databricks catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/databricks.md)
 - [Custom catalogs](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/custom.md)
 - [Python models and tests](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/python-models.md)
-- [Roadmap and known limitations](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/roadmap.md)

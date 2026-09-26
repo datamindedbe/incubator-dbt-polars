@@ -162,3 +162,24 @@ def test_unexpected_catalog_option_gives_readable_error():
                 "not_an_option": 1,
             }
         )
+
+
+class BrokenCatalogConfig(FakeCatalogConfig):
+    def __init__(self, name: str, type: str, schema: str, root: str) -> None:
+        super().__init__(name, type, schema, root)
+        self.url = "s3://" + 42  # type: ignore[operator]
+
+
+def test_type_error_inside_config_is_not_reported_as_invalid_options(
+    register_module,
+):
+    register_module(
+        "dbt_polars_catalog_broken",
+        config_class=BrokenCatalogConfig,
+        create_catalog=create_fake_catalog,
+    )
+
+    with pytest.raises(TypeError, match="can only concatenate str"):
+        PolarsCredentials.from_dict(
+            {"schema": "my_schema", "catalog_type": "broken", "root": "./data"}
+        )

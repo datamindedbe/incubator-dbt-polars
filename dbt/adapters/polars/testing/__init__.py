@@ -6,13 +6,13 @@ Subclass `CatalogTests` (BaseCatalog subclasses) or `StorageCatalogTests`
 can also be combined individually.
 """
 
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 import polars as pl
 from dbt.adapters.polars.catalogs import BaseCatalog, PolarsRelation
+from dbt.adapters.polars.testing.mixin import new_schema_prefix
 from polars.testing import assert_frame_equal
 
 
@@ -25,7 +25,7 @@ class CatalogTestBase:
     def schema_relation(self, catalog):
         relation = PolarsRelation.create(
             database=catalog.config.name,
-            schema=f"catalog_test_{uuid.uuid4().hex[:8]}",
+            schema=f"{new_schema_prefix()}_catalog_test",
             catalog=catalog.config.name,
         )
         catalog.create_schema(relation)

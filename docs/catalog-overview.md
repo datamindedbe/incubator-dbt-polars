@@ -1,6 +1,4 @@
-# dbt-polars documentation
-
-dbt-polars is a dbt adapter that runs transformations locally with Polars. It stores data as files rather than connecting to a database, making it well-suited for local development, offline pipelines, and data lake workflows.
+# Catalog overview
 
 ## How catalogs work
 
@@ -86,9 +84,3 @@ Iceberg catalogs always use the Iceberg format — the `file_format` config has 
 - [Iceberg](catalogs/iceberg.md) — Apache Iceberg tables via pyiceberg
 - [Databricks](catalogs/databricks.md) — Unity Catalog tables via REST, compute-free (an optional SQL warehouse can persist docs into Unity Catalog's native comments)
 - [Custom catalogs](catalogs/custom.md) — add your own storage backend as a separate package
-
-## Other topics
-
-- [Getting started](demos/getting_started.md)
-- [Python models and tests](python-models.md)
-- [SQL macro support](sql-macros.md) — which of dbt's generic SQL macros work on dbt-polars, and why the rest don't
