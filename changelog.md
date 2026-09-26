@@ -1,17 +1,16 @@
 # Changelog
 
-## Unreleased
+## v0.3.0
 
 ### Implements
 
-- Custom catalogs as separate packages, see [docs](docs/catalogs/custom.md).
-- Reusable catalog tests for catalog implementations (`dbt.adapters.polars.testing`).
-- The local, S3, Azure and Databricks catalogs are published as separate packages (`dbt-polars-catalog-<type>`). `dbt-polars` installs the local catalog; the extras (`dbt-polars[azure]`, ...) install the others.
-- Databricks catalog: `table_format` option (only `delta` for now).
+- Catalogs are now published as separate packages
+- Move tests into a package module (`dbt.adapters.polars.testing`) for reusability in catalogs maintained outside this repo
+- [Databricks Catalog]: Add field  `table_format` in the profile. Only allowed value is `Delta`.
 
-### Breaking
+### Other improvements
 
-- Installing the Azure, S3 or Databricks dependencies without the matching extra no longer enables those catalogs; install `dbt-polars[<type>]` instead.
+- Stop using `pull_request_target` in CI
 
 ## v0.2.0
 
