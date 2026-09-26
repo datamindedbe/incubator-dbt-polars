@@ -10,7 +10,7 @@ dbt-polars finds a catalog from its `type`:
 |---|---|---|
 | `my_custom` | `dbt-polars-catalog-my-custom` | `dbt_polars_catalog_my_custom` |
 
-The type must match `^[a-z][a-z0-9_]*$`. The built-in names `local`, `iceberg`, `azure`, `s3` and `databricks` are reserved.
+The type must match `^[a-z][a-z0-9_]*$`. The names of the official catalogs (`local`, `iceberg`, `azure`, `s3` and `databricks`) are reserved. The local, S3, Azure and Databricks catalogs are packages built exactly this way; their source under [`catalogs/`](https://github.com/datamindedbe/incubator-dbt-polars/tree/main/catalogs) is a good starting point.
 
 The package's top-level module must define:
 

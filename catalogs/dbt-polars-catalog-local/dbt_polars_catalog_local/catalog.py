@@ -4,14 +4,16 @@ from pathlib import Path
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.polars.catalogs import (
+    FILE_FORMATS,
+    CatalogConfig,
+    PolarsRelation,
+    StorageCatalog,
+    file_format_of,
+    resolve_relative_path,
+)
 from dbt_common.exceptions import DbtRuntimeError
 from deltalake import DeltaTable
-
-from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
-from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
-from dbt.adapters.polars.relation import PolarsRelation
-from dbt.adapters.polars.utils import resolve_relative_path
 
 logger = AdapterLogger("polars")
 

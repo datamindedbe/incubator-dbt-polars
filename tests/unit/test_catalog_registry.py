@@ -4,11 +4,11 @@ from dataclasses import dataclass
 
 import pytest
 from dbt_common.exceptions import DbtRuntimeError
+from dbt_polars_catalog_local import LocalCatalog
 
 from dbt.adapters.polars.catalogs import (
     BUILTIN_CATALOGS,
     CatalogConfig,
-    LocalCatalog,
     create_catalog,
     resolve_catalog_plugin,
 )
@@ -47,7 +47,13 @@ def register_module(monkeypatch):
 
 
 def test_builtin_types_resolve_without_import():
-    assert resolve_catalog_plugin("local") is BUILTIN_CATALOGS["local"]
+    assert resolve_catalog_plugin("iceberg") is BUILTIN_CATALOGS["iceberg"]
+
+
+def test_official_catalog_packages_resolve_by_prefix():
+    plugin = resolve_catalog_plugin("local")
+
+    assert plugin.create_catalog is LocalCatalog
 
 
 def test_extension_module_is_resolved_by_prefix(register_module):
@@ -68,6 +74,18 @@ def test_missing_extension_suggests_package():
         DbtRuntimeError, match="pip install dbt-polars-catalog-my-custom"
     ):
         resolve_catalog_plugin("my_custom")
+
+
+def test_missing_official_catalog_suggests_extra(monkeypatch):
+    def missing_module(name):
+        raise ModuleNotFoundError(f"No module named '{name}'", name=name)
+
+    monkeypatch.setattr("dbt.adapters.polars.catalogs.import_module", missing_module)
+    resolve_catalog_plugin.cache_clear()
+
+    with pytest.raises(DbtRuntimeError, match=r"pip install 'dbt-polars\[azure\]'"):
+        resolve_catalog_plugin("azure")
+    resolve_catalog_plugin.cache_clear()
 
 
 def test_extension_internal_import_error_propagates(monkeypatch):

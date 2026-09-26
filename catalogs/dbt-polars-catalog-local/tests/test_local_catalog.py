@@ -1,5 +1,4 @@
 import pytest
-
 from dbt.adapters.polars.catalogs import create_catalog, resolve_catalog_plugin
 from dbt.adapters.polars.testing import CatalogTests, FileFormatTests
 

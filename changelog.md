@@ -6,6 +6,12 @@
 
 - Custom catalogs as separate packages, see [docs](docs/catalogs/custom.md).
 - Reusable catalog tests for catalog implementations (`dbt.adapters.polars.testing`).
+- The local, S3, Azure and Databricks catalogs are published as separate packages (`dbt-polars-catalog-<type>`). `dbt-polars` installs the local catalog; the extras (`dbt-polars[azure]`, ...) install the others.
+- Databricks catalog: `table_format` option (only `delta` for now).
+
+### Breaking
+
+- Installing the Azure, S3 or Databricks dependencies without the matching extra no longer enables those catalogs; install `dbt-polars[<type>]` instead.
 
 ## v0.2.0
 

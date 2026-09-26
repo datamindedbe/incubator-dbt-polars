@@ -1,4 +1,4 @@
-from dbt.adapters.polars.catalogs.databricksCatalog import (
+from dbt_polars_catalog_databricks.delta import (
     alter_column_comment_sql,
     comment_on_table_sql,
     quote_identifier,

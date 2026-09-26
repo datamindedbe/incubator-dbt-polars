@@ -1,12 +1,13 @@
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt_common.exceptions import DbtRuntimeError
+from dbt.adapters.polars.catalogs import (
+    FILE_FORMATS,
+    CatalogConfig,
+    PolarsRelation,
+    StorageCatalog,
+    file_format_of,
+)
 from deltalake import DeltaTable
-
-from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
-from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
-from dbt.adapters.polars.relation import PolarsRelation
 
 logger = AdapterLogger("polars")
 
@@ -55,13 +56,6 @@ class AWSS3Catalog(StorageCatalog):
     config: S3CatalogConfig
 
     def __init__(self, config: S3CatalogConfig, project_root: str) -> None:
-        try:
-            import boto3  # noqa: F401
-        except ImportError as exc:
-            raise DbtRuntimeError(
-                "The s3 extra is required for AWSS3Catalog. "
-                "Install it with: pip install 'dbt-polars[s3]'"
-            ) from exc
         super().__init__(config)
         self._s3_client = None
 

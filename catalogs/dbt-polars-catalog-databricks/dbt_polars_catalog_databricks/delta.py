@@ -1,15 +1,18 @@
 import threading
 import time
 
+import polars as pl
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
+from dbt.adapters.polars.catalogs import (
+    PolarsRelation,
+    StorageCatalog,
+    file_format_of,
+)
 from dbt_common.exceptions import DbtRuntimeError
 
-import polars as pl
-from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
-from dbt.adapters.polars.catalogs.databricks_types import polars_dtype_to_uc_type
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
-from dbt.adapters.polars.relation import PolarsRelation
+from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
+from dbt_polars_catalog_databricks.databricks_types import polars_dtype_to_uc_type
 
 logger = AdapterLogger("polars")
 
@@ -90,55 +93,7 @@ def alter_column_comment_sql(quoted_name: str, column: str, comment: str) -> str
     )
 
 
-class DatabricksCatalogConfig(CatalogConfig):
-    """Config for the Databricks/Unity Catalog backend.
-
-    `catalog_name` is the only required dbt-polars-specific field (which Unity
-    Catalog catalog to register tables in - schema storage locations are read
-    from Unity Catalog itself, not configured here). Every other keyword is
-    passed straight through to `databricks.sdk.Config`, so any auth method it
-    supports (PAT, OAuth M2M, Azure client-secret, external-browser, azure-cli,
-    databricks-cli profile, ...) works by supplying the matching kwargs.
-
-    `persist_docs_http_path`: docs (table/column comments from persist_docs)
-    are always written to the Delta table's own metadata. If a SQL warehouse's
-    HTTP path (e.g. `/sql/1.0/warehouses/<warehouse_id>`, as shown on the
-    warehouse's Connection Details page) is also set here, they're additionally
-    written into Unity Catalog's native comment fields via `COMMENT ON TABLE`/
-    `ALTER TABLE ... ALTER COLUMN ... COMMENT` - the only way to set those,
-    since Unity Catalog's REST API has no endpoint for it at all. Left unset,
-    docs never reach Unity Catalog itself.
-    """
-
-    def __init__(
-        self,
-        *,
-        name: str,
-        type: str,
-        schema: str,
-        catalog_name: str,
-        host: str | None = None,
-        persist_docs_http_path: str | None = None,
-        **kwargs: object,
-    ) -> None:
-        self.name = name
-        self.type = type
-        self.schema = schema
-        self.catalog_name = catalog_name
-        self.persist_docs_http_path = persist_docs_http_path
-        self.sdk_kwargs: dict[str, object] = {
-            **({"host": host} if host else {}),
-            **kwargs,
-        }
-
-    def unique_field(self) -> str:
-        return f"{self.catalog_name}/{self.schema}"
-
-    def connection_keys(self) -> tuple[str, ...]:
-        return ("name", "catalog_name", "host", "persist_docs_http_path")
-
-
-class DatabricksCatalog(StorageCatalog):
+class DatabricksDeltaCatalog(StorageCatalog):
     """Registers external Delta tables in Unity Catalog via the REST API.
 
     No Databricks compute/SQL warehouse is ever used: schema/table management and
@@ -157,13 +112,6 @@ class DatabricksCatalog(StorageCatalog):
     config: DatabricksCatalogConfig
 
     def __init__(self, config: DatabricksCatalogConfig, project_root: str) -> None:
-        try:
-            from databricks.sdk import WorkspaceClient  # noqa: F401
-        except ImportError as exc:
-            raise DbtRuntimeError(
-                "The databricks extra is required for DatabricksCatalog. "
-                "Install it with: pip install 'dbt-polars[databricks]'"
-            ) from exc
         super().__init__(config)
         self.client = None
         self.lock = threading.Lock()

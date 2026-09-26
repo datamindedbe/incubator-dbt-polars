@@ -2,13 +2,14 @@ from typing import TYPE_CHECKING
 
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt_common.exceptions import DbtRuntimeError
+from dbt.adapters.polars.catalogs import (
+    FILE_FORMATS,
+    CatalogConfig,
+    PolarsRelation,
+    StorageCatalog,
+    file_format_of,
+)
 from deltalake import DeltaTable
-
-from dbt.adapters.polars.catalogs.baseCatalog import CatalogConfig
-from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
-from dbt.adapters.polars.relation import PolarsRelation
 
 if TYPE_CHECKING:
     from azure.core.credentials import AccessToken
@@ -62,14 +63,6 @@ class AzureBlobStorageCatalog(StorageCatalog):
     def __init__(
         self, config: AzureBlobStorageCatalogConfig, project_root: str
     ) -> None:
-        try:
-            import azure.identity  # noqa: F401
-            import azure.storage.filedatalake  # noqa: F401
-        except ImportError as exc:
-            raise DbtRuntimeError(
-                "The azure extra is required for AzureBlobStorageCatalog. "
-                "Install it with: pip install 'dbt-polars[azure]'"
-            ) from exc
         super().__init__(config)
         self._cached_token: AccessToken | None = None
         self._service_client = None  # DataLakeServiceClient | None

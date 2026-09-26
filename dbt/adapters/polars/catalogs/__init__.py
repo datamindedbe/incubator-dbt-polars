@@ -6,26 +6,16 @@ from importlib import import_module
 
 from dbt_common.exceptions import DbtRuntimeError
 
-from dbt.adapters.polars.catalogs.azureCatalog import (
-    AzureBlobStorageCatalog,
-    AzureBlobStorageCatalogConfig,
-)
 from dbt.adapters.polars.catalogs.baseCatalog import (
     BaseCatalog,
     CatalogConfig,
     get_write_options,
-)
-from dbt.adapters.polars.catalogs.databricksCatalog import (
-    DatabricksCatalog,
-    DatabricksCatalogConfig,
 )
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
 from dbt.adapters.polars.catalogs.icebergCatalog import (
     IcebergCatalog,
     IcebergCatalogConfig,
 )
-from dbt.adapters.polars.catalogs.localCatalog import LocalCatalog, LocalCatalogConfig
-from dbt.adapters.polars.catalogs.s3Catalog import AWSS3Catalog, S3CatalogConfig
 from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.utils import resolve_relative_path
@@ -56,24 +46,20 @@ class CatalogPlugin:
 
 
 BUILTIN_CATALOGS: dict[str, CatalogPlugin] = {
-    "local": CatalogPlugin(LocalCatalogConfig, LocalCatalog),
     "iceberg": CatalogPlugin(IcebergCatalogConfig, IcebergCatalog),
-    "azure": CatalogPlugin(AzureBlobStorageCatalogConfig, AzureBlobStorageCatalog),
-    "s3": CatalogPlugin(S3CatalogConfig, AWSS3Catalog),
-    "databricks": CatalogPlugin(DatabricksCatalogConfig, DatabricksCatalog),
 }
 
 
 def missing_catalog_package_message(catalog_type: str) -> str:
+    distribution = "dbt-polars-catalog-" + catalog_type.replace("_", "-")
     if catalog_type in CATALOG_TYPES_INSTALLED_VIA_EXTRA:
-        install_hint = f"pip install 'dbt-polars[{catalog_type}]'"
-    else:
-        distribution = "dbt-polars-catalog-" + catalog_type.replace("_", "-")
-        install_hint = f"pip install {distribution}"
+        return (
+            f"Catalog type '{catalog_type}' requires {distribution}. "
+            f"Install it with: pip install 'dbt-polars[{catalog_type}]'"
+        )
     return (
-        f"Unknown catalog type '{catalog_type}'. Built-in types: "
-        f"{', '.join(sorted(BUILTIN_CATALOGS))}. To use an extension catalog, "
-        f"install its package: {install_hint}"
+        f"Unknown catalog type '{catalog_type}'. To use an extension catalog, "
+        f"install its package: pip install {distribution}"
     )
 
 
