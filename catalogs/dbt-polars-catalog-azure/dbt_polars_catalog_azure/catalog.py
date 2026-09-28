@@ -93,7 +93,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
 
     _DELEGATED_CRED_KEYS = ("bearer_token", "account_key", "sas_token")
 
-    def get_storage_options(self, _uri: str) -> dict[str, str]:
+    def get_storage_options(self, _uri: str, read_only: bool = False) -> dict[str, str]:
         base: dict[str, str] = {
             "account_name": self.config.account_name,
             "timeout": "120s",

@@ -106,7 +106,8 @@ class DatabricksDeltaCatalog(StorageCatalog):
     table_id) for any table already registered (works for managed and external
     tables alike, gated by `EXTERNAL USE SCHEMA`), and path-based only to
     bootstrap the very first write of a brand-new table that has no table_id yet
-    (gated by `EXTERNAL USE LOCATION`).
+    (gated by `EXTERNAL USE LOCATION`). Reads request READ-only credentials,
+    since Unity Catalog refuses READ_WRITE on managed tables.
     """
 
     config: DatabricksCatalogConfig
@@ -126,8 +127,13 @@ class DatabricksDeltaCatalog(StorageCatalog):
         # storage uri -> table_id, so get_storage_options(uri) can find the table
         self.storage_uri_to_table_id: dict[str, str] = {}
         self.uris_pending_creation: set[str] = set()
-        self.path_credential_cache: dict[str, tuple[dict[str, str], float]] = {}
-        self.table_credential_cache: dict[str, tuple[dict[str, str], float]] = {}
+        # (uri or table_id, operation) -> (storage_options, expiry)
+        self.path_credential_cache: dict[
+            tuple[str, str], tuple[dict[str, str], float]
+        ] = {}
+        self.table_credential_cache: dict[
+            tuple[str, str], tuple[dict[str, str], float]
+        ] = {}
 
     @property
     def workspace_client(self):
@@ -249,29 +255,35 @@ class DatabricksDeltaCatalog(StorageCatalog):
 
     # ── credential vending ───────────────────────────────────────────────────────
 
-    def get_storage_options(self, uri: str) -> dict[str, str] | None:
+    def get_storage_options(
+        self, uri: str, read_only: bool = False
+    ) -> dict[str, str] | None:
         table_id = self.storage_uri_to_table_id.get(uri)
         if table_id is not None:
-            return self.vend_table_credentials(table_id)
+            return self.vend_table_credentials(
+                table_id, "READ" if read_only else "READ_WRITE"
+            )
         if uri in self.uris_pending_creation:
             return self.vend_path_credentials(uri, "PATH_CREATE_TABLE")
         logger.debug(
             f"No cached table_id for {uri}; falling back to path-based credentials."
         )
-        return self.vend_path_credentials(uri, "PATH_READ_WRITE")
+        return self.vend_path_credentials(
+            uri, "PATH_READ" if read_only else "PATH_READ_WRITE"
+        )
 
     def vend_credentials(
         self,
-        cache: dict[str, tuple[dict[str, str], float]],
-        cache_key: str,
+        cache: dict[tuple[str, str], tuple[dict[str, str], float]],
+        cache_key: tuple[str, str],
         endpoint: str,
         body: dict,
     ) -> dict[str, str]:
-        cached = cache.get(cache_key)
-        now = time.time()
-        if cached is not None and cached[1] > now + 300:
-            return cached[0]
+        cached = self.valid_cached_credentials(cache, cache_key)
+        if cached is not None:
+            return cached
 
+        now = time.time()
         response = self.unity_catalog_request("POST", endpoint, body=body)
         opts = map_vended_credentials(response)
         expiry = (
@@ -282,18 +294,34 @@ class DatabricksDeltaCatalog(StorageCatalog):
         cache[cache_key] = (opts, expiry)
         return opts
 
-    def vend_table_credentials(self, table_id: str) -> dict[str, str]:
+    def valid_cached_credentials(
+        self,
+        cache: dict[tuple[str, str], tuple[dict[str, str], float]],
+        cache_key: tuple[str, str],
+    ) -> dict[str, str] | None:
+        cached = cache.get(cache_key)
+        if cached is not None and cached[1] > time.time() + 300:
+            return cached[0]
+        return None
+
+    def vend_table_credentials(self, table_id: str, operation: str) -> dict[str, str]:
+        if operation == "READ":
+            read_write = self.valid_cached_credentials(
+                self.table_credential_cache, (table_id, "READ_WRITE")
+            )
+            if read_write is not None:
+                return read_write
         return self.vend_credentials(
             self.table_credential_cache,
-            table_id,
+            (table_id, operation),
             "/api/2.0/unity-catalog/temporary-table-credentials",
-            {"table_id": table_id, "operation": "READ_WRITE"},
+            {"table_id": table_id, "operation": operation},
         )
 
     def vend_path_credentials(self, uri: str, operation: str) -> dict[str, str]:
         return self.vend_credentials(
             self.path_credential_cache,
-            uri,
+            (uri, operation),
             "/api/2.0/unity-catalog/temporary-path-credentials",
             {"url": uri, "operation": operation},
         )
@@ -432,7 +460,7 @@ class DatabricksDeltaCatalog(StorageCatalog):
     def drop_registered_table(self, full_name: str, table_id: str, uri: str) -> None:
         from databricks.sdk.errors import NotFound
 
-        opts = self.vend_table_credentials(table_id)
+        opts = self.vend_table_credentials(table_id, "READ_WRITE")
         try:
             self.unity_catalog_request(
                 "DELETE", f"/api/2.1/unity-catalog/tables/{full_name}"
@@ -443,7 +471,8 @@ class DatabricksDeltaCatalog(StorageCatalog):
         self.table_metadata.pop(full_name, None)
         self.confirmed_not_registered.add(full_name)
         self.storage_uri_to_table_id.pop(uri, None)
-        self.table_credential_cache.pop(table_id, None)
+        self.table_credential_cache.pop((table_id, "READ"), None)
+        self.table_credential_cache.pop((table_id, "READ_WRITE"), None)
         self.delete_storage(uri, opts)
 
     def delete_storage(self, uri: str, opts: dict[str, str]) -> None:

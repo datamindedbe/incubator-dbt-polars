@@ -37,7 +37,9 @@ class StorageCatalog(BaseCatalog):
     def get_uri(self, relation: PolarsRelation) -> str: ...
 
     @abstractmethod
-    def get_storage_options(self, uri: str) -> dict[str, str] | None: ...
+    def get_storage_options(
+        self, uri: str, read_only: bool = False
+    ) -> dict[str, str] | None: ...
 
     # ── schema management — abstract, each backend implements ─────────────────
 
@@ -65,7 +67,7 @@ class StorageCatalog(BaseCatalog):
 
     def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
         uri = self.get_uri(relation)
-        opts = self.get_storage_options(uri)
+        opts = self.get_storage_options(uri, read_only=True)
         if file_format_of(relation) == "delta":
             return DeltaFormat.read(uri, storage_options=opts)
         return FileFormat.read(
@@ -77,7 +79,7 @@ class StorageCatalog(BaseCatalog):
             return []
         uri = self.get_uri(relation)
         return DeltaFormat.get_partition_columns(
-            uri, storage_options=self.get_storage_options(uri)
+            uri, storage_options=self.get_storage_options(uri, read_only=True)
         )
 
     def write_relation(
@@ -245,7 +247,7 @@ class StorageCatalog(BaseCatalog):
             return None
         uri = self.get_uri(relation)
         return DeltaFormat.get_relation_comment(
-            uri, storage_options=self.get_storage_options(uri)
+            uri, storage_options=self.get_storage_options(uri, read_only=True)
         )
 
     def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
@@ -253,7 +255,7 @@ class StorageCatalog(BaseCatalog):
             return {}
         uri = self.get_uri(relation)
         return DeltaFormat.get_column_comments(
-            uri, storage_options=self.get_storage_options(uri)
+            uri, storage_options=self.get_storage_options(uri, read_only=True)
         )
 
     def apply_snapshot_delta(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -37,12 +38,26 @@ class PolarsCredentials(Credentials):
 
     @property
     def unique_field(self) -> str:
-        # TODO
-        return "todo"
-        # return self._catalog_config.unique_field()
+        return self.catalog_configs[self.database].unique_field()
 
     def _connection_keys(self) -> tuple:
         return ("database", "schema", "catalogs")
+
+    def connection_info(
+        self, *, with_aliases: bool = False
+    ) -> Iterable[tuple[str, Any]]:
+        """Shown by `dbt debug` and available as `target` in Jinja, so each catalog
+        entry only keeps the options listed in its config's connection_keys()."""
+        info = dict(super().connection_info(with_aliases=with_aliases))
+        info["catalogs"] = [
+            self.visible_catalog_entry(entry) for entry in self.catalogs
+        ]
+        return info.items()
+
+    def visible_catalog_entry(self, entry: dict[str, Any]) -> dict[str, Any]:
+        visible = {"name", "type", "schema"}
+        visible.update(self.catalog_configs[entry["name"]].connection_keys())
+        return {key: value for key, value in entry.items() if key in visible}
 
     @property
     def catalog(self) -> str:

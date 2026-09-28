@@ -85,7 +85,7 @@ class AWSS3Catalog(StorageCatalog):
             path = f"{path}.{file_format_of(relation)}"
         return f"s3://{self.config.bucket}/{path}"
 
-    def get_storage_options(self, _uri: str) -> dict[str, str]:
+    def get_storage_options(self, _uri: str, read_only: bool = False) -> dict[str, str]:
         opts: dict[str, str] = {"timeout": "120s"}
         for key, val in self.config.session_kwargs.items():
             if key == "region_name":

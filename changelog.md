@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Omit sensitive fields in the profile from `dbt debug`
+- [Databricks Catalog]: Request READ instead of READ_WRITE credentials for read-only access
+
 ## v0.3.0
 
 ### Implements
