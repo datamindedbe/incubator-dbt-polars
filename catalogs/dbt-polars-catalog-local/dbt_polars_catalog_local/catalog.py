@@ -69,7 +69,7 @@ class LocalCatalog(StorageCatalog):
     def get_uri(self, relation: PolarsRelation) -> str:
         return str(self._get_path(relation))
 
-    def get_storage_options(self, _uri: str) -> None:
+    def get_storage_options(self, _uri: str, read_only: bool = False) -> None:
         return None
 
     def create_schema(self, relation: PolarsRelation) -> None:

@@ -1,9 +1,77 @@
+from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
 from dbt_polars_catalog_databricks.delta import (
+    DatabricksDeltaCatalog,
     alter_column_comment_sql,
     comment_on_table_sql,
     quote_identifier,
     quoted_full_name,
 )
+
+TABLE_URI = "abfss://container@account.dfs.core.windows.net/schema/table"
+
+
+def catalog_recording_credential_requests():
+    catalog = DatabricksDeltaCatalog(
+        DatabricksCatalogConfig(
+            name="uc", type="databricks", schema="schema", catalog_name="main"
+        ),
+        project_root=".",
+    )
+    requests = []
+
+    def fake_unity_catalog_request(method, path, *, query=None, body=None):
+        requests.append(body)
+        return {"azure_user_delegation_sas": {"sas_token": "token"}}
+
+    catalog.unity_catalog_request = fake_unity_catalog_request
+    return catalog, requests
+
+
+def test_registered_table_read_requests_read_credentials():
+    catalog, requests = catalog_recording_credential_requests()
+    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+
+    catalog.get_storage_options(TABLE_URI, read_only=True)
+
+    assert requests == [{"table_id": "table-id", "operation": "READ"}]
+
+
+def test_registered_table_write_requests_read_write_credentials():
+    catalog, requests = catalog_recording_credential_requests()
+    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+
+    catalog.get_storage_options(TABLE_URI)
+
+    assert requests == [{"table_id": "table-id", "operation": "READ_WRITE"}]
+
+
+def test_unregistered_path_read_requests_path_read_credentials():
+    catalog, requests = catalog_recording_credential_requests()
+
+    catalog.get_storage_options(TABLE_URI, read_only=True)
+
+    assert requests == [{"url": TABLE_URI, "operation": "PATH_READ"}]
+
+
+def test_credentials_are_cached_per_operation():
+    catalog, requests = catalog_recording_credential_requests()
+    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+
+    catalog.get_storage_options(TABLE_URI, read_only=True)
+    catalog.get_storage_options(TABLE_URI, read_only=True)
+    catalog.get_storage_options(TABLE_URI)
+
+    assert [r["operation"] for r in requests] == ["READ", "READ_WRITE"]
+
+
+def test_read_reuses_cached_read_write_credentials():
+    catalog, requests = catalog_recording_credential_requests()
+    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+
+    catalog.get_storage_options(TABLE_URI)
+    catalog.get_storage_options(TABLE_URI, read_only=True)
+
+    assert [r["operation"] for r in requests] == ["READ_WRITE"]
 
 
 def test_quote_identifier_wraps_in_backticks():

@@ -133,6 +133,13 @@ def _build_key_delete_filter(keys: list[str], df: pl.DataFrame):
     return Or(*row_filters) if len(row_filters) > 1 else row_filters[0]
 
 
+SECRET_PROPERTY_MARKERS = ("token", "secret", "password", "credential", "key")
+
+
+def is_secret_property(name: str) -> bool:
+    return any(marker in name.lower() for marker in SECRET_PROPERTY_MARKERS)
+
+
 class IcebergCatalogConfig(CatalogConfig):
     """Config for a pyiceberg-backed catalog.
 
@@ -158,11 +165,22 @@ class IcebergCatalogConfig(CatalogConfig):
             kwargs = {"type": pyiceberg_type, **kwargs}
         self._catalog_properties: dict[str, object] = kwargs
 
+    def visible_properties(self) -> dict[str, object]:
+        return {
+            key: value
+            for key, value in self._catalog_properties.items()
+            if not is_secret_property(key)
+        }
+
     def unique_field(self) -> str:
-        return str(sorted(self._catalog_properties.items()))
+        return str(sorted(self.visible_properties().items()))
 
     def connection_keys(self) -> tuple[str, ...]:
-        return ("name",) + tuple(self._catalog_properties.keys())
+        keys = [
+            "pyiceberg_type" if key == "type" else key
+            for key in self.visible_properties()
+        ]
+        return ("name", *keys)
 
 
 def _resolve_relative_uri(uri: str, prefix: str, project_root: str) -> str:

@@ -140,3 +140,55 @@ def test_credentials_survive_a_to_dict_from_dict_round_trip():
         assert creds2.database == creds.database
         assert creds2.schema == creds.schema
         assert creds2.catalogs == creds.catalogs
+
+
+def credentials_with_secrets() -> PolarsCredentials:
+    return PolarsCredentials.from_dict(
+        {
+            "database": "unity",
+            "catalogs": [
+                {
+                    "name": "unity",
+                    "type": "databricks",
+                    "catalog_name": "main",
+                    "host": "https://adb-123.azuredatabricks.net",
+                    "token": "secret-databricks-token",
+                    "schema": "dev",
+                },
+                {
+                    "name": "rest",
+                    "type": "iceberg",
+                    "pyiceberg_type": "rest",
+                    "uri": "https://example.com/iceberg",
+                    "credential": "client:secret",
+                    "token": "secret-iceberg-token",
+                    "schema": "dev",
+                },
+            ],
+        }
+    )
+
+
+def test_connection_info_hides_catalog_secrets():
+    catalogs = dict(credentials_with_secrets().connection_info())["catalogs"]
+
+    assert catalogs == [
+        {
+            "name": "unity",
+            "type": "databricks",
+            "catalog_name": "main",
+            "host": "https://adb-123.azuredatabricks.net",
+            "schema": "dev",
+        },
+        {
+            "name": "rest",
+            "type": "iceberg",
+            "pyiceberg_type": "rest",
+            "uri": "https://example.com/iceberg",
+            "schema": "dev",
+        },
+    ]
+
+
+def test_unique_field_comes_from_the_default_catalog():
+    assert credentials_with_secrets().unique_field == "main/dev"
