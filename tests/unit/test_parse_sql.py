@@ -37,6 +37,20 @@ def test_strips_catalog_and_schema_from_a_qualified_table():
     )
 
 
+def test_leaves_everything_but_qualified_table_names_untouched():
+    sql, _ = parse_and_rewrite(
+        "select TIMESTAMP '2026-10-05 16:32:36', x + INTERVAL '1 day' * n, [1, 2]\n"
+        'from "db"."sch"."orders" o -- comment\n'
+        "join db.sch.customers on true"
+    )
+
+    assert sql == (
+        "select TIMESTAMP '2026-10-05 16:32:36', x + INTERVAL '1 day' * n, [1, 2]\n"
+        "from orders o -- comment\n"
+        "join customers on true"
+    )
+
+
 def test_keeps_an_explicit_alias_on_the_rewritten_table():
     sql, refs = parse_and_rewrite('SELECT o.id FROM "db"."sch"."orders" AS o')
 
@@ -236,11 +250,11 @@ def test_assign_flat_names_disambiguates_a_colliding_name():
 
 
 def test_replace_qualified_tables_with_flat_names_rewrites_sql_and_collects_refs():
-    ast = sqlglot.parse_one('SELECT * FROM "db"."sch"."orders"')
-    table = ast.find(exp.Table)
+    original_sql = 'SELECT * FROM "db"."sch"."orders"'
+    table = sqlglot.parse_one(original_sql).find(exp.Table)
 
     sql, refs = _replace_qualified_tables_with_flat_names(
-        ast, {_relation_key(table): "orders"}
+        original_sql, [table], {_relation_key(table): "orders"}
     )
 
     assert sql == "SELECT * FROM orders"

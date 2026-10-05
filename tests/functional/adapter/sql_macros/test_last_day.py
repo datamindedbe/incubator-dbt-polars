@@ -28,10 +28,38 @@ class BaseLastDay(BaseUtils):
     strict=True,
     raises=CompilationError,
     reason=(
-        "dbt-polars intentionally does not support last_day() — it's built from "
-        "dateadd()/date_trunc(), and dateadd() has no interval arithmetic on "
-        "Polars. Revisit if Polars adds support."
+        "This fixture includes last_day(..., 'quarter'), which needs "
+        "date_trunc('quarter') — not supported by dbt-polars. Month and year work."
     ),
 )
 class TestLastDay(BaseLastDay):
     pass
+
+
+models__test_last_day_month_year_sql = """
+with data as (
+
+    select * from {{ ref('data_last_day') }}
+    where date_part is null or date_part != 'quarter'
+
+)
+
+select
+    case
+        when date_part = 'month' then {{ last_day('date_day', 'month') }}
+        when date_part = 'year' then {{ last_day('date_day', 'year') }}
+        else null
+    end as actual,
+    result as expected
+
+from data
+"""
+
+
+class TestLastDayMonthYear(BaseLastDay):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "test_last_day.yml": models__test_last_day_yml,
+            "test_last_day.sql": models__test_last_day_month_year_sql,
+        }

@@ -14,7 +14,7 @@ Status of dbt-core's generic SQL macros (`dbt.bool_or()`, `dbt.datediff()`, etc.
 | `concat` | Yes | |
 | `current_timestamp` | Yes | Returns the dbt run start time as a naive UTC timestamp, fixed for the whole run. |
 | `date` | Yes | |
-| `dateadd` | No | |
+| `dateadd` | Yes | Always returns a timestamp, also when given a date. |
 | `datediff` | No | |
 | `date_spine` | No | |
 | `date_trunc` | Partial | Only day/hour/minute/month/year truncation is supported. |
@@ -26,7 +26,7 @@ Status of dbt-core's generic SQL macros (`dbt.bool_or()`, `dbt.datediff()`, etc.
 | `get_powers_of_two` | Yes | |
 | `hash` | No | |
 | `intersect` | Yes | |
-| `last_day` | No | |
+| `last_day` | Partial | Only month/year (limited by `date_trunc`). |
 | `length` | Yes | |
 | `listagg` | Partial | Only unordered, unlimited aggregation is supported. |
 | `literal` (`string_literal`) | Yes | |

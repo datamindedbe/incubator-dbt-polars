@@ -1,5 +1,4 @@
 import pytest
-from dbt.exceptions import CompilationError
 
 from tests.functional.adapter.sql_macros.base_utils import BaseUtils
 from tests.functional.adapter.sql_macros.fixture_date import (
@@ -23,7 +22,7 @@ class BaseDate(BaseUtils):
 
 @pytest.mark.xfail(
     strict=True,
-    raises=CompilationError,
+    raises=AssertionError,
     reason=(
         "This fixture calls date() through date_spine(), which is separately "
         "unsupported (see test_date_spine.py) — date() itself works, see "

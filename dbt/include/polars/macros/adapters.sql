@@ -176,5 +176,5 @@ Example 3 of 3 of required macros that does not have a default implementation.
 {% macro polars__current_timestamp() -%}
     {%- set utc = modules.pytz.utc -%}
     {%- set now = run_started_at or modules.datetime.datetime.now(utc) -%}
-    TIMESTAMP '{{ now.astimezone(utc).strftime("%Y-%m-%dT%H:%M:%S.%f") }}'
+    TIMESTAMP '{{ now.astimezone(utc).strftime("%Y-%m-%d %H:%M:%S.%f") }}'
 {%- endmacro %}

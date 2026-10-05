@@ -22,9 +22,7 @@ class BaseGetIntervalsBetween(BaseUtils):
     strict=True,
     raises=AssertionError,
     reason=(
-        "dbt-polars intentionally does not support get_intervals_between() — it "
-        "calls datediff(), which has no interval arithmetic on Polars. Revisit if "
-        "Polars adds support."
+        "get_intervals_between() calls datediff() — not yet supported by dbt-polars."
     ),
 )
 class TestGetIntervalsBetween(BaseGetIntervalsBetween):

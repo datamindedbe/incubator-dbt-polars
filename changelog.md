@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Implements
+
+- `current_timestamp` macro evaluates to naive timestamp when dbt run started.
+- `dateadd` macro.
+
+
 ### Fixes
 
 - Omit sensitive fields in the profile from `dbt debug`

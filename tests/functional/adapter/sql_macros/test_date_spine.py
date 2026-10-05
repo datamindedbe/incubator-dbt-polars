@@ -1,5 +1,4 @@
 import pytest
-from dbt.exceptions import CompilationError
 
 from tests.functional.adapter.sql_macros.base_utils import BaseUtils
 from tests.functional.adapter.sql_macros.fixture_date_spine import (
@@ -21,11 +20,10 @@ class BaseDateSpine(BaseUtils):
 
 @pytest.mark.xfail(
     strict=True,
-    raises=CompilationError,
+    raises=AssertionError,
     reason=(
-        "dbt-polars intentionally does not support date_spine() — it's built from "
-        "get_intervals_between(), which calls datediff() (no interval arithmetic on "
-        "Polars). Revisit if Polars adds support."
+        "date_spine() is built from get_intervals_between(), which calls "
+        "datediff() — not yet supported by dbt-polars."
     ),
 )
 class TestDateSpine(BaseDateSpine):
