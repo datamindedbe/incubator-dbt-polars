@@ -86,11 +86,12 @@ def comment_on_table_sql(quoted_name: str, comment: str) -> str:
     return f"COMMENT ON TABLE {quoted_name} IS '{escape_sql_string(comment)}'"
 
 
-def alter_column_comment_sql(quoted_name: str, column: str, comment: str) -> str:
-    return (
-        f"ALTER TABLE {quoted_name} ALTER COLUMN {quote_identifier(column)} "
-        f"COMMENT '{escape_sql_string(comment)}'"
+def alter_column_comments_sql(quoted_name: str, comments: dict[str, str]) -> str:
+    column_changes = ", ".join(
+        f"{quote_identifier(column)} COMMENT '{escape_sql_string(comment)}'"
+        for column, comment in comments.items()
     )
+    return f"ALTER TABLE {quoted_name} ALTER COLUMN {column_changes}"
 
 
 class DatabricksDeltaCatalog(StorageCatalog):
@@ -647,6 +648,6 @@ class DatabricksDeltaCatalog(StorageCatalog):
         }
         if not diffs:
             return
-        quoted_name = self.quoted_full_name(relation)
-        for col, comment in diffs.items():
-            self.run_sql_statement(alter_column_comment_sql(quoted_name, col, comment))
+        self.run_sql_statement(
+            alter_column_comments_sql(self.quoted_full_name(relation), diffs)
+        )
