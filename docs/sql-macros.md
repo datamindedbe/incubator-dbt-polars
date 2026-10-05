@@ -12,7 +12,7 @@ Status of dbt-core's generic SQL macros (`dbt.bool_or()`, `dbt.datediff()`, etc.
 | `cast` | Yes | |
 | `cast_bool_to_text` | Yes | |
 | `concat` | Yes | |
-| `current_timestamp` | No | |
+| `current_timestamp` | Yes | Returns the dbt run start time as a naive UTC timestamp, fixed for the whole run. |
 | `date` | Yes | |
 | `dateadd` | No | |
 | `datediff` | No | |

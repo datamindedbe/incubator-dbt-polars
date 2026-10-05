@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from dbt.exceptions import CompilationError
 from dbt.tests.util import relation_from_name, run_dbt
 
 from dbt.adapters.polars.testing.mixin import PolarsTestMixin
@@ -62,25 +61,10 @@ class BaseCurrentTimestamp(PolarsTestMixin):
         )
 
 
-class BaseCurrentTimestampAware(BaseCurrentTimestamp):
-    def test_current_timestamp_type(self, current_timestamp):
-        assert is_aware(current_timestamp)
-
-
 class BaseCurrentTimestampNaive(BaseCurrentTimestamp):
     def test_current_timestamp_type(self, current_timestamp):
         assert is_naive(current_timestamp)
 
 
-# Use either BaseCurrentTimestampAware or BaseCurrentTimestampNaive but not both
-@pytest.mark.xfail(
-    strict=True,
-    raises=CompilationError,
-    reason=(
-        "dbt-polars intentionally does not support current_timestamp() via SQL — "
-        "Polars' SQL engine has no runtime clock function. Revisit if Polars adds "
-        "support."
-    ),
-)
-class TestCurrentTimestamp(BaseCurrentTimestampAware):
+class TestCurrentTimestamp(BaseCurrentTimestampNaive):
     pass
