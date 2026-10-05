@@ -1,7 +1,7 @@
 from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
 from dbt_polars_catalog_databricks.delta import (
     DatabricksDeltaCatalog,
-    alter_column_comment_sql,
+    alter_column_comments_sql,
     comment_on_table_sql,
     quote_identifier,
     quoted_full_name,
@@ -101,29 +101,32 @@ def test_comment_on_table_sql_escapes_single_quotes():
     assert "it's a table" not in sql
 
 
-def test_alter_column_comment_sql_quotes_reserved_word_column():
+def test_alter_column_comments_sql_quotes_reserved_word_column():
     name = quoted_full_name("cat", "schema", "table")
-    sql = alter_column_comment_sql(name, "date", "when it happened")
+    sql = alter_column_comments_sql(name, {"date": "when it happened"})
     assert sql == (
         "ALTER TABLE `cat`.`schema`.`table` ALTER COLUMN `date` "
         "COMMENT 'when it happened'"
     )
 
 
-def test_alter_column_comment_sql_quotes_another_reserved_word_column():
+def test_alter_column_comments_sql_combines_columns_in_one_statement():
     name = quoted_full_name("cat", "schema", "table")
-    sql = alter_column_comment_sql(name, "order", "the order value")
-    assert "ALTER COLUMN `order`" in sql
+    sql = alter_column_comments_sql(name, {"a": "first", "order": "second"})
+    assert sql == (
+        "ALTER TABLE `cat`.`schema`.`table` ALTER COLUMN "
+        "`a` COMMENT 'first', `order` COMMENT 'second'"
+    )
 
 
-def test_alter_column_comment_sql_escapes_single_quotes_in_comment():
+def test_alter_column_comments_sql_escapes_single_quotes_in_comment():
     name = quoted_full_name("cat", "schema", "table")
-    sql = alter_column_comment_sql(name, "col", "user's note")
+    sql = alter_column_comments_sql(name, {"col": "user's note"})
     assert "user''s note" in sql
     assert "user's note" not in sql
 
 
-def test_alter_column_comment_sql_escapes_backtick_in_column_name():
+def test_alter_column_comments_sql_escapes_backtick_in_column_name():
     name = quoted_full_name("cat", "schema", "table")
-    sql = alter_column_comment_sql(name, "weird`col", "a comment")
+    sql = alter_column_comments_sql(name, {"weird`col": "a comment"})
     assert "`weird``col`" in sql

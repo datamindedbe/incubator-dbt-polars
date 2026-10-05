@@ -6,6 +6,7 @@
 
 - Omit sensitive fields in the profile from `dbt debug`
 - [Databricks Catalog]: Request READ instead of READ_WRITE credentials for read-only access
+- [Databricks Catalog]: Update the description of all columns in a table with a single query
 
 ## v0.3.0
 
