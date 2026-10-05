@@ -20,15 +20,6 @@ class BaseDate(BaseUtils):
         }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "This fixture calls date() through date_spine(), which is separately "
-        "unsupported (see test_date_spine.py) — date() itself works, see "
-        "TestDateStandalone."
-    ),
-)
 class TestDate(BaseDate):
     pass
 

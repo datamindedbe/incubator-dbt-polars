@@ -14,15 +14,15 @@ Status of dbt-core's generic SQL macros (`dbt.bool_or()`, `dbt.datediff()`, etc.
 | `concat` | Yes | |
 | `current_timestamp` | Yes | Returns the dbt run start time as a naive UTC timestamp, fixed for the whole run. |
 | `date` | Yes | |
-| `dateadd` | Yes | Always returns a timestamp, also when given a date. |
-| `datediff` | No | |
-| `date_spine` | No | |
+| `dateadd` | Yes | Keeps the input type for day and larger dateparts (a date stays a date); sub-day dateparts return a timestamp. |
+| `datediff` | Yes | `week` counts Sunday week boundaries. |
+| `date_spine` | Yes | Returns dates when the start date is a date. |
 | `date_trunc` | Partial | Only day/hour/minute/month/year truncation is supported. |
 | `equals` | Yes | |
 | `escape_single_quotes` | Yes | |
 | `except` | Yes | |
 | `generate_series` | Yes | |
-| `get_intervals_between` | No | |
+| `get_intervals_between` | Yes | Date strings must be ISO (`YYYY-MM-DD`). |
 | `get_powers_of_two` | Yes | |
 | `hash` | No | |
 | `intersect` | Yes | |

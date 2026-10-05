@@ -5,7 +5,7 @@
 ### Implements
 
 - `current_timestamp` macro evaluates to naive timestamp when dbt run started.
-- `dateadd` macro.
+- `dateadd`, `datediff`, `date_spine` and `intervals_between` macro.
 
 
 ### Fixes
