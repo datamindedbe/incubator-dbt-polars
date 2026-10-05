@@ -1,0 +1,37 @@
+name: CI (Fabric)
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  test-fabric:
+    name: "Test fabric"
+    if: github.event.label.name == 'fabric verified'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --python 3.12 --extra fabric
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run tests (fabric catalog)
+        env:
+          FABRIC_WORKSPACE: ${{ vars.FABRIC_WORKSPACE }}
+          FABRIC_LAKEHOUSE: ${{ vars.FABRIC_LAKEHOUSE }}
+        run: uv run --python 3.12 pytest -n auto --profile fabric

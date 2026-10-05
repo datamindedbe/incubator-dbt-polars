@@ -5,6 +5,7 @@
 ### Implements
 
 - [Databricks Catalog]: Add support for iceberg tables in the Databricks catalog.
+- [Fabric Catalog]: New catalog for Delta and Iceberg tables in a Microsoft Fabric Lakehouse.
 
 ### Fixes
 

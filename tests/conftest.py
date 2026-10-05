@@ -10,6 +10,7 @@ from tests.profiles import (
     azure_target,
     databricks_target,
     default_target,
+    fabric_target,
     get_databricks_token,
     iceberg_target,
     s3_target,
@@ -28,6 +29,7 @@ def pytest_addoption(parser):
             "azure",
             "s3",
             "databricks",
+            "fabric",
         ],
         default="local",
         help=(
@@ -94,6 +96,8 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
         return s3_target(unique_schema)
     if profile == "databricks":
         return databricks_target(databricks_token, unique_schema)
+    if profile == "fabric":
+        return fabric_target(unique_schema)
     return default_target(unique_schema)
 
 
@@ -229,6 +233,33 @@ def cleanup_databricks_catalog_test_schemas(request, databricks_token):
         if not is_removable_test_schema(schema_name):
             continue
         relation = PolarsRelation.create(database=catalog_name, schema=schema_name)
+        try:
+            catalog.drop_schema(relation)
+        except Exception:
+            pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_fabric_test_schemas(request):
+    """Session-wide sweep of leftover `fabric` catalog test schemas, for the same
+    reasons as cleanup_databricks_catalog_test_schemas."""
+    yield
+    if request.config.option.profile != "fabric":
+        return
+    from dbt.adapters.polars.catalogs import create_catalog, resolve_catalog_plugin
+    from dbt.adapters.polars.relation import PolarsRelation
+    from tests.profiles import fabric_catalog
+
+    profile_config = fabric_catalog("cleanup", "cleanup")
+    if not profile_config["workspace"] or not profile_config["lakehouse"]:
+        return
+    catalog = create_catalog(
+        resolve_catalog_plugin("fabric").config_class(**profile_config), ""
+    )
+    for schema_name in catalog.list_schemas():
+        if not is_removable_test_schema(schema_name):
+            continue
+        relation = PolarsRelation.create(database="cleanup", schema=schema_name)
         try:
             catalog.drop_schema(relation)
         except Exception:

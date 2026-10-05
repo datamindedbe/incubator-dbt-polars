@@ -33,10 +33,12 @@ def polars_relation_row_count(adapter, relation_name: str) -> int:
     """
     with get_connection(adapter):
         relation = resolve_relation(adapter, relation_name)
-        return len(
+        return (
             adapter.get_storage_catalog(relation.database)
             .get_relation(relation)
+            .select(pl.len())
             .collect()
+            .item()
         )
 
 
