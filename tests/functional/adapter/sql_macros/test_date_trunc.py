@@ -29,3 +29,29 @@ class BaseDateTrunc(BaseUtils):
 @pytest.mark.skip_configs("csv", "ndjson")
 class TestDateTrunc(BaseDateTrunc):
     pass
+
+
+# Weeks start on Monday, as in Postgres.
+models__test_date_trunc_week_quarter_sql = """
+select
+    {{ date_trunc('week', "TIMESTAMP '2023-09-10 18:30:00'") }} as actual,
+    TIMESTAMP '2023-09-04 00:00:00' as expected
+union all select
+    {{ date_trunc('week', "DATE '2023-09-06'") }}, TIMESTAMP '2023-09-04 00:00:00'
+union all select
+    {{ date_trunc('quarter', "TIMESTAMP '2023-12-31 23:59:59'") }},
+    TIMESTAMP '2023-10-01 00:00:00'
+union all select
+    {{ date_trunc('quarter', "DATE '2023-02-15'") }}, TIMESTAMP '2023-01-01 00:00:00'
+union all select
+    {{ date_trunc('quarter', "cast(null as date)") }}, cast(null as timestamp)
+"""
+
+
+class TestDateTruncWeekQuarter(BaseUtils):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "test_date_trunc.yml": models__test_date_trunc_yml,
+            "test_date_trunc.sql": models__test_date_trunc_week_quarter_sql,
+        }
