@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Implements
+
+- Documentation rendered in docusaurus
+
 ### Fixes
 
 - Omit sensitive fields in the profile from `dbt debug`
