@@ -66,5 +66,8 @@ class BaseCurrentTimestampNaive(BaseCurrentTimestamp):
         assert is_naive(current_timestamp)
 
 
+# CSV and ndjson have no native datetime type: the stored timestamp is read back
+# as a string.
+@pytest.mark.skip_configs("csv", "ndjson")
 class TestCurrentTimestamp(BaseCurrentTimestampNaive):
     pass
