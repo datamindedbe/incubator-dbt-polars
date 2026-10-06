@@ -4,6 +4,7 @@
 const sidebars = {
   docs: [
     'index',
+    'about',
     'demos/getting_started',
     {
       type: 'category',

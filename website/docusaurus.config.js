@@ -28,6 +28,9 @@ const config = {
           sidebarPath: './sidebars.js',
         },
         blog: false,
+        theme: {
+          customCss: './src/css/custom.css',
+        },
       }),
     ],
   ],
@@ -37,11 +40,13 @@ const config = {
     ({
       navbar: {
         title: 'dbt-polars',
+        style: 'dark',
         items: [
           {
             href: 'https://github.com/datamindedbe/incubator-dbt-polars',
             label: 'GitHub',
             position: 'right',
+            className: 'navbar-github-link',
           },
         ],
       },
