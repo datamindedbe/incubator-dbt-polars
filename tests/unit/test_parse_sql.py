@@ -1,3 +1,4 @@
+import polars as pl
 import pytest
 import sqlglot
 import sqlglot.expressions as exp
@@ -49,6 +50,17 @@ def test_leaves_everything_but_qualified_table_names_untouched():
         "from orders o -- comment\n"
         "join customers on true"
     )
+
+
+def test_functions_are_not_transpiled_to_duckdb_equivalents():
+    # duckdb's generator turns log10(x) into LOG(10, x), which Polars reads with
+    # the arguments swapped.
+    sql, refs = parse_and_rewrite('SELECT log10(x) AS y FROM "db"."sch"."numbers"')
+
+    frames = {name: pl.LazyFrame({"x": [100.0]}) for name in refs}
+    result = pl.SQLContext(frames).execute(sql, eager=True)
+
+    assert result["y"].to_list() == [2.0]
 
 
 def test_keeps_an_explicit_alias_on_the_rewritten_table():
