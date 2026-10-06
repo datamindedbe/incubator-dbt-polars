@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Implements
+
+- Documentation on GitHub pages
+
 ### Fixes
 
 - Omit sensitive fields in the profile from `dbt debug`
