@@ -53,13 +53,24 @@ models__test_dateadd_dates_sql = """
 select
     {{ dateadd('month', -1, "DATE '2018-03-31'") }} as actual,
     DATE '2018-02-28' as expected
-union all select {{ dateadd('quarter', 1, "DATE '2018-01-31'") }}, DATE '2018-04-30'
-union all select {{ dateadd('year', '-1', "DATE '2020-02-29'") }}, DATE '2019-02-28'
-union all select {{ dateadd('day', -364, "DATE '2018-12-31'") }}, DATE '2018-01-01'
-union all select {{ dateadd('day', 1, "'2018-01-01'") }}, DATE '2018-01-02'
-union all select {{ dateadd('week', '1 + 1', "DATE '2018-01-01'") }}, DATE '2018-01-15'
 union all select
-    {{ dateadd('quarter', '0 + 1', "DATE '2018-01-31'") }}, DATE '2018-04-30'
+    {{ dateadd('quarter', 1, "DATE '2018-01-31'") }} as actual,
+    DATE '2018-04-30' as expected
+union all select
+    {{ dateadd('year', '-1', "DATE '2020-02-29'") }} as actual,
+    DATE '2019-02-28' as expected
+union all select
+    {{ dateadd('day', -364, "DATE '2018-12-31'") }} as actual,
+    DATE '2018-01-01' as expected
+union all select
+    {{ dateadd('day', 1, "'2018-01-01'") }} as actual,
+    DATE '2018-01-02' as expected
+union all select
+    {{ dateadd('week', '1 + 1', "DATE '2018-01-01'") }} as actual,
+    DATE '2018-01-15' as expected
+union all select
+    {{ dateadd('quarter', '0 + 1', "DATE '2018-01-31'") }} as actual,
+    DATE '2018-04-30' as expected
 """
 
 models__test_dateadd_timestamps_sql = """
@@ -67,11 +78,11 @@ select
     {{ dateadd('hour', 12, "DATE '2018-01-01'") }} as actual,
     TIMESTAMP '2018-01-01 12:00:00' as expected
 union all select
-    {{ dateadd('month', '0 + 1', "TIMESTAMP '2018-01-31 13:05:00'") }},
-    TIMESTAMP '2018-02-28 13:05:00'
+    {{ dateadd('month', '0 + 1', "TIMESTAMP '2018-01-31 13:05:00'") }} as actual,
+    TIMESTAMP '2018-02-28 13:05:00' as expected
 union all select
-    {{ dateadd('day', -1, "'2018-01-01 06:00:00'") }},
-    TIMESTAMP '2017-12-31 06:00:00'
+    {{ dateadd('day', -1, "'2018-01-01 06:00:00'") }} as actual,
+    TIMESTAMP '2017-12-31 06:00:00' as expected
 """
 
 models__test_dateadd_dates_and_timestamps_yml = """

@@ -6,7 +6,6 @@ from dbt_common.exceptions import DbtRuntimeError
 from sqlglot.optimizer.scope import traverse_scope
 
 from dbt.adapters.polars.sql_rewrite import (
-    _assign_flat_names,
     _disambiguated_flat_name,
     _find_qualified_tables,
     _is_qualified_table,
@@ -25,12 +24,12 @@ def _first_table(sql: str) -> exp.Table:
     return sqlglot.parse_one(sql).find(exp.Table)
 
 
-def test_strips_catalog_and_schema_from_a_qualified_table():
+def test_flattens_a_qualified_table_and_aliases_it_to_its_bare_name():
     sql, refs = parse_and_rewrite('SELECT * FROM "db"."sch"."orders"')
 
-    assert sql == "SELECT * FROM orders"
-    assert list(refs.keys()) == ["orders"]
-    relation = refs["orders"]
+    assert sql == 'SELECT * FROM "db__sch__orders" AS "orders"'
+    assert list(refs.keys()) == ["db__sch__orders"]
+    relation = refs["db__sch__orders"]
     assert (relation.database, relation.schema, relation.identifier) == (
         "db",
         "sch",
@@ -47,8 +46,8 @@ def test_leaves_everything_but_qualified_table_names_untouched():
 
     assert sql == (
         "select TIMESTAMP '2026-10-05 16:32:36', x + INTERVAL '1 day' * n, [1, 2]\n"
-        "from orders o -- comment\n"
-        "join customers on true"
+        'from "db__sch__orders" o -- comment\n'
+        'join "db__sch__customers" AS customers on true'
     )
 
 
@@ -66,15 +65,15 @@ def test_functions_are_not_transpiled_to_duckdb_equivalents():
 def test_keeps_an_explicit_alias_on_the_rewritten_table():
     sql, refs = parse_and_rewrite('SELECT o.id FROM "db"."sch"."orders" AS o')
 
-    assert sql == "SELECT o.id FROM orders AS o"
-    assert list(refs.keys()) == ["orders"]
+    assert sql == 'SELECT o.id FROM "db__sch__orders" AS o'
+    assert list(refs.keys()) == ["db__sch__orders"]
 
 
 def test_unqualified_columns_never_trigger_validation():
     sql, refs = parse_and_rewrite('SELECT id, amount FROM "db"."sch"."orders"')
 
-    assert sql == "SELECT id, amount FROM orders"
-    assert list(refs.keys()) == ["orders"]
+    assert sql == 'SELECT id, amount FROM "db__sch__orders" AS "orders"'
+    assert list(refs.keys()) == ["db__sch__orders"]
 
 
 def test_cte_name_can_qualify_columns_without_an_alias():
@@ -82,8 +81,29 @@ def test_cte_name_can_qualify_columns_without_an_alias():
         'WITH stg AS (SELECT * FROM "db"."sch"."orders") SELECT stg.id FROM stg'
     )
 
-    assert sql == "WITH stg AS (SELECT * FROM orders) SELECT stg.id FROM stg"
-    assert list(refs.keys()) == ["orders"]
+    assert sql == (
+        'WITH stg AS (SELECT * FROM "db__sch__orders" AS "orders") '
+        "SELECT stg.id FROM stg"
+    )
+    assert list(refs.keys()) == ["db__sch__orders"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'WITH base AS (SELECT * FROM "db"."sch"."base" WHERE id > 1) '
+        "SELECT * FROM base",
+        'WITH base AS (SELECT base.id FROM "db"."sch"."base" WHERE base.id > 1) '
+        "SELECT base.id FROM base",
+    ],
+)
+def test_cte_named_like_the_ref_it_wraps_is_not_shadowed(sql):
+    rewritten_sql, refs = parse_and_rewrite(sql)
+
+    frames = {name: pl.LazyFrame({"id": [1, 2, 3]}) for name in refs}
+    result = pl.SQLContext(frames).execute(rewritten_sql, eager=True)
+
+    assert result["id"].to_list() == [2, 3]
 
 
 def test_correlated_subquery_can_qualify_an_outer_alias():
@@ -99,15 +119,15 @@ def test_correlated_subquery_can_qualify_an_outer_alias():
         """
     )
 
-    assert "orders" in refs
-    assert "other" in refs
+    assert "db__sch__orders" in refs
+    assert "db__sch__other" in refs
 
 
 def test_bare_table_name_can_qualify_columns_when_there_is_no_collision():
     sql, refs = parse_and_rewrite('SELECT orders.id FROM "db"."sch"."orders"')
 
-    assert sql == "SELECT orders.id FROM orders"
-    assert list(refs.keys()) == ["orders"]
+    assert sql == 'SELECT orders.id FROM "db__sch__orders" AS "orders"'
+    assert list(refs.keys()) == ["db__sch__orders"]
 
 
 def test_raises_when_a_colliding_table_is_qualified_by_its_bare_name():
@@ -137,7 +157,7 @@ def test_two_tables_sharing_an_identifier_are_renamed_to_stay_distinct():
     assert refs["db__schema_b__orders"].schema == "schema_b"
 
 
-def test_alias_colliding_with_an_unrelated_tables_bare_name_renames_the_other_table():
+def test_alias_matching_an_unrelated_tables_bare_name_keeps_both_distinct():
     sql, refs = parse_and_rewrite(
         """
         SELECT orders.id, o.amount
@@ -146,9 +166,9 @@ def test_alias_colliding_with_an_unrelated_tables_bare_name_renames_the_other_ta
         """
     )
 
-    assert "orders_stg AS orders" in sql
-    assert "db__sch__orders AS o" in sql
-    assert set(refs.keys()) == {"orders_stg", "db__sch__orders"}
+    assert '"db__sch__orders_stg" AS orders' in sql
+    assert '"db__sch__orders" AS o' in sql
+    assert set(refs.keys()) == {"db__sch__orders_stg", "db__sch__orders"}
 
 
 # _is_qualified_table
@@ -243,21 +263,6 @@ def test_names_claimed_by_multiple_identities_counts_an_alias_against_a_bare_nam
     assert _names_claimed_by_multiple_identities(tables) == {"orders"}
 
 
-# _assign_flat_names
-
-
-def test_assign_flat_names_keeps_the_original_name_when_there_is_no_collision():
-    table = _first_table('SELECT * FROM "db"."sch"."orders"')
-    flat_names = _assign_flat_names([table], colliding_names=set())
-    assert flat_names == {("db", "sch", "orders"): "orders"}
-
-
-def test_assign_flat_names_disambiguates_a_colliding_name():
-    table = _first_table('SELECT * FROM "db"."sch"."orders"')
-    flat_names = _assign_flat_names([table], colliding_names={"orders"})
-    assert flat_names == {("db", "sch", "orders"): "db__sch__orders"}
-
-
 # _replace_qualified_tables_with_flat_names
 
 
@@ -265,12 +270,10 @@ def test_replace_qualified_tables_with_flat_names_rewrites_sql_and_collects_refs
     original_sql = 'SELECT * FROM "db"."sch"."orders"'
     table = sqlglot.parse_one(original_sql).find(exp.Table)
 
-    sql, refs = _replace_qualified_tables_with_flat_names(
-        original_sql, [table], {_relation_key(table): "orders"}
-    )
+    sql, refs = _replace_qualified_tables_with_flat_names(original_sql, [table])
 
-    assert sql == "SELECT * FROM orders"
-    relation = refs["orders"]
+    assert sql == 'SELECT * FROM "db__sch__orders" AS "orders"'
+    relation = refs["db__sch__orders"]
     assert (relation.database, relation.schema, relation.identifier) == (
         "db",
         "sch",

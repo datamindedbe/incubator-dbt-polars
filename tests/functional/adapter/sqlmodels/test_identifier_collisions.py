@@ -46,6 +46,44 @@ class TestCteNameCollision(PolarsTestMixin):
         )
 
 
+class TestCteSameNameAsRef(PolarsTestMixin):
+    base = """
+        select 1 as id union all select 2 as id union all select 3 as id
+    """
+
+    # Import-CTE pattern from dbt's style guide: the CTE reuses the name of the
+    # model it selects from.
+    downstream = """
+        with base as (
+            select * from {{ ref('base') }} where id > 1
+        )
+        select * from base
+    """
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "base.sql": self.base,
+            "downstream.sql": self.downstream,
+        }
+
+    def test_cte_is_not_shadowed_by_the_ref_it_wraps(self, project):
+        run_dbt(["run"])
+
+        with get_connection(project.adapter):
+            rel = relation_from_name(project.adapter, "downstream")
+            df = (
+                project.adapter.get_storage_catalog(rel.database)
+                .get_relation(rel)
+                .collect()
+            )
+
+        assert sorted(df["id"].to_list()) == [2, 3], (
+            f"Expected the CTE filter to apply, got {df['id'].to_list()!r}. "
+            "The 'base' model shadowed the 'base' CTE."
+        )
+
+
 class TestCrossSchemaIdentifierCollision(PolarsTestMixin):
     orders_a = """
         {{ config(schema='schema_a', alias='orders') }}
@@ -306,7 +344,7 @@ class TestUnrelatedAliasDoesNotBlockCollisionResolution(PolarsTestMixin):
             "combined.sql": self.combined,
         }
 
-    def C(self, project):
+    def test_run(self, project):
         results = run_dbt(["run"])
         assert all(r.status == "success" for r in results), (
             f"Expected all models to run successfully, got statuses "
