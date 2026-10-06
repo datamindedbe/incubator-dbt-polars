@@ -41,7 +41,7 @@ dbt-polars uses **catalogs** to define where data is stored. Each catalog maps t
 
 ## Quick start
 
-See the [Getting started](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/demos/getting_started.md) guide.
+See the [Getting started](https://datamindedbe.github.io/incubator-dbt-polars/demos/getting_started) guide.
 
 A minimal `profiles.yml` for local development is:
 
@@ -59,11 +59,11 @@ my_project:
 
 ## Documentation
 
-- [Getting started](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/demos/getting_started.md)
-- [Catalog overview and profile reference](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalog-overview.md)
-- [Local catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/local.md)
-- [Azure catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/azure.md)
-- [Iceberg catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/iceberg.md)
-- [Databricks catalog](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/databricks.md)
-- [Custom catalogs](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/catalogs/custom.md)
-- [Python models and tests](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/python-models.md)
+- [Getting started](https://datamindedbe.github.io/incubator-dbt-polars/demos/getting_started)
+- [Catalog overview and profile reference](https://datamindedbe.github.io/incubator-dbt-polars/catalog-overview)
+- [Local catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/local)
+- [Azure catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/azure)
+- [Iceberg catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/iceberg)
+- [Databricks catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/databricks)
+- [Custom catalogs](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/custom)
+- [Python models and tests](https://datamindedbe.github.io/incubator-dbt-polars/python-models)
