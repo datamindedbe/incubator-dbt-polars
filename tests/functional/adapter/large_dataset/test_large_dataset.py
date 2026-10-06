@@ -32,7 +32,7 @@ import polars as pl
 def model(dbt, _):
     dbt.config(materialized='table')
     return (
-        pl.concat([pl.scan_parquet("{source_path}") for _ in range({copies})])
+        pl.scan_parquet(["{source_path}"] * {copies})
         .with_columns((pl.col("id") * 2).alias("id"))
     )
 """
@@ -43,7 +43,7 @@ import polars as pl
 def model(dbt, _):
     dbt.config(materialized='table', write_options={{'batch_size': 10_000_000}})
     return (
-        pl.concat([pl.scan_parquet("{source_path}") for _ in range({copies})])
+        pl.scan_parquet(["{source_path}"] * {copies})
         .with_columns((pl.col("id") * 2).alias("id"))
     )
 """
@@ -54,7 +54,7 @@ import polars as pl
 def model(dbt, _):
     dbt.config(materialized='table', write_mode='eager')
     return (
-        pl.concat([pl.scan_parquet("{source_path}") for _ in range({copies})])
+        pl.scan_parquet(["{source_path}"] * {copies})
         .with_columns((pl.col("id") * 2).alias("id"))
     )
 """
