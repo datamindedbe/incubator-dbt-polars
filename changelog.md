@@ -12,6 +12,7 @@
 - [Databricks Catalog]: Request READ instead of READ_WRITE credentials for read-only access
 - [Databricks Catalog]: Update the description of all columns in a table with a single query
 - Queried fail when a CTE has the same name as a model it selects from
+- User .str.date to cast strings to date as this is the only supported way to do this conversion in Polars 2.0
 
 ## v0.3.0
 
