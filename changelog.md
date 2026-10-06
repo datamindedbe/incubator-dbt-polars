@@ -4,7 +4,7 @@
 
 ### Implements
 
-- Documentation rendered in docusaurus
+- Documentation on GitHub pages
 
 ### Fixes
 
