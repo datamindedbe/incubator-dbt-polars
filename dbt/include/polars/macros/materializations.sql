@@ -13,6 +13,8 @@
 
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
+  {% do apply_grants(target_relation, config.get('grants'), should_revoke=False) %}
+  {{ polars_raise_if_contract_enforced() }}
 
   {% if language == 'python' %}
     {% if existing_relation is not none and full_refresh_mode %}
@@ -58,6 +60,8 @@
 
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
+  {% do apply_grants(target_relation, config.get('grants'), should_revoke=False) %}
+  {{ polars_raise_if_contract_enforced() }}
 
   {% if language == 'python' %}
     {% call statement('main', language='python') -%}
@@ -88,6 +92,10 @@
   {%- do adapter.store_source_configs(graph) -%}
   {%- set target_relation = this.incorporate(type='table') -%}
 
+  {{ run_hooks(pre_hooks, inside_transaction=False) }}
+  {{ run_hooks(pre_hooks, inside_transaction=True) }}
+  {% do apply_grants(target_relation, config.get('grants'), should_revoke=False) %}
+
   {%- do adapter.polars_execute_snapshot(
         target_relation,
         sql,
@@ -105,6 +113,9 @@
     -- Source query of the snapshot model. The SCD2 merge is handled by the Polars adapter in Python.
     {{ sql }}
   {%- endcall %}
+
+  {{ run_hooks(post_hooks, inside_transaction=True) }}
+  {{ run_hooks(post_hooks, inside_transaction=False) }}
 
   {{ return({'relations': [target_relation]}) }}
 {% endmaterialization %}

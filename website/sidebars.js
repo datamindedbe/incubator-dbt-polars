@@ -18,7 +18,7 @@ const sidebars = {
       ],
     },
     'python-models',
-    'sql-macros',
+    'dbt-compatibility',
   ],
 };
 

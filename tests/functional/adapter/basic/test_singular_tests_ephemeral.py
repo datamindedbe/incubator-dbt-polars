@@ -75,10 +75,5 @@ class BaseSingularTestsEphemeral:
         check_result_nodes_by_name(results, ["failing_model", "passing_model"])
 
 
-@pytest.mark.skip(
-    reason="Singular test execution path (adapter.execute) does not yet call "
-    "_evaluate_ctes/_strip_all_ctes; ephemeral CTEs end up inside a FROM subquery "
-    "that Polars cannot resolve."
-)
 class TestSingularTestsEphemeral(BaseSingularTestsEphemeral):
     pass
