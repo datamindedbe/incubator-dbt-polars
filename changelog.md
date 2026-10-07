@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.1
+
 ### Implements
 
 - `current_timestamp` macro evaluates to naive timestamp when dbt run started.
@@ -17,6 +19,7 @@
 - [Databricks Catalog]: Update the description of all columns in a table with a single query
 - Queried fail when a CTE has the same name as a model it selects from
 - User .str.date to cast strings to date as this is the only supported way to do this conversion in Polars 2.0
+- Throw an error when a user uses a hook or contract which is not yet supported
 
 ## v0.3.0
 
