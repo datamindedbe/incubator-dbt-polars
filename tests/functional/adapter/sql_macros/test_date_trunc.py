@@ -60,6 +60,12 @@ union all select
     {{ date_trunc('quarter', "'2023-09-10 18:30:45'") }},TIMESTAMP '2023-07-01 00:00:00'
 union all select
     {{ date_trunc('year', "'2023-09-10'") }}, TIMESTAMP '2023-01-01 00:00:00'
+union all select
+    {{ date_trunc('hour', "'2023-09-10T18:30:45+0100'") }},
+    TIMESTAMP '2023-09-10 17:00:00'
+union all select
+    {{ date_trunc('day', "'2023-09-10T00:30:00+01:00'") }},
+    TIMESTAMP '2023-09-09 00:00:00'
 """
 
 

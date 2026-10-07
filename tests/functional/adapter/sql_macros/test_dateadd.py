@@ -83,6 +83,12 @@ union all select
 union all select
     {{ dateadd('day', -1, "'2018-01-01 06:00:00'") }} as actual,
     TIMESTAMP '2017-12-31 06:00:00' as expected
+union all select
+    {{ dateadd('hour', 1, "'2023-01-01T10:00:00Z'") }} as actual,
+    TIMESTAMP '2023-01-01 11:00:00' as expected
+union all select
+    {{ dateadd('minute', 30, "'2023-01-01T10:00:00.5-05:30'") }} as actual,
+    TIMESTAMP '2023-01-01 16:00:00.5' as expected
 """
 
 models__test_dateadd_dates_and_timestamps_yml = """

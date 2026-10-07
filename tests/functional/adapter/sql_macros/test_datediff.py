@@ -52,6 +52,12 @@ union all select {{ datediff(
     "TIMESTAMP '1969-12-31 23:59:59'", "TIMESTAMP '1970-01-01 00:00:00'", 'second'
 ) }}, 1
 union all select {{ datediff("'2020-01-01'", "DATE '2020-03-15'", 'month') }}, 2
+union all select {{ datediff(
+    "'2023-01-01T10:00:00Z'", "'2023-01-01T12:00:00+01:00'", 'hour'
+) }}, 1
+union all select {{ datediff(
+    "'2023-01-01T00:30:00+01:00'", "'2023-01-01 00:30:00Z'", 'day'
+) }}, 1
 """
 
 
