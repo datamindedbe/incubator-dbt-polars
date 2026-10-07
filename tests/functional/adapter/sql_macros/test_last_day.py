@@ -1,5 +1,4 @@
 import pytest
-from dbt.exceptions import CompilationError
 
 from tests.functional.adapter.sql_macros.base_utils import BaseUtils
 from tests.functional.adapter.sql_macros.fixture_last_day import (
@@ -24,14 +23,24 @@ class BaseLastDay(BaseUtils):
         }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=CompilationError,
-    reason=(
-        "dbt-polars intentionally does not support last_day() — it's built from "
-        "dateadd()/date_trunc(), and dateadd() has no interval arithmetic on "
-        "Polars. Revisit if Polars adds support."
-    ),
-)
 class TestLastDay(BaseLastDay):
     pass
+
+
+# Weeks run Monday to Sunday, as in Postgres.
+models__test_last_day_week_sql = """
+select
+    {{ last_day("DATE '2023-09-06'", 'week') }} as actual,
+    DATE '2023-09-10' as expected
+union all select
+    {{ last_day("'2023-09-06 10:00:00'", 'month') }}, DATE '2023-09-30'
+"""
+
+
+class TestLastDayWeek(BaseUtils):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "test_last_day.yml": models__test_last_day_yml,
+            "test_last_day.sql": models__test_last_day_week_sql,
+        }

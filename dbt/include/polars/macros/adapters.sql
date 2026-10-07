@@ -172,10 +172,9 @@ Example 3 of 3 of required macros that does not have a default implementation.
 
 */
 
+{# Polars SQL has no clock function, so the run start time (naive UTC) is rendered as a literal. #}
 {% macro polars__current_timestamp() -%}
-    {{ exceptions.raise_not_implemented(
-        "current_timestamp() is not supported by dbt-polars: Polars' SQL engine has "
-        "no current_timestamp()/now() function. If you need the current timestamp, "
-        "use a Python model (polars) instead of a SQL model."
-    ) }}
+    {%- set utc = modules.pytz.utc -%}
+    {%- set now = run_started_at or modules.datetime.datetime.now(utc) -%}
+    TIMESTAMP '{{ now.astimezone(utc).strftime("%Y-%m-%d %H:%M:%S.%f") }}'
 {%- endmacro %}

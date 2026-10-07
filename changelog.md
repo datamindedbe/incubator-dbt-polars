@@ -4,7 +4,11 @@
 
 ### Implements
 
-- Documentation on GitHub pages
+- `current_timestamp` macro evaluates to naive timestamp when dbt run started.
+- `dateadd`, `datediff`, `date_spine` and `get_intervals_between` macro.
+- `date_trunc` macro supports `week` and `quarter`.
+- `last_day` macro for `week`, `month`, `quarter` and `year`.
+- Move documentation to GitHub pages
 
 ### Fixes
 

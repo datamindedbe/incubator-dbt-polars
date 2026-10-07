@@ -12,21 +12,21 @@ Status of dbt-core's generic SQL macros (`dbt.bool_or()`, `dbt.datediff()`, etc.
 | `cast` | Yes | |
 | `cast_bool_to_text` | Yes | |
 | `concat` | Yes | |
-| `current_timestamp` | No | |
+| `current_timestamp` | Yes | Returns the dbt run start time as a naive UTC timestamp, fixed for the whole run. |
 | `date` | Yes | |
-| `dateadd` | No | |
-| `datediff` | No | |
-| `date_spine` | No | |
-| `date_trunc` | Partial | Only day/hour/minute/month/year truncation is supported. |
+| `dateadd` | Yes | Keeps the input type for day and larger dateparts (a date stays a date); sub-day dateparts return a timestamp. |
+| `datediff` | Yes | `week` counts Sunday week boundaries. |
+| `date_spine` | Yes | Returns dates when the start date is a date. |
+| `date_trunc` | Partial | Only minute/hour/day/week/month/quarter/year truncation is supported. Weeks start on Monday. |
 | `equals` | Yes | |
 | `escape_single_quotes` | Yes | |
 | `except` | Yes | |
 | `generate_series` | Yes | |
-| `get_intervals_between` | No | |
+| `get_intervals_between` | Yes | Date strings must be ISO (`YYYY-MM-DD`). |
 | `get_powers_of_two` | Yes | |
 | `hash` | No | |
 | `intersect` | Yes | |
-| `last_day` | No | |
+| `last_day` | Yes | |
 | `length` | Yes | |
 | `listagg` | Partial | Only unordered, unlimited aggregation is supported. |
 | `literal` (`string_literal`) | Yes | |

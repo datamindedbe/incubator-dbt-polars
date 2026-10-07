@@ -22,9 +22,8 @@ class BaseGetIntervalsBetween(BaseUtils):
     strict=True,
     raises=AssertionError,
     reason=(
-        "dbt-polars intentionally does not support get_intervals_between() — it "
-        "calls datediff(), which has no interval arithmetic on Polars. Revisit if "
-        "Polars adds support."
+        "The fixture passes MM/DD/YYYY strings ('09/01/2023'), which Polars can't "
+        "cast to a date (< 2.0) or reads as DD/MM/YYYY (2.0)."
     ),
 )
 class TestGetIntervalsBetween(BaseGetIntervalsBetween):

@@ -37,6 +37,31 @@ def test_flattens_a_qualified_table_and_aliases_it_to_its_bare_name():
     )
 
 
+def test_leaves_everything_but_qualified_table_names_untouched():
+    sql, _ = parse_and_rewrite(
+        "select TIMESTAMP '2026-10-05 16:32:36', x + INTERVAL '1 day' * n, [1, 2]\n"
+        'from "db"."sch"."orders" o -- comment\n'
+        "join db.sch.customers on true"
+    )
+
+    assert sql == (
+        "select TIMESTAMP '2026-10-05 16:32:36', x + INTERVAL '1 day' * n, [1, 2]\n"
+        'from "db__sch__orders" o -- comment\n'
+        'join "db__sch__customers" AS customers on true'
+    )
+
+
+def test_functions_are_not_transpiled_to_duckdb_equivalents():
+    # duckdb's generator turns log10(x) into LOG(10, x), which Polars reads with
+    # the arguments swapped.
+    sql, refs = parse_and_rewrite('SELECT log10(x) AS y FROM "db"."sch"."numbers"')
+
+    frames = {name: pl.LazyFrame({"x": [100.0]}) for name in refs}
+    result = pl.SQLContext(frames).execute(sql, eager=True)
+
+    assert result["y"].to_list() == [2.0]
+
+
 def test_keeps_an_explicit_alias_on_the_rewritten_table():
     sql, refs = parse_and_rewrite('SELECT o.id FROM "db"."sch"."orders" AS o')
 
@@ -114,6 +139,11 @@ def test_raises_when_a_colliding_table_is_qualified_by_its_bare_name():
             CROSS JOIN "db"."schema_b"."orders"
             """
         )
+
+
+def test_raises_on_a_table_name_with_more_than_three_parts():
+    with pytest.raises(DbtRuntimeError, match=r"Invalid table name 'a\.b\.c\.d'"):
+        parse_and_rewrite("SELECT * FROM a.b.c.d")
 
 
 def test_two_tables_sharing_an_identifier_are_renamed_to_stay_distinct():
@@ -242,9 +272,10 @@ def test_names_claimed_by_multiple_identities_counts_an_alias_against_a_bare_nam
 
 
 def test_replace_qualified_tables_with_flat_names_rewrites_sql_and_collects_refs():
-    ast = sqlglot.parse_one('SELECT * FROM "db"."sch"."orders"')
+    original_sql = 'SELECT * FROM "db"."sch"."orders"'
+    table = sqlglot.parse_one(original_sql).find(exp.Table)
 
-    sql, refs = _replace_qualified_tables_with_flat_names(ast)
+    sql, refs = _replace_qualified_tables_with_flat_names(original_sql, [table])
 
     assert sql == 'SELECT * FROM "db__sch__orders" AS "orders"'
     relation = refs["db__sch__orders"]
