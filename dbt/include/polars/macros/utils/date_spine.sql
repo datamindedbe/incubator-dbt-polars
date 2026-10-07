@@ -1,4 +1,5 @@
-{# dbt-core's default__date_spine, ordering by generated_number: Polars rejects order by 1. #}
+{# dbt-core's default__date_spine without its row_number() window: generate_series
+   yields 1..n, so generated_number - 1 is already the offset. #}
 {% macro polars__date_spine(datepart, start_date, end_date) %}
 
     with rawdata as (
@@ -15,7 +16,7 @@
             {{
                 dbt.dateadd(
                     datepart,
-                    "row_number() over (order by generated_number) - 1",
+                    "generated_number - 1",
                     start_date
                 )
             }}
