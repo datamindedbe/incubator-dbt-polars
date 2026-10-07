@@ -26,9 +26,10 @@
     {%- set source_date = polars__local_date(source) -%}
     {%- set month_index = "(date_part('year', " ~ source_date ~ ") * 12 + date_part('month', " ~ source_date ~ ") - 1 + " ~ months_sql ~ ")" -%}
     {%- set year_sql = "cast(floor(" ~ month_index ~ " / 12) as bigint)" -%}
-    {%- set month_sql = "cast(" ~ month_index ~ " - floor(" ~ month_index ~ " / 12) * 12 + 1 as bigint)" -%}
+    {%- set month_sql = "cast(" ~ month_index ~ " % 12 + 1 as bigint)" -%}
+    {#- try_cast: concat skips nulls, so a null source yields '--01'. -#}
     {%- set first_of_month = "try_cast(concat(cast(" ~ year_sql ~ " as varchar), '-', lpad(cast(" ~ month_sql ~ " as varchar), 2, '0'), '-01') as date)" -%}
-    {%- set last_day_of_month = "date_part('day', " ~ first_of_month ~ " + INTERVAL '1 month' - INTERVAL '1 day')" -%}
-    {%- set target_days = "(cast(" ~ first_of_month ~ " as bigint) + least(date_part('day', " ~ source_date ~ "), " ~ last_day_of_month ~ ") - 1)" -%}
-({{ source }} + INTERVAL '1 day' * ({{ target_days }} - cast({{ source_date }} as bigint)))
+    {#- The source's day of month, clamped to the last day of the target month. -#}
+    {%- set target_date = "least(" ~ first_of_month ~ " + INTERVAL '1 day' * (date_part('day', " ~ source_date ~ ") - 1), " ~ first_of_month ~ " + INTERVAL '1 month' - INTERVAL '1 day')" -%}
+({{ source }} + INTERVAL '1 day' * (cast({{ target_date }} as bigint) - cast({{ source_date }} as bigint)))
 {%- endmacro %}
