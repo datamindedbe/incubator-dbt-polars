@@ -46,13 +46,20 @@ def polars_append_rows(adapter, relation_name: str, rows: list[dict]) -> None:
     Substitute for executing a raw SQL `INSERT INTO ... VALUES (...)` statement:
     Polars' SQLContext only supports SELECT-style queries, not DML, so there's no
     SQL string this adapter could run for that. Rows are cast to the relation's
-    existing schema (e.g. date columns given as ISO strings) before appending.
+    existing schema before appending; string values for temporal columns (e.g.
+    ISO dates) are parsed, since Polars 2.0 no longer casts strings to dates.
     """
     with get_connection(adapter):
         relation = resolve_relation(adapter, relation_name)
         catalog = adapter.get_storage_catalog(relation.database)
         existing_schema = catalog.get_relation(relation).collect_schema()
-        df = pl.DataFrame(rows).cast(existing_schema)
+        df = pl.DataFrame(rows)
+        df = df.select(
+            pl.col(name).str.strptime(dtype)
+            if df.schema[name] == pl.String and dtype.is_temporal()
+            else pl.col(name).cast(dtype)
+            for name, dtype in existing_schema.items()
+        )
         catalog.append_relation(relation, df)
 
 

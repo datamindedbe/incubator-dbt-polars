@@ -14,30 +14,28 @@ RelationKey = tuple[str, str, str]
 
 
 def parse_and_rewrite(sql: str) -> tuple[str, dict[str, PolarsRelation]]:
-    """Strip catalog/schema qualifiers from three-level dbt refs, renaming
-    colliding tables so every table has a unique name in the flat
-    SQLContext namespace. Raises DbtRuntimeError if a column qualifies a
+    """Rename three-level dbt refs to `catalog__schema__name` so they get a
+    unique name in the flat SQLContext namespace that can't shadow a CTE or
+    alias in the query. An unaliased ref is aliased to its bare name so column
+    qualifiers keep working. Raises DbtRuntimeError if a column qualifies a
     colliding table by its bare name rather than an alias, since that bare
-    name may no longer point at that table after the rename.
+    name can't be resolved to a single table.
 
     Returns the rewritten SQL and a dict mapping flat table name to
     PolarsRelation.
     """
-    # Parsed/regenerated as duckdb: sqlglot's default (dialect-agnostic) generator
-    # rewrites array literals like `[1, 2, 3]` into `ARRAY(1, 2, 3)` call syntax,
-    # which Polars' SQL engine doesn't understand (it only accepts bracket
-    # literals). duckdb's dialect round-trips bracket syntax unchanged and is
-    # otherwise compatible with the SQL Polars accepts.
+    # The SQL is only parsed to locate table references; their names are spliced
+    # into the original text so everything else reaches Polars exactly as written.
     ast = sqlglot.parse_one(sql, read="duckdb")
     parsed: exp.Expr = ast
 
     qualified_tables = _find_qualified_tables(parsed)
+    _raise_if_a_table_name_has_more_than_three_parts(qualified_tables)
     colliding_names = _names_claimed_by_multiple_identities(qualified_tables)
 
     _raise_if_a_column_unsafely_qualifies_a_colliding_name(parsed, colliding_names)
 
-    flat_name_by_key = _assign_flat_names(qualified_tables, colliding_names)
-    return _replace_qualified_tables_with_flat_names(parsed, flat_name_by_key)
+    return _replace_qualified_tables_with_flat_names(sql, qualified_tables)
 
 
 def _is_qualified_table(node: exp.Expr) -> TypeGuard[exp.Table]:
@@ -50,6 +48,17 @@ def _is_qualified_table(node: exp.Expr) -> TypeGuard[exp.Table]:
 
 def _find_qualified_tables(ast: exp.Expr) -> list[exp.Table]:
     return [table for table in ast.find_all(exp.Table) if _is_qualified_table(table)]
+
+
+def _raise_if_a_table_name_has_more_than_three_parts(
+    qualified_tables: list[exp.Table],
+) -> None:
+    for table in qualified_tables:
+        if isinstance(table.this, exp.Dot):
+            raise DbtRuntimeError(
+                f"Invalid table name '{exp.table_name(table)}': expected at most "
+                "three parts (catalog.schema.table)."
+            )
 
 
 def _relation_key(table: exp.Table) -> RelationKey:
@@ -84,44 +93,40 @@ def _names_claimed_by_multiple_identities(
     }
 
 
-def _assign_flat_names(
-    qualified_tables: list[exp.Table],
-    colliding_names: set[str],
-) -> dict[RelationKey, str]:
-    flat_name_by_key: dict[RelationKey, str] = {}
-    for table in qualified_tables:
-        key = _relation_key(table)
-        if table.name in colliding_names:
-            flat_name_by_key[key] = _disambiguated_flat_name(table)
-        else:
-            flat_name_by_key[key] = table.name
-    return flat_name_by_key
-
-
 def _replace_qualified_tables_with_flat_names(
-    ast: exp.Expr,
-    flat_name_by_key: dict[RelationKey, str],
+    sql: str,
+    qualified_tables: list[exp.Table],
 ) -> tuple[str, dict[str, PolarsRelation]]:
     relation_by_flat_name: dict[str, PolarsRelation] = {}
+    replacements: list[tuple[int, int, str]] = []
 
-    def replace_table(node: exp.Expr) -> exp.Expr:
-        if not _is_qualified_table(node):
-            return node
-
-        flat_name = flat_name_by_key[_relation_key(node)]
+    for table in qualified_tables:
+        flat_name = _disambiguated_flat_name(table)
         relation_by_flat_name[flat_name] = PolarsRelation.create(
-            database=node.catalog,
-            schema=node.db,
-            identifier=node.name,
+            database=table.catalog,
+            schema=table.db,
+            identifier=table.name,
             type=RelationType.Table,
         )
-        return exp.Table(
-            this=exp.Identifier(this=flat_name, quoted=False),
-            alias=node.args.get("alias"),
-        )
+        name_parts = [
+            table.args[part]
+            for part in ("catalog", "db", "this")
+            if table.args.get(part)
+        ]
+        start, end = name_parts[0].meta["start"], name_parts[-1].meta["end"]
+        replacement = f'"{flat_name}"'
+        if not table.args.get("alias"):
+            bare_name = table.this
+            replacement += (
+                f" AS {sql[bare_name.meta['start'] : bare_name.meta['end'] + 1]}"
+            )
+        replacements.append((start, end, replacement))
 
-    rewritten_ast = ast.transform(replace_table)
-    return rewritten_ast.sql(dialect="duckdb"), relation_by_flat_name
+    # Splice right to left so earlier offsets stay valid.
+    rewritten_sql = sql
+    for start, end, replacement in sorted(replacements, reverse=True):
+        rewritten_sql = rewritten_sql[:start] + replacement + rewritten_sql[end + 1 :]
+    return rewritten_sql, relation_by_flat_name
 
 
 def _raise_if_a_column_unsafely_qualifies_a_colliding_name(

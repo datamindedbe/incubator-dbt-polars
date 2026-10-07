@@ -4,13 +4,19 @@
 
 ### Implements
 
-- Documentation on GitHub pages
+- `current_timestamp` macro evaluates to naive timestamp when dbt run started.
+- `dateadd`, `datediff`, `date_spine` and `get_intervals_between` macro.
+- `date_trunc` macro supports `week` and `quarter`.
+- `last_day` macro for `week`, `month`, `quarter` and `year`.
+- Move documentation to GitHub pages
 
 ### Fixes
 
 - Omit sensitive fields in the profile from `dbt debug`
 - [Databricks Catalog]: Request READ instead of READ_WRITE credentials for read-only access
 - [Databricks Catalog]: Update the description of all columns in a table with a single query
+- Queried fail when a CTE has the same name as a model it selects from
+- User .str.date to cast strings to date as this is the only supported way to do this conversion in Polars 2.0
 
 ## v0.3.0
 
