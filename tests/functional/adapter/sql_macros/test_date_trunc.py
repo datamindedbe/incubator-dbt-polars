@@ -48,6 +48,34 @@ union all select
 """
 
 
+models__test_date_trunc_string_literals_sql = """
+select
+    {{ date_trunc('minute', "'2023-09-10 18:30:45'") }} as actual,
+    TIMESTAMP '2023-09-10 18:30:00' as expected
+union all select
+    {{ date_trunc('hour', "'2023-09-10 18:30:45'") }}, TIMESTAMP '2023-09-10 18:00:00'
+union all select
+    {{ date_trunc('day', "'2023-09-10 18:30:45'") }}, TIMESTAMP '2023-09-10 00:00:00'
+union all select
+    {{ date_trunc('week', "'2023-09-10 18:30:45'") }}, TIMESTAMP '2023-09-04 00:00:00'
+union all select
+    {{ date_trunc('month', "'2023-09-10 18:30:45'") }}, TIMESTAMP '2023-09-01 00:00:00'
+union all select
+    {{ date_trunc('quarter', "'2023-09-10 18:30:45'") }},TIMESTAMP '2023-07-01 00:00:00'
+union all select
+    {{ date_trunc('year', "'2023-09-10'") }}, TIMESTAMP '2023-01-01 00:00:00'
+"""
+
+
+class TestDateTruncStringLiterals(BaseUtils):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "test_date_trunc.yml": models__test_date_trunc_yml,
+            "test_date_trunc.sql": models__test_date_trunc_string_literals_sql,
+        }
+
+
 class TestDateTruncWeekQuarter(BaseUtils):
     @pytest.fixture(scope="class")
     def models(self):

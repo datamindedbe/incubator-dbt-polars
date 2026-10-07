@@ -32,6 +32,8 @@ models__test_last_day_week_sql = """
 select
     {{ last_day("DATE '2023-09-06'", 'week') }} as actual,
     DATE '2023-09-10' as expected
+union all select
+    {{ last_day("'2023-09-06 10:00:00'", 'month') }}, DATE '2023-09-30'
 """
 
 

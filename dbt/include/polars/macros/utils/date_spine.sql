@@ -28,7 +28,7 @@
 
         select *
         from all_periods
-        where date_{{datepart}} <= {{ end_date }}
+        where date_{{datepart}} <= {{ polars__typed_temporal_literal(end_date) }}
 
     )
 

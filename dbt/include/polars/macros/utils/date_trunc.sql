@@ -1,5 +1,6 @@
 {% macro polars__date_trunc(datepart, date) -%}
     {%- set part = datepart | lower -%}
+    {%- set date = polars__typed_temporal_literal(date) -%}
     {%- if part == 'day' -%}
 cast(cast({{ date }} as date) as timestamp)
     {%- elif part == 'week' -%}

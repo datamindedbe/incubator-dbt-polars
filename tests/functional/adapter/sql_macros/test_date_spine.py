@@ -66,6 +66,18 @@ full outer join expected_months
     on generated_months.date_month = expected_months.expected
 """
 
+models__test_date_spine_timestamp_end_sql = """
+with generated_dates as (
+    {{ date_spine("day", "'2023-09-01'", "'2023-09-03 12:00:00'") }}
+), expected_dates as (
+    select DATE '2023-09-01' as expected
+    union all select DATE '2023-09-02'
+)
+select generated_dates.date_day, expected_dates.expected
+from generated_dates
+full outer join expected_dates on generated_dates.date_day = expected_dates.expected
+"""
+
 models__test_date_spine_dates_yml = """
 version: 2
 models:
@@ -79,6 +91,11 @@ models:
       - assert_equal:
           actual: date_month
           expected: expected
+  - name: test_date_spine_timestamp_end
+    data_tests:
+      - assert_equal:
+          actual: date_day
+          expected: expected
 """
 
 
@@ -89,4 +106,7 @@ class TestDateSpineDates(BaseUtils):
             "test_date_spine_dates.yml": models__test_date_spine_dates_yml,
             "test_date_spine_dates.sql": models__test_date_spine_dates_sql,
             "test_date_spine_months.sql": models__test_date_spine_months_sql,
+            "test_date_spine_timestamp_end.sql": (
+                models__test_date_spine_timestamp_end_sql
+            ),
         }
