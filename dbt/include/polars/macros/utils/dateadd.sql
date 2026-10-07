@@ -23,7 +23,7 @@
 
 
 {% macro polars__dateadd_months(source, months_sql) -%}
-    {%- set source_date = "cast(" ~ source ~ " as date)" -%}
+    {%- set source_date = polars__local_date(source) -%}
     {%- set month_index = "(date_part('year', " ~ source_date ~ ") * 12 + date_part('month', " ~ source_date ~ ") - 1 + " ~ months_sql ~ ")" -%}
     {%- set year_sql = "cast(floor(" ~ month_index ~ " / 12) as bigint)" -%}
     {%- set month_sql = "cast(" ~ month_index ~ " - floor(" ~ month_index ~ " / 12) * 12 + 1 as bigint)" -%}

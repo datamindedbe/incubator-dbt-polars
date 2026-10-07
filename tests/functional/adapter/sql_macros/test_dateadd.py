@@ -113,3 +113,39 @@ class TestDateAddLiteralAndExpressionCounts(BaseDateAdd):
             "test_dateadd_dates.sql": models__test_dateadd_dates_sql,
             "test_dateadd_timestamps.sql": models__test_dateadd_timestamps_sql,
         }
+
+
+# Ephemeral, so the timezone survives: Delta would store these values as UTC.
+models__brussels_timestamps_py = """
+from datetime import datetime
+
+import polars as pl
+
+
+def model(dbt, session):
+    dbt.config(materialized="ephemeral")
+    return pl.DataFrame(
+        {"from_ts": [datetime(2023, 1, 31, 0, 30)], "months": [1]}
+    ).with_columns(pl.col("from_ts").dt.replace_time_zone("Europe/Brussels"))
+"""
+
+models__test_dateadd_timezone_sql = """
+select
+    strftime({{ dateadd('month', 'months', 'from_ts') }}, '%Y-%m-%d %H:%M') as actual,
+    '2023-02-28 00:30' as expected
+from {{ ref('brussels_timestamps') }}
+"""
+
+
+class TestDateAddTimezoneAware(BaseDateAdd):
+    @pytest.fixture(scope="class")
+    def seeds(self):
+        return {}
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "brussels_timestamps.py": models__brussels_timestamps_py,
+            "test_dateadd.yml": models__test_dateadd_yml,
+            "test_dateadd.sql": models__test_dateadd_timezone_sql,
+        }
