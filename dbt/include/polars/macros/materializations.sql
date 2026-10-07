@@ -14,7 +14,7 @@
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
   {% do apply_grants(target_relation, config.get('grants'), should_revoke=False) %}
-  {{ polars_assert_contract(sql) }}
+  {{ polars_raise_if_contract_enforced() }}
 
   {% if language == 'python' %}
     {% if existing_relation is not none and full_refresh_mode %}
@@ -61,7 +61,7 @@
   {{ run_hooks(pre_hooks, inside_transaction=False) }}
   {{ run_hooks(pre_hooks, inside_transaction=True) }}
   {% do apply_grants(target_relation, config.get('grants'), should_revoke=False) %}
-  {{ polars_assert_contract(sql) }}
+  {{ polars_raise_if_contract_enforced() }}
 
   {% if language == 'python' %}
     {% call statement('main', language='python') -%}

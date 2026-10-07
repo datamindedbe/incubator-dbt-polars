@@ -14,7 +14,7 @@ Overview of features dbt-polars already supports and plans to support in the fut
 | Feature | Status | Remarks |
 |---|---|---|
 | table materialization | ✅ | |
-| incremental materialization | 🟡 | ✅ append <br> ✅ merge <br> ✅ delete+insert<br/>🚧 microbatch |
+| incremental materialization | 🟡 | ✅ append <br> ✅ merge <br> ✅ delete+insert<br/> 🚧 microbatch |
 | ephemeral materialization | ✅ | |
 | view materialization | ❌️ | dbt-polars has no database to hold views. Use table or ephemeral instead. |
 | Snapshots | ✅ | |
@@ -30,7 +30,7 @@ Overview of features dbt-polars already supports and plans to support in the fut
 | dbt clone | ❌️ | |
 | Hooks | ❌️ | |
 | Grants | ❌️ | |
-| Model contracts | 🟡 | ❌️ constraints<br/>❌️ Python models |
+| Model contracts | 🚧 | |
 
 ## dbt core extensions
 
@@ -55,11 +55,3 @@ dbt-core publishes a list of  [cross-database macros](https://docs.getdbt.com/re
 | Other | ✅ | |
 
 Unsupported macros raise a compilation error. Use a [Python model](python-models.md) for the same logic.
-
-## Macro libraries
-
-Third-party packages such as `dbt_utils` have not been tested on dbt-polars yet.
-
-| Package | Status | Remarks |
-|---|---|---|
-| | | |

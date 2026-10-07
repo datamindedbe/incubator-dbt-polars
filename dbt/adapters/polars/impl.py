@@ -290,10 +290,6 @@ class PolarsAdapter(BaseAdapter):
         schema = catalog.get_relation(relation).collect_schema()
         return [Column(col, str(type)) for col, type in schema.items()]
 
-    def get_column_schema_from_query(self, sql: str) -> list[Column]:
-        schema = self._run_sql(sql, eager=False).collect_schema()
-        return [Column(col, str(type)) for col, type in schema.items()]
-
     def list_relations_without_caching(
         self,
         schema_relation: PolarsRelation,
