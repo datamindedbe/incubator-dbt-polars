@@ -30,6 +30,7 @@ def parse_and_rewrite(sql: str) -> tuple[str, dict[str, PolarsRelation]]:
     parsed: exp.Expr = ast
 
     qualified_tables = _find_qualified_tables(parsed)
+    _raise_if_a_table_name_has_more_than_three_parts(qualified_tables)
     colliding_names = _names_claimed_by_multiple_identities(qualified_tables)
 
     _raise_if_a_column_unsafely_qualifies_a_colliding_name(parsed, colliding_names)
@@ -47,6 +48,17 @@ def _is_qualified_table(node: exp.Expr) -> TypeGuard[exp.Table]:
 
 def _find_qualified_tables(ast: exp.Expr) -> list[exp.Table]:
     return [table for table in ast.find_all(exp.Table) if _is_qualified_table(table)]
+
+
+def _raise_if_a_table_name_has_more_than_three_parts(
+    qualified_tables: list[exp.Table],
+) -> None:
+    for table in qualified_tables:
+        if isinstance(table.this, exp.Dot):
+            raise DbtRuntimeError(
+                f"Invalid table name '{exp.table_name(table)}': expected at most "
+                "three parts (catalog.schema.table)."
+            )
 
 
 def _relation_key(table: exp.Table) -> RelationKey:
