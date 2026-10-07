@@ -23,9 +23,6 @@ class BaseDateDiff(BaseUtils):
         }
 
 
-# CSV and ndjson have no native datetime type: the seed's timestamps are read
-# back as strings, which cast(... as date) can't parse.
-@pytest.mark.skip_configs("csv", "ndjson")
 class TestDateDiff(BaseDateDiff):
     pass
 

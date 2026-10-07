@@ -1,16 +1,15 @@
 {% macro polars__date_trunc(datepart, date) -%}
     {%- set part = datepart | lower -%}
     {%- set date = polars__typed_temporal_literal(date) -%}
+    {%- set local_date = polars__local_date(date) -%}
     {%- if part == 'day' -%}
-cast(cast({{ date }} as date) as timestamp)
+cast({{ local_date }} as timestamp)
     {%- elif part == 'week' -%}
-        {%- set day_sql = "cast(" ~ date ~ " as date)" -%}
-cast({{ day_sql }} - INTERVAL '1 day' * ((date_part('dow', {{ day_sql }}) + 6) % 7) as timestamp)
+cast({{ local_date }} - INTERVAL '1 day' * ((date_part('dow', {{ local_date }}) + 6) % 7) as timestamp)
     {%- elif part == 'quarter' -%}
-        {%- set timestamp_sql = "cast(" ~ date ~ " as timestamp)" -%}
-cast(try_cast(concat(strftime({{ timestamp_sql }}, '%Y'), '-', lpad(cast(cast(floor((date_part('month', {{ timestamp_sql }}) - 1) / 3) * 3 + 1 as bigint) as varchar), 2, '0'), '-01') as date) as timestamp)
+cast(try_cast(concat(strftime({{ local_date }}, '%Y'), '-', lpad(cast(cast(floor((date_part('month', {{ local_date }}) - 1) / 3) * 3 + 1 as bigint) as varchar), 2, '0'), '-01') as date) as timestamp)
     {%- elif part in ('month', 'year') -%}
-cast(cast(strftime(cast({{ date }} as timestamp), '{{ "%Y-%m-01" if part == "month" else "%Y-01-01" }}') as date) as timestamp)
+cast(cast(strftime({{ local_date }}, '{{ "%Y-%m-01" if part == "month" else "%Y-01-01" }}') as date) as timestamp)
     {%- elif part in ('hour', 'minute') -%}
 cast(strftime(cast({{ date }} as timestamp), '{{ "%Y-%m-%dT%H:00:00" if part == "hour" else "%Y-%m-%dT%H:%M:00" }}') as timestamp)
     {%- else -%}
