@@ -19,6 +19,19 @@ def file_format_of(relation: PolarsRelation) -> str:
     return relation.file_format or DEFAULT_FILE_FORMAT
 
 
+def file_name_of(relation: PolarsRelation) -> str:
+    """The file name of a non-delta relation: its identifier plus `.<file_format>`.
+
+    An identifier that already ends in that extension, in any case, is used as written,
+    so a source can name `data.CSV` or `*.CSV`. Object stores are case-sensitive.
+    """
+    identifier = relation.identifier or ""
+    extension = f".{file_format_of(relation)}"
+    if identifier.lower().endswith(extension):
+        return identifier
+    return identifier + extension
+
+
 def _unsupported_for_format(method: str, fmt: str) -> NoReturn:
     raise DbtRuntimeError(
         f"{method} is only supported for delta file_format, got '{fmt}'"

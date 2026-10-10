@@ -6,6 +6,7 @@ from dbt.adapters.polars.catalogs import (
     PolarsRelation,
     StorageCatalog,
     file_format_of,
+    file_name_of,
 )
 from deltalake import DeltaTable
 
@@ -80,9 +81,10 @@ class AWSS3Catalog(StorageCatalog):
     def get_uri(self, relation: PolarsRelation) -> str:
         schema = relation.schema or ""
         identifier = relation.identifier or ""
-        path = self._object_prefix(schema, identifier)
-        if file_format_of(relation) != "delta":
-            path = f"{path}.{file_format_of(relation)}"
+        if file_format_of(relation) == "delta":
+            path = self._object_prefix(schema, identifier)
+        else:
+            path = self._object_prefix(schema, file_name_of(relation))
         return f"s3://{self.config.bucket}/{path}"
 
     def get_storage_options(self, _uri: str, read_only: bool = False) -> dict[str, str]:
@@ -149,9 +151,7 @@ class AWSS3Catalog(StorageCatalog):
         opts = self.get_storage_options(uri)
         if file_format_of(relation) == "delta":
             return DeltaTable.is_deltatable(uri, storage_options=opts)
-        schema = relation.schema or ""
-        identifier = relation.identifier or ""
-        key = f"{self._object_prefix(schema, identifier)}.{file_format_of(relation)}"
+        key = self._object_prefix(relation.schema or "", file_name_of(relation))
         from botocore.exceptions import ClientError
 
         try:
@@ -173,9 +173,7 @@ class AWSS3Catalog(StorageCatalog):
                 self._object_prefix(schema, identifier) + "/"
             )
         else:
-            key = (
-                f"{self._object_prefix(schema, identifier)}.{file_format_of(relation)}"
-            )
+            key = self._object_prefix(schema, file_name_of(relation))
             self._get_s3_client().delete_object(Bucket=self.config.bucket, Key=key)
 
     def list_relations_without_caching(

@@ -10,6 +10,7 @@ from dbt.adapters.polars.catalogs import (
     PolarsRelation,
     StorageCatalog,
     file_format_of,
+    file_name_of,
     resolve_relative_path,
 )
 from dbt_common.exceptions import DbtRuntimeError
@@ -64,7 +65,7 @@ class LocalCatalog(StorageCatalog):
         stem = self._relation_path(relation)
         if file_format_of(relation) == "delta":
             return stem
-        return stem.with_suffix(f".{file_format_of(relation)}")
+        return stem.with_name(file_name_of(relation))
 
     def get_uri(self, relation: PolarsRelation) -> str:
         return str(self._get_path(relation))

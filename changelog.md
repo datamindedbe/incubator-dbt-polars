@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- A file source whose identifier already ends in its format's extension, in any case (`data.CSV`, `*.CSV`), reads that file instead of `data.CSV.csv` ([#29](https://github.com/datamindedbe/incubator-dbt-polars/issues/29))
+
 ## v0.3.1
 
 ### Implements
