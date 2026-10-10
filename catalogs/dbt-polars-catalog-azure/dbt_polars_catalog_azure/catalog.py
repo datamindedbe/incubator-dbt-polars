@@ -8,6 +8,7 @@ from dbt.adapters.polars.catalogs import (
     PolarsRelation,
     StorageCatalog,
     file_format_of,
+    file_name_of,
 )
 from deltalake import DeltaTable
 
@@ -86,9 +87,10 @@ class AzureBlobStorageCatalog(StorageCatalog):
         schema = relation.schema or ""
         identifier = relation.identifier or ""
         container = self.config.container
-        path = self._object_path(schema, identifier)
-        if file_format_of(relation) != "delta":
-            path = f"{path}.{file_format_of(relation)}"
+        if file_format_of(relation) == "delta":
+            path = self._object_path(schema, identifier)
+        else:
+            path = self._object_path(schema, file_name_of(relation))
         return f"az://{container}/{path}"
 
     _DELEGATED_CRED_KEYS = ("bearer_token", "account_key", "sas_token")
@@ -223,9 +225,7 @@ class AzureBlobStorageCatalog(StorageCatalog):
         else:
             from azure.core.exceptions import ResourceNotFoundError
 
-            file_path = (
-                f"{self._object_path(schema, identifier)}.{file_format_of(relation)}"
-            )
+            file_path = self._object_path(schema, file_name_of(relation))
             try:
                 self._get_file_system_client(file_system).get_file_client(
                     file_path

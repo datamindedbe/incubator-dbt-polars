@@ -277,3 +277,68 @@ SELECT * FROM {{ source('external', 'people_csv') }}
             project.adapter, "from_secondary", ["id", "name"], order_by="id"
         )
         assert rows == [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+
+
+_SCHEMA_YML_FILE_EXTENSION = """
+version: 2
+sources:
+  - name: landed
+    schema: "{{ target.schema }}"
+    tables:
+      - name: people_upper
+        identifier: people.CSV
+        config:
+          file_format: csv
+      - name: every_csv
+        identifier: "*.CSV"
+        config:
+          file_format: csv
+"""
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestSourceIdentifierWithExtension(PolarsTestMixin):
+    """An identifier that already ends in the file format's extension, in any case, is
+    the file name as written: `people.CSV` reads people.CSV (not people.CSV.csv), and
+    `*.CSV` globs every .CSV file in the schema."""
+
+    @pytest.fixture(scope="class", autouse=True)
+    def write_source_data(self, project):
+        _write_relation(project, "primary", "people.CSV", "csv")
+        _write_relation(project, "primary", "more_people.CSV", "csv")
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "schema.yml": _SCHEMA_YML_FILE_EXTENSION,
+            "from_upper.sql": """
+{{ config(materialized='table') }}
+SELECT * FROM {{ source('landed', 'people_upper') }}
+""",
+            "from_glob.sql": """
+{{ config(materialized='table') }}
+SELECT * FROM {{ source('landed', 'every_csv') }}
+""",
+        }
+
+    def test_identifier_with_upper_case_extension(self, project):
+        run_dbt(["run"])
+        rows = polars_read_relation(
+            project.adapter, "from_upper", ["id", "name"], order_by="id"
+        )
+        assert rows == [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+
+    def test_glob_identifier(self, project):
+        run_dbt(["run"])
+        rows = polars_read_relation(
+            project.adapter, "from_glob", ["id", "name"], order_by="id"
+        )
+        assert rows == [
+            (1, "Alice"),
+            (1, "Alice"),
+            (2, "Bob"),
+            (2, "Bob"),
+            (3, "Charlie"),
+            (3, "Charlie"),
+        ]
