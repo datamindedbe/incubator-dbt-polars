@@ -11,6 +11,7 @@ from dbt.adapters.contracts.relation import HasQuoting, RelationConfig
 class PolarsRelation(BaseRelation):
     file_format: str | None = None
     read_options: dict = field(default_factory=dict)
+    location: str | None = None
 
     @classmethod
     def create_from(

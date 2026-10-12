@@ -54,6 +54,7 @@ class S3CatalogConfig(CatalogConfig):
 
 class AWSS3Catalog(StorageCatalog):
     config: S3CatalogConfig
+    supports_external_location = True
 
     def __init__(self, config: S3CatalogConfig, project_root: str) -> None:
         super().__init__(config)
@@ -78,6 +79,8 @@ class AWSS3Catalog(StorageCatalog):
         return boto3.Session(**kwargs)
 
     def get_uri(self, relation: PolarsRelation) -> str:
+        if relation.location:
+            return f"s3://{self.config.bucket}/{self._object_prefix(relation.location)}"
         schema = relation.schema or ""
         identifier = relation.identifier or ""
         path = self._object_prefix(schema, identifier)

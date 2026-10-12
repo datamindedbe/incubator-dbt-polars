@@ -55,6 +55,10 @@ class BaseCatalog(ABC):
     Subclasses implement schema and relation management for a specific storage target.
     """
 
+    # True when a source can be read from `external.location`, a path relative to the
+    # catalog root.
+    supports_external_location: bool = False
+
     def __init__(self, config: CatalogConfig, project_root: str = ""):
         self.schema = config.schema
         self.config = config

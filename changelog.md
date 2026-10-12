@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Implements
+
+- A source can be read from a path relative to its catalog with `external.location` and `external.file_format`, the dbt-external-tables keys: a file with any extension (`data.CSV`) or a glob (`orders/*.CSV`) ([#29](https://github.com/datamindedbe/incubator-dbt-polars/issues/29))
+
 ## v0.3.1
 
 ### Implements

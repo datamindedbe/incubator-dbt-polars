@@ -59,6 +59,7 @@ class _StaticTokenCredential:
 
 class AzureBlobStorageCatalog(StorageCatalog):
     config: AzureBlobStorageCatalogConfig
+    supports_external_location = True
 
     def __init__(
         self, config: AzureBlobStorageCatalogConfig, project_root: str
@@ -83,9 +84,11 @@ class AzureBlobStorageCatalog(StorageCatalog):
         return f"https://{self.config.account_name}.dfs.core.windows.net"
 
     def get_uri(self, relation: PolarsRelation) -> str:
+        container = self.config.container
+        if relation.location:
+            return f"az://{container}/{self._blob_prefix(relation.location)}"
         schema = relation.schema or ""
         identifier = relation.identifier or ""
-        container = self.config.container
         path = self._object_path(schema, identifier)
         if file_format_of(relation) != "delta":
             path = f"{path}.{file_format_of(relation)}"

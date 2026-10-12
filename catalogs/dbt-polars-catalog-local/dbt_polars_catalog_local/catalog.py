@@ -36,6 +36,7 @@ class LocalCatalogConfig(CatalogConfig):
 
 class LocalCatalog(StorageCatalog):
     config: LocalCatalogConfig
+    supports_external_location = True
 
     def __init__(self, config: LocalCatalogConfig, project_root: str):
         absolute_root = resolve_relative_path(config.root, project_root)
@@ -67,6 +68,8 @@ class LocalCatalog(StorageCatalog):
         return stem.with_suffix(f".{file_format_of(relation)}")
 
     def get_uri(self, relation: PolarsRelation) -> str:
+        if relation.location:
+            return str(self.absolute_root / relation.location)
         return str(self._get_path(relation))
 
     def get_storage_options(self, _uri: str, read_only: bool = False) -> None:
