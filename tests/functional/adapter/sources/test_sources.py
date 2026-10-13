@@ -288,6 +288,7 @@ sources:
       - name: people_upper
         external:
           location: "{{ target.schema }}/landed/people.CSV"
+        config:
           file_format: csv
       - name: every_csv
         external:

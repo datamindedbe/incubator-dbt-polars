@@ -162,34 +162,34 @@ def _add_scd_id(df: pl.DataFrame, unique_key: str | list[str]) -> pl.DataFrame:
 
 
 def source_file_config(source: dict) -> dict:
-    """The file_format, read_options and location of a source node from the graph.
+    """The file_format, read_options and external keys of a source node from the graph.
 
-    `external.location` and `external.file_format` are the dbt-external-tables keys.
-    A location is a path relative to the catalog root, because credentials belong to
-    the catalog.
+    Nothing is validated here: a misconfigured source only fails the runs that read
+    it, in source_external_location and the catalog's get_uri.
     """
     cfg = source.get("config") or {}
     external = source.get("external") or {}
-    name = f"{source.get('source_name')}.{source.get('name')}"
-    file_format = cfg.get("file_format")
-    external_file_format = external.get("file_format")
-    if file_format and external_file_format and file_format != external_file_format:
-        raise DbtRuntimeError(
-            f"Source '{name}' sets file_format '{file_format}' under config and "
-            + f"'{external_file_format}' under external. Set it in one place."
-        )
-    location = external.get("location")
-    if location and (location.startswith("/") or "://" in location):
-        raise DbtRuntimeError(
-            f"Source '{name}' has external.location '{location}', which must be a "
-            + "path relative to the catalog root. To read from another storage "
-            + "location, add a catalog for it."
-        )
     return {
-        "file_format": file_format or external_file_format,
+        "file_format": cfg.get("file_format"),
         "read_options": cfg.get("read_options") or {},
-        "location": location or None,
+        # The graph lists every ExternalTable field, the unset ones as None
+        "external": {k: v for k, v in external.items() if v is not None},
     }
+
+
+def source_external_location(name: str, external: dict) -> str | None:
+    """The `external.location` of a source, the only `external` key dbt-polars reads.
+
+    Any other key would be silently ignored, so it is an error.
+    """
+    unsupported = sorted(set(external) - {"location"})
+    if unsupported:
+        keys = ", ".join(f"external.{key}" for key in unsupported)
+        raise DbtRuntimeError(
+            f"Source '{name}' sets {keys}. dbt-polars only reads external.location; "
+            + "set file_format and read_options under config."
+        )
+    return external.get("location")
 
 
 class PolarsAdapter(BaseAdapter):
@@ -570,8 +570,11 @@ class PolarsAdapter(BaseAdapter):
                 + f"'{database}.{schema}.{identifier}'. "
                 + "This is likely a bug in the dbt-polars adapter."
             )
+        external_location = source_external_location(
+            f"{database}.{schema}.{identifier}", source_info["external"]
+        )
         if (
-            source_info["location"]
+            external_location
             and not self.get_storage_catalog(database).supports_external_location
         ):
             raise DbtRuntimeError(
@@ -586,7 +589,7 @@ class PolarsAdapter(BaseAdapter):
             catalog=database,
             file_format=source_info["file_format"],
             read_options=source_info["read_options"],
-            location=source_info["location"],
+            external_location=external_location,
         )
 
     def _build_sql_context(

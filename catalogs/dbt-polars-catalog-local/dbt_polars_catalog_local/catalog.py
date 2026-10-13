@@ -9,6 +9,7 @@ from dbt.adapters.polars.catalogs import (
     CatalogConfig,
     PolarsRelation,
     StorageCatalog,
+    external_location_of,
     file_format_of,
     resolve_relative_path,
 )
@@ -68,8 +69,9 @@ class LocalCatalog(StorageCatalog):
         return stem.with_suffix(f".{file_format_of(relation)}")
 
     def get_uri(self, relation: PolarsRelation) -> str:
-        if relation.location:
-            return str(self.absolute_root / relation.location)
+        location = external_location_of(relation)
+        if location:
+            return str(self.absolute_root / location)
         return str(self._get_path(relation))
 
     def get_storage_options(self, _uri: str, read_only: bool = False) -> None:

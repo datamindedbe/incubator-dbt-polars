@@ -102,17 +102,19 @@ sources:
       - name: orders
         external:
           location: erp/orders/*.CSV
+        config:
           file_format: csv
       - name: invoices
         external:
           location: erp/invoices/**/*.parquet
-          file_format: parquet
         config:
+          file_format: parquet
           read_options: {hive_partitioning: true}
 ```
 
 - `external.location` must be relative. An absolute path or a URL is an error, because credentials belong to the catalog. To read from another storage location, add a catalog for it and set the source's `database` to that catalog.
-- `file_format` can be set under `external:` or under `config:`. If both are set, they must match.
+- `location` is the only `external` key dbt-polars reads. Any other key, such as `external.file_format`, is an error: set `file_format` and `read_options` under `config:`.
+- These errors are raised when a model reads the source, so runs that don't select it are not affected.
 
 ## Catalog reference
 

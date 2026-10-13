@@ -7,6 +7,7 @@ from dbt.adapters.polars.catalogs import (
     CatalogConfig,
     PolarsRelation,
     StorageCatalog,
+    external_location_of,
     file_format_of,
 )
 from deltalake import DeltaTable
@@ -85,8 +86,9 @@ class AzureBlobStorageCatalog(StorageCatalog):
 
     def get_uri(self, relation: PolarsRelation) -> str:
         container = self.config.container
-        if relation.location:
-            return f"az://{container}/{self._blob_prefix(relation.location)}"
+        location = external_location_of(relation)
+        if location:
+            return f"az://{container}/{self._blob_prefix(location)}"
         schema = relation.schema or ""
         identifier = relation.identifier or ""
         path = self._object_path(schema, identifier)

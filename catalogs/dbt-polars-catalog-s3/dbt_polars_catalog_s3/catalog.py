@@ -5,6 +5,7 @@ from dbt.adapters.polars.catalogs import (
     CatalogConfig,
     PolarsRelation,
     StorageCatalog,
+    external_location_of,
     file_format_of,
 )
 from deltalake import DeltaTable
@@ -79,8 +80,9 @@ class AWSS3Catalog(StorageCatalog):
         return boto3.Session(**kwargs)
 
     def get_uri(self, relation: PolarsRelation) -> str:
-        if relation.location:
-            return f"s3://{self.config.bucket}/{self._object_prefix(relation.location)}"
+        location = external_location_of(relation)
+        if location:
+            return f"s3://{self.config.bucket}/{self._object_prefix(location)}"
         schema = relation.schema or ""
         identifier = relation.identifier or ""
         path = self._object_prefix(schema, identifier)
