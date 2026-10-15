@@ -18,17 +18,11 @@
   {% do adapter.polars_raise_on_unknown_model_config(target_relation, model) %}
 
   {% if language == 'python' %}
-    {% if existing_relation is not none and full_refresh_mode %}
-      {%- do adapter.drop_relation(existing_relation) -%}
-    {% endif %}
     {% call statement('main', language='python') -%}
       {{ compiled_code }}
     {%- endcall %}
   {% else %}
-    {% if existing_relation is none %}
-      {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes'], partition_by, model.get('config', {})) -%}
-    {% elif full_refresh_mode %}
-      {%- do adapter.drop_relation(existing_relation) -%}
+    {% if existing_relation is none or full_refresh_mode %}
       {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes'], partition_by, model.get('config', {})) -%}
     {% else %}
       {%- set unique_key = config.get('unique_key') -%}
