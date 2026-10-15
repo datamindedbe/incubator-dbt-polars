@@ -205,6 +205,12 @@ class PolarsAdapter(BaseAdapter):
         self._catalog_adapters_lock = threading.Lock()
         self._node_configs: dict[tuple, RelationConfig] = {}
         self._source_configs: dict[tuple, dict] = {}
+        self.configs_loaded_from_manifest = False
+
+    def set_macro_resolver(self, macro_resolver: Any) -> None:
+        # Called when a new manifest is used
+        super().set_macro_resolver(macro_resolver)
+        self.configs_loaded_from_manifest = False
 
     def set_relations_cache(
         self,
@@ -230,6 +236,28 @@ class PolarsAdapter(BaseAdapter):
             self._source_configs[
                 (source["database"], source["schema"], source["identifier"])
             ] = source_file_config(source)
+
+    def load_configs_from_manifest(self) -> None:
+        """Fills node and source configs from the manifest, for commands that never
+        populate the relation cache (run-operation, --no-populate-cache)."""
+        if self.configs_loaded_from_manifest:
+            return
+        self.configs_loaded_from_manifest = True
+        manifest = self.get_macro_resolver()
+        for node in getattr(manifest, "nodes", {}).values():
+            if (
+                node.is_relational
+                and not node.is_ephemeral_model
+                and not node.is_external_node
+            ):
+                self._node_configs.setdefault(
+                    (node.database, node.schema, node.identifier), node
+                )
+        for source in getattr(manifest, "sources", {}).values():
+            self._source_configs.setdefault(
+                (source.database, source.schema, source.identifier),
+                source_file_config(source.to_dict(omit_none=False)),
+            )
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         credentials = cast(PolarsCredentials, self.config.credentials)
@@ -340,9 +368,10 @@ class PolarsAdapter(BaseAdapter):
         self.cache_dropped(relation)
 
     def truncate_relation(self, relation: PolarsRelation) -> None:
-        node_config = self._node_configs.get(
-            (relation.database, relation.schema, relation.identifier)
-        )
+        key = (relation.database, relation.schema, relation.identifier)
+        if key not in self._node_configs:
+            self.load_configs_from_manifest()
+        node_config = self._node_configs.get(key)
         if node_config is None:
             raise DbtRuntimeError(
                 f"Could not find config for relation "
@@ -592,7 +621,10 @@ class PolarsAdapter(BaseAdapter):
     def _resolve_relation(
         self, database: str, schema: str, identifier: str
     ) -> PolarsRelation:
-        node_config = self._node_configs.get((database, schema, identifier))
+        key = (database, schema, identifier)
+        if key not in self._node_configs and key not in self._source_configs:
+            self.load_configs_from_manifest()
+        node_config = self._node_configs.get(key)
         if node_config is not None:
             return PolarsRelation.create_from(
                 quoting=self.config, relation_config=node_config
