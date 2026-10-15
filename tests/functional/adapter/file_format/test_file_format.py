@@ -200,6 +200,68 @@ class TestSourceReadOptions(PolarsTestMixin):
         assert rows == [(1, "hello"), (2, "world")]
 
 
+_SOURCE_DTYPE_SCHEMA = """
+version: 2
+sources:
+  - name: external_data
+    schema: "{{ target.schema }}"
+    tables:
+      - name: raw_overrides
+        identifier: raw_codes
+        config:
+          file_format: csv
+          read_options:
+            schema_overrides: {code: String}
+      - name: raw_schema
+        identifier: raw_codes
+        config:
+          file_format: csv
+          read_options:
+            schema: {id: bigint, code: String}
+"""
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestSourceReadOptionsDtypeNames(PolarsTestMixin):
+    """Dtype names in schema / schema_overrides read_options resolve to Polars types."""
+
+    @pytest.fixture(scope="class", autouse=True)
+    def write_raw_file(self, project):
+        relation = PolarsRelation.create(
+            database=project.database,
+            schema=project.test_schema,
+            identifier="raw_codes",
+            type=RelationType.Table,
+            catalog=project.database,
+            file_format="csv",
+        )
+        with get_connection(project.adapter):
+            catalog = project.adapter.get_storage_catalog(project.database)
+            catalog.create_schema(relation)
+            catalog.write_relation(
+                relation, pl.DataFrame({"id": [1, 2], "code": ["007", "042"]}), [], {}
+            )
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "schema.yml": _SOURCE_DTYPE_SCHEMA,
+            "reader_overrides.sql": "{{ config(materialized='table') }}\n"
+            + "SELECT * FROM {{ source('external_data', 'raw_overrides') }}",
+            "reader_schema.sql": "{{ config(materialized='table') }}\n"
+            + "SELECT * FROM {{ source('external_data', 'raw_schema') }}",
+        }
+
+    def test_source_dtype_names(self, project):
+        run_dbt(["run"])
+        for model in ("reader_overrides", "reader_schema"):
+            rows = polars_read_relation(
+                project.adapter, model, ["id", "code"], order_by="id"
+            )
+            assert rows == [(1, "007"), (2, "042")]
+
+
 _MERGE_CSV_MODEL = """
 {{ config(
     materialized='incremental',
