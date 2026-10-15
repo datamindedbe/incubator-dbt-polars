@@ -1,7 +1,12 @@
 import pytest
+from dbt.cli.main import cli
 from dbt.tests.util import run_dbt, run_dbt_and_capture
 
 from dbt.adapters.polars.testing.mixin import PolarsTestMixin
+
+run_operation_supports_sql = any(
+    param.name == "sql" for param in cli.commands["run-operation"].params
+)
 
 my_model_sql = "{{ config(materialized='table') }}\nselect 1 as id"
 
@@ -69,6 +74,74 @@ class TestMacroOnlyHookPasses(PolarsTestMixin):
     def test_macro_only_hook_passes(self, project):
         _, log_output = run_dbt_and_capture(["run"])
         assert "running pre-hook" in log_output
+
+
+class TestOnRunStartSqlHookFails(PolarsTestMixin):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"my_model.sql": my_model_sql}
+
+    @pytest.fixture(scope="class")
+    def project_config_update(self):
+        return {"on-run-start": ["vacuum"]}
+
+    def test_on_run_start_sql_hook_fails(self, project):
+        _, log_output = run_dbt_and_capture(["run"], expect_pass=False)
+        assert "dbt-polars does not support SQL in hooks" in log_output
+
+
+class TestOnRunEndSqlHookFails(PolarsTestMixin):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"my_model.sql": my_model_sql}
+
+    @pytest.fixture(scope="class")
+    def project_config_update(self):
+        return {"on-run-end": ["vacuum"]}
+
+    def test_on_run_end_sql_hook_fails(self, project):
+        _, log_output = run_dbt_and_capture(["run"], expect_pass=False)
+        assert "dbt-polars does not support SQL in hooks" in log_output
+
+
+class TestRunOperationSqlFails(PolarsTestMixin):
+    @pytest.fixture(scope="class")
+    def macros(self):
+        return {
+            "run_statement.sql": "{% macro run_statement() %}"
+            + "{% call statement('vacuum') %}vacuum{% endcall %}"
+            + "{% endmacro %}"
+        }
+
+    @pytest.mark.skipif(
+        not run_operation_supports_sql,
+        reason="this dbt-core version has no run-operation --sql",
+    )
+    def test_run_operation_inline_sql_fails(self, project):
+        _, log_output = run_dbt_and_capture(
+            ["run-operation", "--sql", "vacuum"], expect_pass=False
+        )
+        assert "dbt-polars does not support SQL" in log_output
+
+    def test_statement_without_fetch_result_fails(self, project):
+        _, log_output = run_dbt_and_capture(
+            ["run-operation", "run_statement"], expect_pass=False
+        )
+        assert "dbt-polars does not support SQL" in log_output
+
+
+class TestOnRunEndMacroOnlyHookPasses(PolarsTestMixin):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {"my_model.sql": my_model_sql}
+
+    @pytest.fixture(scope="class")
+    def project_config_update(self):
+        return {"on-run-end": ["{{ log('running on-run-end', info=True) }}"]}
+
+    def test_on_run_end_macro_only_hook_passes(self, project):
+        _, log_output = run_dbt_and_capture(["run"])
+        assert "running on-run-end" in log_output
 
 
 class TestGrantsFail(PolarsTestMixin):

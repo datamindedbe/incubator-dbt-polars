@@ -6,6 +6,10 @@
 
 - A source can be read from a path relative to its catalog with `external.location`: a file with any extension (`data.CSV`) or a glob (`orders/*.CSV`) ([#29](https://github.com/datamindedbe/incubator-dbt-polars/issues/29))
 
+### Fixes
+
+- Fail with error on SQL statements executed through hooks ([#36](https://github.com/datamindedbe/incubator-dbt-polars/issues/36))
+
 ## v0.3.1
 
 ### Implements

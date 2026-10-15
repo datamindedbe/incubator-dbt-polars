@@ -20,7 +20,6 @@ from dbt_common.clients.agate_helper import (
 )
 from dbt_common.clients.agate_helper import (
     Number,
-    empty_table,
     table_from_data,
 )
 from dbt_common.exceptions import CompilationError, DbtRuntimeError
@@ -1415,7 +1414,10 @@ class PolarsAdapter(BaseAdapter):
         limit: int | None = None,
     ) -> tuple[AdapterResponse, agate.Table]:
         if not fetch:
-            return AdapterResponse(_message="OK"), empty_table()
+            raise DbtRuntimeError(
+                "dbt-polars does not support SQL in hooks, run-operation --sql or "
+                + "statement calls without fetch_result, use macros instead."
+            )
 
         df = self._run_sql(sql)
         if limit is not None and limit >= 0:
@@ -1423,6 +1425,9 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table_from_data(
             df.to_dicts(), df.columns
         )
+
+    def debug_query(self) -> None:
+        self.execute("select 1 as id", fetch=True)
 
     @available
     def run_sql_for_tests(self, sql, fetch, conn=None):

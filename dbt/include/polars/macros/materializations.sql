@@ -38,7 +38,7 @@
       {%- set incremental_predicates = config.get('predicates') or config.get('incremental_predicates') -%}
       {%- do adapter.polars_execute_incremental_model(target_relation, sql, unique_key, strategy, on_schema_change, merge_update_columns, merge_exclude_columns, incremental_predicates, model['extra_ctes'], partition_by, model.get('config', {})) -%}
     {% endif %}
-    {% call statement('main') -%}
+    {% call noop_statement('main', 'OK') -%}
       {{ sql }}
     {%- endcall %}
   {% endif %}
@@ -69,7 +69,7 @@
     {%- endcall %}
   {% else %}
     {%- do adapter.polars_execute_model(target_relation, sql, model['extra_ctes'], partition_by, model.get('config', {})) -%}
-    {% call statement('main') -%}
+    {% call noop_statement('main', 'OK') -%}
       {{ sql }}
     {%- endcall %}
   {% endif %}
@@ -109,7 +109,7 @@
         config.get('dbt_valid_to_current')
   ) -%}
 
-  {% call statement('main') -%}
+  {% call noop_statement('main', 'OK') -%}
     -- Source query of the snapshot model. The SCD2 merge is handled by the Polars adapter in Python.
     {{ sql }}
   {%- endcall %}

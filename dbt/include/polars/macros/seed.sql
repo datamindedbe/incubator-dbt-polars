@@ -1,3 +1,7 @@
+{% macro polars__create_csv_table(model, agate_table) %}
+  {{ return('') }}
+{% endmacro %}
+
 {% macro polars__load_csv_rows(model, agate_table) %}
   {%- set column_types = model['config'].get('column_types', {}) -%}
   {%- set partition_by = model['config'].get('partition_by') -%}
