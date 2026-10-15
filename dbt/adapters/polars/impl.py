@@ -15,6 +15,7 @@ from dbt.adapters.contracts.connection import AdapterResponse
 from dbt.adapters.contracts.relation import RelationConfig, RelationType
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.artifacts.resources.v1.snapshot import SnapshotMetaColumnNames
+from dbt.flags import get_flags
 from dbt_common.clients.agate_helper import (
     Integer as DbtInteger,
 )
@@ -748,15 +749,15 @@ class PolarsAdapter(BaseAdapter):
         self,
         catalog,
         relation: PolarsRelation,
-        new_data: pl.DataFrame,
+        new_data: pl.DataFrame | pl.LazyFrame,
         on_schema_change: str,
         partition_by: list[str],
         model_config: dict | None = None,
-    ) -> tuple[pl.DataFrame | None, bool]:
+    ) -> tuple[pl.DataFrame | pl.LazyFrame | None, bool]:
         """Apply on_schema_change policy before an incremental write.
 
         Returns (data, allow_evolution):
-          - data: the DataFrame to write, possibly column-filtered or None if
+          - data: the frame to write, possibly column-filtered or None if
             sync_all_columns already performed a full rewrite (caller
             should return early)
           - allow_evolution: True when the catalog should enable schema
@@ -766,15 +767,16 @@ class PolarsAdapter(BaseAdapter):
         existing = {
             col.name: col.dtype for col in self.get_columns_in_relation(relation)
         }
-        new_cols = new_data.columns
+        new_schema = new_data.collect_schema()
+        new_cols = new_schema.names()
         added = set(new_cols) - set(existing.keys())
         removed = set(existing.keys()) - set(new_cols)
 
         if on_schema_change == "fail":
             type_changes = {
-                col: (existing[col], str(new_data.schema[col]))
+                col: (existing[col], str(new_schema[col]))
                 for col in new_cols
-                if col in existing and existing[col] != str(new_data.schema[col])
+                if col in existing and existing[col] != str(new_schema[col])
             }
             if added or removed or type_changes:
                 raise CompilationError(
@@ -796,14 +798,14 @@ class PolarsAdapter(BaseAdapter):
             existing_df = catalog.get_relation(relation).collect()
             if added:
                 existing_df = existing_df.with_columns(
-                    [
-                        pl.lit(None).cast(new_data.schema[col]).alias(col)
-                        for col in added
-                    ]
+                    [pl.lit(None).cast(new_schema[col]).alias(col) for col in added]
                 )
             existing_df = existing_df.select(new_cols)
             catalog.write_relation(
-                relation, pl.concat([existing_df, new_data]), partition_by, model_config
+                relation,
+                pl.concat([existing_df.lazy(), new_data.lazy()]),
+                partition_by,
+                model_config,
             )
             return None, False
 
@@ -856,7 +858,7 @@ class PolarsAdapter(BaseAdapter):
         self,
         catalog: BaseCatalog,
         relation: PolarsRelation,
-        new_data: pl.DataFrame,
+        new_data: pl.DataFrame | pl.LazyFrame,
         unique_key: str | list[str] | None,
         strategy: str,
         on_schema_change: str,
@@ -904,12 +906,15 @@ class PolarsAdapter(BaseAdapter):
                 if isinstance(unique_key, str)
                 else list(dict.fromkeys(unique_key))
             )
+            collected_data = (
+                new_data.collect() if isinstance(new_data, pl.LazyFrame) else new_data
+            )
             except_cols = self._resolve_merge_except_cols(
-                new_data, merge_update_columns, merge_exclude_columns
+                collected_data, merge_update_columns, merge_exclude_columns
             )
             catalog.merge_relation(
                 relation,
-                new_data,
+                collected_data,
                 keys,
                 except_cols=except_cols,
                 incremental_predicates=incremental_predicates or None,
@@ -924,16 +929,19 @@ class PolarsAdapter(BaseAdapter):
                 if isinstance(unique_key, str)
                 else list(dict.fromkeys(unique_key))
             )
+            collected_data = (
+                new_data.collect() if isinstance(new_data, pl.LazyFrame) else new_data
+            )
             catalog.delete_matched_relation(
                 relation,
-                new_data,
+                collected_data,
                 keys,
                 incremental_predicates=incremental_predicates or None,
                 model_config=model_config,
             )
             catalog.append_relation(
                 relation,
-                new_data,
+                collected_data,
                 allow_schema_evolution=allow_evolution,
                 model_config=model_config,
             )
@@ -959,7 +967,7 @@ class PolarsAdapter(BaseAdapter):
         ctes = extra_ctes or []
         cte_frames = self._evaluate_ctes(ctes)
         sql = self._strip_all_ctes(sql, ctes)
-        new_data = self._run_sql(sql, extra_frames=cte_frames or None)
+        new_data = self._run_sql(sql, eager=False, extra_frames=cte_frames or None)
         catalog = self.get_storage_catalog(relation.catalog)
         self._incremental_write(
             catalog,
@@ -1017,8 +1025,15 @@ class PolarsAdapter(BaseAdapter):
 
         partition_by = _normalize_partition_by(model_config.get("partition_by"))
 
-        if model_config.get("materialized") == "incremental" and catalog.table_exists(
-            target_relation
+        # Mirrors dbt-core's should_full_refresh() macro
+        full_refresh = model_config.get("full_refresh")
+        if full_refresh is None:
+            full_refresh = getattr(get_flags(), "FULL_REFRESH", False)
+
+        if (
+            model_config.get("materialized") == "incremental"
+            and not full_refresh
+            and catalog.table_exists(target_relation)
         ):
             unique_key = model_config.get("unique_key")
             strategy = (
@@ -1030,7 +1045,7 @@ class PolarsAdapter(BaseAdapter):
             self._incremental_write(
                 catalog,
                 target_relation,
-                lazy_result.collect(),
+                lazy_result,
                 unique_key,
                 strategy,
                 on_schema_change,
