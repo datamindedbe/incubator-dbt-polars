@@ -69,6 +69,8 @@ The supported API is what `dbt.adapters.polars.catalogs` exports: `StorageCatalo
 
 To let sources be read from an `external.location`, set `supports_external_location = True` on the catalog class and, in `get_uri`, return the catalog root joined with `external_location_of(relation)` when it is set. That function returns the location normalized and raises when it is absolute or leaves the catalog root.
 
+dbt-polars fails a model that sets a config key it does not read. If your catalog reads its own model config keys, list them in `model_config_keys` on the catalog class, e.g. `model_config_keys = frozenset({"my_option"})`.
+
 Pin a compatible range in your package, e.g. `dbt-polars>=0.3,<0.4`.
 
 ## Profile configuration

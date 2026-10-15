@@ -14,6 +14,7 @@ from dbt.adapters.base.relation import BaseRelation
 from dbt.adapters.contracts.connection import AdapterResponse
 from dbt.adapters.contracts.relation import RelationConfig, RelationType
 from dbt.adapters.events.logging import AdapterLogger
+from dbt.artifacts.resources import ModelConfig
 from dbt.artifacts.resources.v1.snapshot import SnapshotMetaColumnNames
 from dbt.flags import get_flags
 from dbt_common.clients.agate_helper import (
@@ -120,6 +121,23 @@ def source_external_location(name: str, external: dict) -> str | None:
     return external.get("location")
 
 
+# Model config keys read by dbt-polars that dbt-core's ModelConfig does not define
+POLARS_MODEL_CONFIG_KEYS = frozenset(
+    {
+        "catalog",
+        "file_format",
+        "read_options",
+        "write_options",
+        "write_mode",
+        "partition_by",
+        "merge_update_columns",
+        "merge_exclude_columns",
+        "incremental_predicates",
+        "predicates",
+    }
+)
+
+
 class PolarsAdapter(BaseAdapter):
     """
     Controls actual implmentation of adapter, and ability to override certain methods.
@@ -216,6 +234,23 @@ class PolarsAdapter(BaseAdapter):
             )
 
         return self.CatalogAdapters[name]
+
+    @available
+    def polars_raise_on_unknown_model_config(
+        self, relation: PolarsRelation, model: dict
+    ) -> None:
+        catalog = self.get_storage_catalog(relation.catalog)
+        unknown = sorted(
+            set(ModelConfig.from_dict(model["config"])._extra)
+            - POLARS_MODEL_CONFIG_KEYS
+            - catalog.model_config_keys
+        )
+        if unknown:
+            raise CompilationError(
+                f"Model '{model['name']}' sets unsupported config key(s): "
+                f"{', '.join(unknown)}. dbt-polars would ignore them; "
+                "put custom keys under 'meta'."
+            )
 
     @available
     def get_default_schema(self, node: dict) -> str:

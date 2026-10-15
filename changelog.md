@@ -13,6 +13,7 @@
 - Fail with error on unknown `read_options` keys ([#34](https://github.com/datamindedbe/incubator-dbt-polars/issues/34))
 - Lazy append on incremental materialization ([#31](https://github.com/datamindedbe/incubator-dbt-polars/issues/31))
 - Full refresh of an incremental model are now atomic
+- Fail with error on unknown model config keys
 
 ## v0.3.1
 
