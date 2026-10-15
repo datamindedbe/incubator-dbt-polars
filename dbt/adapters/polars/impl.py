@@ -205,6 +205,12 @@ class PolarsAdapter(BaseAdapter):
         self._catalog_adapters_lock = threading.Lock()
         self._node_configs: dict[tuple, RelationConfig] = {}
         self._source_configs: dict[tuple, dict] = {}
+        self.configs_loaded_from_manifest = False
+
+    def set_macro_resolver(self, macro_resolver: Any) -> None:
+        # Called when a new manifest is used
+        super().set_macro_resolver(macro_resolver)
+        self.configs_loaded_from_manifest = False
 
     def set_relations_cache(
         self,
@@ -234,6 +240,9 @@ class PolarsAdapter(BaseAdapter):
     def load_configs_from_manifest(self) -> None:
         """Fills node and source configs from the manifest, for commands that never
         populate the relation cache (run-operation, --no-populate-cache)."""
+        if self.configs_loaded_from_manifest:
+            return
+        self.configs_loaded_from_manifest = True
         manifest = self.get_macro_resolver()
         for node in getattr(manifest, "nodes", {}).values():
             if (
