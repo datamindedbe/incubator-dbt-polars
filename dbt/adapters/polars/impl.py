@@ -311,14 +311,8 @@ class PolarsAdapter(BaseAdapter):
         )
 
     def get_columns_in_relation(self, relation: PolarsRelation) -> list[Column]:
-        catalog = self.get_storage_catalog(relation.catalog)
-        if relation.external_location:
-            if not catalog.supports_external_location:
-                raise DbtRuntimeError(
-                    f"Source '{relation}' sets external.location, which catalog "
-                    + f"'{relation.catalog}' does not support."
-                )
-        elif not catalog.table_exists(relation):
+        catalog = self.catalog_for_relation(relation)
+        if not relation.external_location and not catalog.table_exists(relation):
             return []
         schema = catalog.get_relation(relation).collect_schema()
         return [Column(col, str(type)) for col, type in schema.items()]
@@ -422,6 +416,28 @@ class PolarsAdapter(BaseAdapter):
         rows: list[dict[str, Any]] = []
         exceptions: list[Exception] = []
 
+        # dbt's ExternalTable is falsy without a location
+        external_location_sources: list[PolarsRelation] = []
+        for relation_config in relation_configs:
+            external = getattr(relation_config, "external", None)
+            if not external:
+                continue
+            try:
+                source_external_location(
+                    str(relation_config.identifier),
+                    {k: v for k, v in external.to_dict().items() if v is not None},
+                )
+                external_location_sources.append(
+                    PolarsRelation.create_from(
+                        quoting=self.config, relation_config=relation_config
+                    )
+                )
+            except Exception as e:
+                exceptions.append(e)
+        external_location_source_keys = {
+            (r.database, r.schema, r.identifier) for r in external_location_sources
+        }
+
         for database, schema in used_schemas:
             try:
                 storage_catalog = self.get_storage_catalog(database)
@@ -431,9 +447,10 @@ class PolarsAdapter(BaseAdapter):
                 for _relation in storage_catalog.list_relations_without_caching(
                     schema_relation
                 ):
-                    node_config = config_lookup.get(
-                        (_relation.database, _relation.schema, _relation.identifier)
-                    )
+                    key = (_relation.database, _relation.schema, _relation.identifier)
+                    if key in external_location_source_keys:
+                        continue
+                    node_config = config_lookup.get(key)
                     relation = (
                         PolarsRelation.create_from(
                             quoting=self.config, relation_config=node_config
@@ -441,24 +458,17 @@ class PolarsAdapter(BaseAdapter):
                         if node_config is not None
                         else _relation
                     )
-                    # Sources with an external.location are added below
-                    if relation.external_location:
-                        continue
                     rows.extend(self.catalog_rows(storage_catalog, relation))
             except Exception as e:
                 exceptions.append(e)
 
-        for relation_config in relation_configs:
-            relation = PolarsRelation.create_from(
-                quoting=self.config, relation_config=relation_config
-            )
-            if not relation.external_location:
-                continue
+        # A source whose files haven't landed yet must not fail docs generate
+        for relation in external_location_sources:
             try:
-                storage_catalog = self.get_storage_catalog(relation.catalog)
+                storage_catalog = self.catalog_for_relation(relation)
                 rows.extend(self.catalog_rows(storage_catalog, relation))
             except Exception as e:
-                exceptions.append(e)
+                logger.warning(f"No catalog entry for source {relation}: {e}")
 
         return table_from_data(rows, column_names), exceptions
 
@@ -595,18 +605,7 @@ class PolarsAdapter(BaseAdapter):
                 + f"'{database}.{schema}.{identifier}'. "
                 + "This is likely a bug in the dbt-polars adapter."
             )
-        external_location = source_external_location(
-            f"{database}.{schema}.{identifier}", source_info["external"]
-        )
-        if (
-            external_location
-            and not self.get_storage_catalog(database).supports_external_location
-        ):
-            raise DbtRuntimeError(
-                f"Source '{database}.{schema}.{identifier}' sets external.location, "
-                + f"which catalog '{database}' does not support."
-            )
-        return PolarsRelation.create(
+        relation = PolarsRelation.create(
             database=database,
             schema=schema,
             identifier=identifier,
@@ -614,8 +613,22 @@ class PolarsAdapter(BaseAdapter):
             catalog=database,
             file_format=source_info["file_format"],
             read_options=source_info["read_options"],
-            external_location=external_location,
+            external_location=source_external_location(
+                f"{database}.{schema}.{identifier}", source_info["external"]
+            ),
         )
+        self.catalog_for_relation(relation)
+        return relation
+
+    def catalog_for_relation(self, relation: PolarsRelation) -> BaseCatalog:
+        """The catalog of `relation`, which must support its external.location."""
+        catalog = self.get_storage_catalog(relation.catalog)
+        if relation.external_location and not catalog.supports_external_location:
+            raise DbtRuntimeError(
+                f"Source '{relation}' sets external.location, which catalog "
+                + f"'{relation.catalog}' does not support."
+            )
+        return catalog
 
     def _build_sql_context(
         self,

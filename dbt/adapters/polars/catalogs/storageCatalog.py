@@ -33,7 +33,7 @@ def external_location_of(relation: PolarsRelation) -> str | None:
     if (
         "://" in location
         or normalized.startswith("/")
-        or normalized == ".."
+        or normalized in (".", "..")
         or normalized.startswith("../")
     ):
         raise DbtRuntimeError(

@@ -76,7 +76,15 @@ def test_external_location_must_be_relative(location):
 
 
 @pytest.mark.parametrize(
-    "location", ["../orders.csv", "erp/../../orders.csv", "..", "erp/../../../x/*.csv"]
+    "location",
+    [
+        "../orders.csv",
+        "erp/../../orders.csv",
+        "..",
+        "erp/../../../x/*.csv",
+        ".",
+        "erp/..",
+    ],
 )
 def test_external_location_cannot_leave_catalog_root(location):
     with pytest.raises(DbtRuntimeError, match="relative to the catalog root"):
