@@ -16,8 +16,8 @@ def model(dbt, session):
 """
 
 known_keys_sql = """
-{{ config(materialized='table', partition_by='k', meta={'owner': 'data-team'}) }}
-select 1 as k, 'a' as v
+{{ config(materialized='table', write_mode='lazy', meta={'owner': 'data-team'}) }}
+select 1 as k
 """
 
 
