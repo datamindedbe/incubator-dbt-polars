@@ -114,7 +114,7 @@ sources:
 
 - `external.location` must be relative. An absolute path or a URL is an error, because credentials belong to the catalog. To read from another storage location, add a catalog for it and set the source's `database` to that catalog.
 - `location` is the only `external` key dbt-polars reads. Any other key, such as `external.file_format`, is an error: set `file_format` and `read_options` under `config:`.
-- These errors are raised when a model reads the source, so runs that don't select it are not affected.
+- `read_options` are passed to the Polars `scan_*` function of the file format. In `schema`, `schema_overrides` and `hive_schema`, give types by name: Polars names (`String`, `Int64`) or SQL names (`varchar`, `bigint`).
 
 ## Catalog reference
 

@@ -6,6 +6,7 @@ from dbt_common.exceptions import DbtRuntimeError
 import polars as pl
 from dbt.adapters.polars.catalogs.baseCatalog import get_write_options
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
+from dbt.adapters.polars.utils import resolve_dtype_names
 
 
 class FileFormat:
@@ -35,13 +36,15 @@ class FileFormat:
     ) -> pl.LazyFrame:
         spec = FILE_FORMATS[fmt]
         valid = frozenset(inspect.signature(spec.scan).parameters) - {"source", "path"}
+
         unknown = set(read_options) - valid
         if unknown:
             raise DbtRuntimeError(
                 f"Unknown read_options for file_format '{fmt}': {sorted(unknown)}. "
                 + f"Valid options are the parameters of polars.{spec.scan.__name__}."
             )
-        kwargs = dict(read_options)
+        kwargs = resolve_dtype_names(read_options)
+
         if storage_options is not None:
             kwargs["storage_options"] = storage_options
         return spec.scan(path, **kwargs)

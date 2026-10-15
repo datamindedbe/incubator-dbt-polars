@@ -29,82 +29,10 @@ from dbt.adapters.polars.catalogs import BaseCatalog, create_catalog
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
+from dbt.adapters.polars.utils import resolve_polars_type
 
 if TYPE_CHECKING:
     import agate
-
-_POLARS_TYPE_MAP: dict[str, type[pl.DataType]] = {
-    # Polars-native names
-    "Int8": pl.Int8,
-    "Int16": pl.Int16,
-    "Int32": pl.Int32,
-    "Int64": pl.Int64,
-    "UInt8": pl.UInt8,
-    "UInt16": pl.UInt16,
-    "UInt32": pl.UInt32,
-    "UInt64": pl.UInt64,
-    "Float32": pl.Float32,
-    "Float64": pl.Float64,
-    "Boolean": pl.Boolean,
-    "Utf8": pl.Utf8,
-    "String": pl.Utf8,
-    "Categorical": pl.Categorical,
-    "Date": pl.Date,
-    "Datetime": pl.Datetime,
-    "Time": pl.Time,
-    "Duration": pl.Duration,
-    "Decimal": pl.Decimal,
-    "Binary": pl.Binary,
-    # SQL aliases (lowercase)
-    "int8": pl.Int8,
-    "int16": pl.Int16,
-    "int32": pl.Int32,
-    "int64": pl.Int64,
-    "tinyint": pl.Int8,
-    "smallint": pl.Int16,
-    "integer": pl.Int32,
-    "int": pl.Int32,
-    "int4": pl.Int32,
-    "int2": pl.Int16,
-    "bigint": pl.Int64,
-    "uint8": pl.UInt8,
-    "uint16": pl.UInt16,
-    "uint32": pl.UInt32,
-    "uint64": pl.UInt64,
-    "float4": pl.Float32,
-    "real": pl.Float32,
-    "float32": pl.Float32,
-    "float8": pl.Float64,
-    "double": pl.Float64,
-    "float64": pl.Float64,
-    "float": pl.Float64,
-    "double precision": pl.Float64,
-    "varchar": pl.Utf8,
-    "text": pl.Utf8,
-    "string": pl.Utf8,
-    "char": pl.Utf8,
-    "character varying": pl.Utf8,
-    "utf8": pl.Utf8,
-    "categorical": pl.Categorical,
-    "boolean": pl.Boolean,
-    "bool": pl.Boolean,
-    "date": pl.Date,
-    "timestamp": pl.Datetime,
-    "datetime": pl.Datetime,
-    "time": pl.Time,
-    "duration": pl.Duration,
-    "decimal": pl.Decimal,
-    "numeric": pl.Decimal,
-    "binary": pl.Binary,
-}
-
-
-def _resolve_polars_type(type_str: str) -> type[pl.DataType]:
-    key = type_str.split("(")[0].strip()
-    dtype = _POLARS_TYPE_MAP.get(key) or _POLARS_TYPE_MAP.get(key.lower())
-    if dtype is None:
-        raise DbtRuntimeError(f"Unknown column type: '{type_str}'")
-    return dtype
 
 
 def _normalize_partition_by(partition_by: str | list[str] | None) -> list[str]:
@@ -591,7 +519,7 @@ class PolarsAdapter(BaseAdapter):
                 if converter is None:
                     continue
                 type_str = converter(agate_table, col_idx)
-            target_type = _resolve_polars_type(type_str)
+            target_type = resolve_polars_type(type_str)
             if target_type in (pl.Date, pl.Datetime) and df[col_name].dtype == pl.Utf8:
                 # An explicit `+column_types` override (e.g. seed config) leaves the
                 # column as raw CSV text, so a plain strict cast rejects any timestamp
