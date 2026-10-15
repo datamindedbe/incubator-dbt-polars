@@ -161,6 +161,37 @@ def _add_scd_id(df: pl.DataFrame, unique_key: str | list[str]) -> pl.DataFrame:
     )
 
 
+def source_file_config(source: dict) -> dict:
+    """The file_format, read_options and external keys of a source node from the graph.
+
+    Nothing is validated here: a misconfigured source only fails the runs that read
+    it, in source_external_location and the catalog's get_uri.
+    """
+    cfg = source.get("config") or {}
+    external = source.get("external") or {}
+    return {
+        "file_format": cfg.get("file_format"),
+        "read_options": cfg.get("read_options") or {},
+        # The graph lists every ExternalTable field, the unset ones as None
+        "external": {k: v for k, v in external.items() if v is not None},
+    }
+
+
+def source_external_location(name: str, external: dict) -> str | None:
+    """The `external.location` of a source, the only `external` key dbt-polars reads.
+
+    Any other key would be silently ignored, so it is an error.
+    """
+    unsupported = sorted(set(external) - {"location"})
+    if unsupported:
+        keys = ", ".join(f"external.{key}" for key in unsupported)
+        raise DbtRuntimeError(
+            f"Source '{name}' sets {keys}. dbt-polars only reads external.location; "
+            + "set file_format and read_options under config."
+        )
+    return external.get("location")
+
+
 class PolarsAdapter(BaseAdapter):
     """
     Controls actual implmentation of adapter, and ability to override certain methods.
@@ -197,13 +228,9 @@ class PolarsAdapter(BaseAdapter):
         if self._source_configs:
             return
         for source in graph.get("sources", {}).values():
-            cfg = source.get("config", {})
             self._source_configs[
                 (source["database"], source["schema"], source["identifier"])
-            ] = {
-                "file_format": cfg.get("file_format"),
-                "read_options": cfg.get("read_options") or {},
-            }
+            ] = source_file_config(source)
 
     def get_storage_catalog(self, name: str | None) -> BaseCatalog:
         credentials = cast(PolarsCredentials, self.config.credentials)
@@ -543,6 +570,17 @@ class PolarsAdapter(BaseAdapter):
                 + f"'{database}.{schema}.{identifier}'. "
                 + "This is likely a bug in the dbt-polars adapter."
             )
+        external_location = source_external_location(
+            f"{database}.{schema}.{identifier}", source_info["external"]
+        )
+        if (
+            external_location
+            and not self.get_storage_catalog(database).supports_external_location
+        ):
+            raise DbtRuntimeError(
+                f"Source '{database}.{schema}.{identifier}' sets external.location, "
+                + f"which catalog '{database}' does not support."
+            )
         return PolarsRelation.create(
             database=database,
             schema=schema,
@@ -551,6 +589,7 @@ class PolarsAdapter(BaseAdapter):
             catalog=database,
             file_format=source_info["file_format"],
             read_options=source_info["read_options"],
+            external_location=external_location,
         )
 
     def _build_sql_context(

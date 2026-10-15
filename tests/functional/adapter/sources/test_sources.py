@@ -277,3 +277,73 @@ SELECT * FROM {{ source('external', 'people_csv') }}
             project.adapter, "from_secondary", ["id", "name"], order_by="id"
         )
         assert rows == [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+
+
+_SCHEMA_YML_EXTERNAL_LOCATION = """
+version: 2
+sources:
+  - name: landed
+    schema: "{{ target.schema }}"
+    tables:
+      - name: people_upper
+        external:
+          location: "{{ target.schema }}/landed/people.CSV"
+        config:
+          file_format: csv
+      - name: every_csv
+        external:
+          location: "{{ target.schema }}/landed/*.CSV"
+        config:
+          file_format: csv
+"""
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestSourceExternalLocation(PolarsTestMixin):
+    """A source with external.location reads that path, relative to the catalog root,
+    as written: a file whose extension is not the lower-case format name, and a glob."""
+
+    @pytest.fixture(scope="class", autouse=True)
+    def write_source_data(self, project):
+        with get_connection(project.adapter):
+            catalog = project.adapter.get_storage_catalog("primary")
+            landed = catalog.absolute_root / project.test_schema / "landed"
+        landed.mkdir(parents=True, exist_ok=True)
+        _SOURCE_DATA.write_csv(landed / "people.CSV")
+        _SOURCE_DATA.write_csv(landed / "more_people.CSV")
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "schema.yml": _SCHEMA_YML_EXTERNAL_LOCATION,
+            "from_upper.sql": """
+{{ config(materialized='table') }}
+SELECT * FROM {{ source('landed', 'people_upper') }}
+""",
+            "from_glob.sql": """
+{{ config(materialized='table') }}
+SELECT * FROM {{ source('landed', 'every_csv') }}
+""",
+        }
+
+    def test_location_with_upper_case_extension(self, project):
+        run_dbt(["run"])
+        rows = polars_read_relation(
+            project.adapter, "from_upper", ["id", "name"], order_by="id"
+        )
+        assert rows == [(1, "Alice"), (2, "Bob"), (3, "Charlie")]
+
+    def test_location_glob(self, project):
+        run_dbt(["run"])
+        rows = polars_read_relation(
+            project.adapter, "from_glob", ["id", "name"], order_by="id"
+        )
+        assert rows == [
+            (1, "Alice"),
+            (1, "Alice"),
+            (2, "Bob"),
+            (2, "Bob"),
+            (3, "Charlie"),
+            (3, "Charlie"),
+        ]

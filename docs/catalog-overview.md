@@ -77,6 +77,45 @@ models:
 
 Iceberg catalogs always use the Iceberg format — the `file_format` config has no effect there.
 
+### Reading files as sources
+
+A source in a storage catalog (local, azure, s3) is read from `<schema>/<identifier>`, plus `.<file_format>` for a file format. To read files with another name, such as an upper-case extension or a glob, give the source an `external.location`. It is a path relative to the catalog root and includes the schema.
+
+```yaml
+sources:
+  # Tables in the format dbt-polars writes
+  - name: crm
+    database: landing
+    schema: crm
+    config:
+      file_format: csv
+    tables:
+      - name: customers
+      - name: contacts
+        identifier: contacts_export
+
+  # Tables read from a path relative to the catalog root
+  - name: erp
+    database: landing
+    schema: erp
+    tables:
+      - name: orders
+        external:
+          location: erp/orders/*.CSV
+        config:
+          file_format: csv
+      - name: invoices
+        external:
+          location: erp/invoices/**/*.parquet
+        config:
+          file_format: parquet
+          read_options: {hive_partitioning: true}
+```
+
+- `external.location` must be relative. An absolute path or a URL is an error, because credentials belong to the catalog. To read from another storage location, add a catalog for it and set the source's `database` to that catalog.
+- `location` is the only `external` key dbt-polars reads. Any other key, such as `external.file_format`, is an error: set `file_format` and `read_options` under `config:`.
+- These errors are raised when a model reads the source, so runs that don't select it are not affected.
+
 ## Catalog reference
 
 - [Local](catalogs/local.md) — reads and writes files on the local filesystem

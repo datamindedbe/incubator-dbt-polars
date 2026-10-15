@@ -11,6 +11,7 @@ from dbt.adapters.contracts.relation import HasQuoting, RelationConfig
 class PolarsRelation(BaseRelation):
     file_format: str | None = None
     read_options: dict = field(default_factory=dict)
+    external_location: str | None = None
 
     @classmethod
     def create_from(
@@ -28,12 +29,16 @@ class PolarsRelation(BaseRelation):
         ) or relation_config.database
         file_format = config.get("file_format") if config else None
         read_options = config.get("read_options", {}) if config else {}
+        # Only sources have `external`; dbt's ExternalTable is falsy without a location
+        external = getattr(relation_config, "external", None)
+        external_location = external.location if external else None
 
         relation = super().create_from(
             quoting,
             relation_config,
             file_format=file_format,
             read_options=read_options,
+            external_location=external_location,
             **kwargs,
         )
 

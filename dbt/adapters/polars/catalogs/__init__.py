@@ -16,7 +16,11 @@ from dbt.adapters.polars.catalogs.icebergCatalog import (
     IcebergCatalog,
     IcebergCatalogConfig,
 )
-from dbt.adapters.polars.catalogs.storageCatalog import StorageCatalog, file_format_of
+from dbt.adapters.polars.catalogs.storageCatalog import (
+    StorageCatalog,
+    external_location_of,
+    file_format_of,
+)
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.utils import resolve_relative_path
 
@@ -28,6 +32,7 @@ __all__ = [
     "PolarsRelation",
     "StorageCatalog",
     "create_catalog",
+    "external_location_of",
     "file_format_of",
     "get_write_options",
     "resolve_catalog_plugin",
