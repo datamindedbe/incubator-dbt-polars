@@ -262,6 +262,57 @@ class TestSourceReadOptionsDtypeNames(PolarsTestMixin):
             assert rows == [(1, "007"), (2, "042")]
 
 
+_SOURCE_SCHEMA_UNKNOWN_READ_OPTION = """
+version: 2
+sources:
+  - name: external_data
+    schema: "{{ target.schema }}"
+    tables:
+      - name: raw_typo
+        config:
+          file_format: csv
+          read_options:
+            has_headr: false
+"""
+
+_SOURCE_READER_UNKNOWN_READ_OPTION = """
+{{ config(materialized='table') }}
+SELECT * FROM {{ source('external_data', 'raw_typo') }}
+"""
+
+
+@pytest.mark.require_profiles("local")
+@pytest.mark.require_configs("default")
+class TestUnknownReadOptionRaises(PolarsTestMixin):
+    @pytest.fixture(scope="class", autouse=True)
+    def write_raw_file(self, project):
+        relation = PolarsRelation.create(
+            database=project.database,
+            schema=project.test_schema,
+            identifier="raw_typo",
+            type=RelationType.Table,
+            catalog=project.database,
+            file_format="csv",
+        )
+        with get_connection(project.adapter):
+            catalog = project.adapter.get_storage_catalog(project.database)
+            catalog.create_schema(relation)
+            catalog.write_relation(
+                relation, pl.DataFrame({"a": [1], "b": ["x"]}), [], {}
+            )
+
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "schema.yml": _SOURCE_SCHEMA_UNKNOWN_READ_OPTION,
+            "reader.sql": _SOURCE_READER_UNKNOWN_READ_OPTION,
+        }
+
+    def test_unknown_read_option_raises(self, project):
+        results = run_dbt(["run"], expect_pass=False)
+        assert "has_headr" in results[0].message
+
+
 _MERGE_CSV_MODEL = """
 {{ config(
     materialized='incremental',
