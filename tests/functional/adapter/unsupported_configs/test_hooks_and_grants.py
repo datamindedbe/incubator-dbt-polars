@@ -1,7 +1,12 @@
 import pytest
+from dbt.cli.main import cli
 from dbt.tests.util import run_dbt, run_dbt_and_capture
 
 from dbt.adapters.polars.testing.mixin import PolarsTestMixin
+
+run_operation_supports_sql = any(
+    param.name == "sql" for param in cli.commands["run-operation"].params
+)
 
 my_model_sql = "{{ config(materialized='table') }}\nselect 1 as id"
 
@@ -108,6 +113,10 @@ class TestRunOperationSqlFails(PolarsTestMixin):
             + "{% endmacro %}"
         }
 
+    @pytest.mark.skipif(
+        not run_operation_supports_sql,
+        reason="this dbt-core version has no run-operation --sql",
+    )
     def test_run_operation_inline_sql_fails(self, project):
         _, log_output = run_dbt_and_capture(
             ["run-operation", "--sql", "vacuum"], expect_pass=False
