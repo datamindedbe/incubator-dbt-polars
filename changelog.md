@@ -11,6 +11,7 @@
 - Fail with error on SQL statements executed through hooks ([#36](https://github.com/datamindedbe/incubator-dbt-polars/issues/36))
 - Resolve polar types in read options (`schema`, `override_schema`) ([#33](https://github.com/datamindedbe/incubator-dbt-polars/issues/33))
 - Fail with error on unknown `read_options` keys ([#34](https://github.com/datamindedbe/incubator-dbt-polars/issues/34))
+- Lazy append on incremental materialization (#31)(https://github.com/datamindedbe/incubator-dbt-polars/issues/31))
 
 ## v0.3.1
 
