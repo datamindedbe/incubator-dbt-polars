@@ -74,6 +74,7 @@ include = ["dbt*"]
 
 [tool.uv]
 config-settings = { editable_mode = "compat" }
+exclude-newer = "3 days"
 
 [tool.uv.workspace]
 members = ["catalogs/*"]
