@@ -94,6 +94,11 @@ class StorageCatalog(BaseCatalog):
         uri = self.get_uri(relation)
         opts = self.get_storage_options(uri, read_only=True)
         if file_format_of(relation) == "delta":
+            if relation.read_options:
+                logger.warning(
+                    "read_options are not supported for delta file_format and are "
+                    + f"ignored for '{relation}': {sorted(relation.read_options)}"
+                )
             return DeltaFormat.read(uri, storage_options=opts)
         return FileFormat.read(
             uri, file_format_of(relation), relation.read_options, storage_options=opts
