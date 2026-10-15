@@ -76,6 +76,20 @@ def test_external_location_must_be_relative(location):
 
 
 @pytest.mark.parametrize(
+    "location", ["../orders.csv", "erp/../../orders.csv", "..", "erp/../../../x/*.csv"]
+)
+def test_external_location_cannot_leave_catalog_root(location):
+    with pytest.raises(DbtRuntimeError, match="relative to the catalog root"):
+        external_location_of(_relation(location))
+
+
+def test_external_location_is_normalized():
+    assert external_location_of(_relation("erp/./orders/../invoices/*.csv")) == (
+        "erp/invoices/*.csv"
+    )
+
+
+@pytest.mark.parametrize(
     ("external", "expected"),
     [(ExternalTable(location="erp/*.CSV"), "erp/*.CSV"), (ExternalTable(), None)],
 )

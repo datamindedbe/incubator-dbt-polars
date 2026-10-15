@@ -1,3 +1,4 @@
+import posixpath
 from abc import abstractmethod
 from typing import NoReturn
 
@@ -20,18 +21,27 @@ def file_format_of(relation: PolarsRelation) -> str:
 
 
 def external_location_of(relation: PolarsRelation) -> str | None:
-    """A source's `external.location`, a path relative to the catalog root.
+    """A source's `external.location`, a normalized path relative to the catalog root.
 
-    An absolute path or a URL is an error, because credentials belong to the catalog.
+    An absolute path, a URL or a path that leaves the catalog root is an error,
+    because credentials belong to the catalog.
     """
     location = relation.external_location
-    if location and (location.startswith("/") or "://" in location):
+    if not location:
+        return None
+    normalized = posixpath.normpath(location)
+    if (
+        "://" in location
+        or normalized.startswith("/")
+        or normalized == ".."
+        or normalized.startswith("../")
+    ):
         raise DbtRuntimeError(
             f"Source '{relation}' has external.location '{location}', which must be "
             + "a path relative to the catalog root. To read from another storage "
             + "location, add a catalog for it."
         )
-    return location
+    return normalized
 
 
 def _unsupported_for_format(method: str, fmt: str) -> NoReturn:

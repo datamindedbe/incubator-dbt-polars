@@ -65,7 +65,11 @@ create_catalog = MyCustomCatalog
 
 For backends that don't store Delta tables or files, extend `BaseCatalog` and implement all of its methods.
 
-The supported API is what `dbt.adapters.polars.catalogs` exports: `StorageCatalog`, `BaseCatalog`, `CatalogConfig`, `PolarsRelation`, `get_write_options`, `FILE_FORMATS`, `file_format_of` and `resolve_relative_path`. A relation's `file_format` is `None` when the model doesn't set one; in a `StorageCatalog`, `file_format_of(relation)` returns the effective format (`delta` by default). Pin a compatible range in your package, e.g. `dbt-polars>=0.3,<0.4`.
+The supported API is what `dbt.adapters.polars.catalogs` exports: `StorageCatalog`, `BaseCatalog`, `CatalogConfig`, `PolarsRelation`, `get_write_options`, `FILE_FORMATS`, `file_format_of`, `external_location_of` and `resolve_relative_path`. A relation's `file_format` is `None` when the model doesn't set one; in a `StorageCatalog`, `file_format_of(relation)` returns the effective format (`delta` by default).
+
+To let sources be read from an `external.location`, set `supports_external_location = True` on the catalog class and, in `get_uri`, return the catalog root joined with `external_location_of(relation)` when it is set. That function returns the location normalized and raises when it is absolute or leaves the catalog root.
+
+Pin a compatible range in your package, e.g. `dbt-polars>=0.3,<0.4`.
 
 ## Profile configuration
 

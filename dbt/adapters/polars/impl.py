@@ -312,7 +312,13 @@ class PolarsAdapter(BaseAdapter):
 
     def get_columns_in_relation(self, relation: PolarsRelation) -> list[Column]:
         catalog = self.get_storage_catalog(relation.catalog)
-        if not catalog.table_exists(relation):
+        if relation.external_location:
+            if not catalog.supports_external_location:
+                raise DbtRuntimeError(
+                    f"Source '{relation}' sets external.location, which catalog "
+                    + f"'{relation.catalog}' does not support."
+                )
+        elif not catalog.table_exists(relation):
             return []
         schema = catalog.get_relation(relation).collect_schema()
         return [Column(col, str(type)) for col, type in schema.items()]
@@ -409,6 +415,7 @@ class PolarsAdapter(BaseAdapter):
             "column_type",
             "column_comment",
         ]
+        relation_configs = list(relation_configs)
         config_lookup: dict[tuple, RelationConfig] = {
             (c.database, c.schema, c.identifier): c for c in relation_configs
         }
@@ -434,29 +441,47 @@ class PolarsAdapter(BaseAdapter):
                         if node_config is not None
                         else _relation
                     )
-                    table_comment = storage_catalog.get_relation_comment(relation)
-                    column_comments = storage_catalog.get_column_comments(relation)
-                    for index, column in enumerate(
-                        self.get_columns_in_relation(relation)
-                    ):
-                        rows.append(
-                            {
-                                "table_database": database,
-                                "table_schema": schema,
-                                "table_name": relation.identifier,
-                                "table_type": "BASE TABLE",
-                                "table_comment": table_comment,
-                                "table_owner": None,
-                                "column_name": column.name,
-                                "column_index": index,
-                                "column_type": column.dtype,
-                                "column_comment": column_comments.get(column.name),
-                            }
-                        )
+                    # Sources with an external.location are added below
+                    if relation.external_location:
+                        continue
+                    rows.extend(self.catalog_rows(storage_catalog, relation))
+            except Exception as e:
+                exceptions.append(e)
+
+        for relation_config in relation_configs:
+            relation = PolarsRelation.create_from(
+                quoting=self.config, relation_config=relation_config
+            )
+            if not relation.external_location:
+                continue
+            try:
+                storage_catalog = self.get_storage_catalog(relation.catalog)
+                rows.extend(self.catalog_rows(storage_catalog, relation))
             except Exception as e:
                 exceptions.append(e)
 
         return table_from_data(rows, column_names), exceptions
+
+    def catalog_rows(
+        self, storage_catalog: BaseCatalog, relation: PolarsRelation
+    ) -> list[dict[str, Any]]:
+        table_comment = storage_catalog.get_relation_comment(relation)
+        column_comments = storage_catalog.get_column_comments(relation)
+        return [
+            {
+                "table_database": relation.database,
+                "table_schema": relation.schema,
+                "table_name": relation.identifier,
+                "table_type": "BASE TABLE",
+                "table_comment": table_comment,
+                "table_owner": None,
+                "column_name": column.name,
+                "column_index": index,
+                "column_type": column.dtype,
+                "column_comment": column_comments.get(column.name),
+            }
+            for index, column in enumerate(self.get_columns_in_relation(relation))
+        ]
 
     # --- Type conversions ---
     @classmethod
