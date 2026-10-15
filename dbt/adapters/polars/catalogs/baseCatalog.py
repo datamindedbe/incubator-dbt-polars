@@ -59,6 +59,9 @@ class BaseCatalog(ABC):
     # catalog root.
     supports_external_location: bool = False
 
+    # Model config keys this catalog reads beyond the ones dbt-polars knows.
+    model_config_keys: frozenset[str] = frozenset()
+
     def __init__(self, config: CatalogConfig, project_root: str = ""):
         self.schema = config.schema
         self.config = config

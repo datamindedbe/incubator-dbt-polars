@@ -57,13 +57,7 @@ seeds__seed_csv = """id,first_name,last_name,email,gender,ip_address
 """
 
 model_sql = """
-{{
-  config(
-    materialized = "table",
-    sort = 'first_name',
-    dist = 'first_name'
-  )
-}}
+{{ config(materialized = "table") }}
 
 select * from {{ ref('seed') }}
 """
@@ -78,7 +72,7 @@ class BaseTableMaterialization(PolarsProfileMixin):
     def models(self):
         return {"materialized.sql": model_sql}
 
-    def test_table_materialization_sort_dist_no_op(self, project):
+    def test_table_materialization(self, project):
 
         # check seed
         results = run_dbt(["seed"])
