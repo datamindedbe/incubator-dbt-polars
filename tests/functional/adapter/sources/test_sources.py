@@ -325,6 +325,15 @@ SELECT * FROM {{ source('landed', 'people_upper') }}
 {{ config(materialized='table') }}
 SELECT * FROM {{ source('landed', 'every_csv') }}
 """,
+            "glob_columns.sql": """
+{{ config(materialized='table') }}
+{% if execute %}
+  {% set columns = adapter.get_columns_in_relation(source('landed', 'every_csv')) %}
+{% else %}
+  {% set columns = [] %}
+{% endif %}
+SELECT '{{ columns | map(attribute="name") | join(",") }}' AS column_names
+""",
         }
 
     def test_location_with_upper_case_extension(self, project):
@@ -347,3 +356,15 @@ SELECT * FROM {{ source('landed', 'every_csv') }}
             (3, "Charlie"),
             (3, "Charlie"),
         ]
+
+    def test_columns_of_located_source(self, project):
+        run_dbt(["run", "--select", "glob_columns"])
+        rows = polars_read_relation(project.adapter, "glob_columns", ["column_names"])
+        assert rows == [("id,name",)]
+
+    def test_docs_generate_includes_located_source(self, project):
+        run_dbt(["run"])
+        catalog = run_dbt(["docs", "generate"])
+        source_id = "source.test.landed.every_csv"
+        assert source_id in catalog.sources
+        assert set(catalog.sources[source_id].columns) == {"id", "name"}
