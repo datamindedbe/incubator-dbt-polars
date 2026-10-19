@@ -1,18 +1,19 @@
 """merge and delete+insert on an Iceberg table with a composite unique_key.
 
-These used to delete through one pyiceberg Or(And(EqualTo, ...), ...) with an And per batch
-row, which does not scale: 22 s at 5,000 rows and a segfault at 20,000. They now prune files
-with one In() per key column and anti-join each candidate file in Polars.
+These used to delete through one pyiceberg Or(And(EqualTo, ...), ...) with an And
+per batch row, which does not scale: 22 s at 5,000 rows and a segfault at 20,000.
+They now prune files with one In() per key column and anti-join each candidate file
+in Polars.
 """
 
 import time
 
-import pytest
-
 import polars as pl
+import pytest
+from polars.testing import assert_frame_equal
+
 from dbt.adapters.polars.catalogs import create_catalog, resolve_catalog_plugin
 from dbt.adapters.polars.testing import CatalogTestBase
-from polars.testing import assert_frame_equal
 
 pytest.importorskip("pyiceberg")
 
@@ -41,14 +42,20 @@ class TestIcebergCompositeKey(CatalogTestBase):
         catalog.write_relation(
             relation,
             pl.DataFrame(
-                {"region": ["eu", "eu", "us"], "product": ["a", "b", "a"], "v": [1, 2, 3]}
+                {
+                    "region": ["eu", "eu", "us"],
+                    "product": ["a", "b", "a"],
+                    "v": [1, 2, 3],
+                }
             ),
             [],
         )
 
         catalog.merge_relation(
             relation,
-            pl.DataFrame({"region": ["eu", "us"], "product": ["b", "b"], "v": [20, 40]}),
+            pl.DataFrame(
+                {"region": ["eu", "us"], "product": ["b", "b"], "v": [20, 40]}
+            ),
             keys=KEYS,
         )
 
@@ -68,7 +75,12 @@ class TestIcebergCompositeKey(CatalogTestBase):
         catalog.write_relation(
             relation,
             pl.DataFrame(
-                {"region": ["eu", "us"], "product": ["a", "a"], "v": [1, 2], "w": ["x", "y"]}
+                {
+                    "region": ["eu", "us"],
+                    "product": ["a", "a"],
+                    "v": [1, 2],
+                    "w": ["x", "y"],
+                }
             ),
             [],
         )
@@ -76,7 +88,12 @@ class TestIcebergCompositeKey(CatalogTestBase):
         catalog.merge_relation(
             relation,
             pl.DataFrame(
-                {"region": ["us", "eu"], "product": ["a", "c"], "v": [20, 5], "w": ["Y", "z"]}
+                {
+                    "region": ["us", "eu"],
+                    "product": ["a", "c"],
+                    "v": [20, 5],
+                    "w": ["Y", "z"],
+                }
             ),
             keys=KEYS,
             except_cols=["w"],
@@ -97,8 +114,8 @@ class TestIcebergCompositeKey(CatalogTestBase):
     def test_delete_matched_composite_key_spares_cross_combinations(
         self, catalog, schema_relation
     ):
-        """(eu, b) and (us, a) each match the batch on ONE key column only: the prune filter
-        admits them, the anti-join must keep them."""
+        """(eu, b) and (us, a) each match the batch on ONE key column only: the
+        prune filter admits them, the anti-join must keep them."""
         relation = self.table(schema_relation, "deleted")
         catalog.write_relation(
             relation,
@@ -143,7 +160,10 @@ class TestIcebergCompositeKey(CatalogTestBase):
 
         catalog.merge_relation(
             relation,
-            pl.DataFrame({"region": [None], "product": ["a"], "v": [3]}),
+            pl.DataFrame(
+                {"region": [None], "product": ["a"], "v": [3]},
+                schema={"region": pl.String, "product": pl.String, "v": pl.Int64},
+            ),
             keys=KEYS,
         )
 

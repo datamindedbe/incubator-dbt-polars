@@ -84,8 +84,9 @@ def test_single_key_prune_filter_is_one_in():
 
 
 def test_composite_key_prune_filter_grows_with_distinct_values_not_rows():
-    """One In() per key column: a 50 x 288 x 300 batch (4.3M rows) gives 638 literals, not
-    an Or of 4.3M Ands, which pyiceberg cannot evaluate (22 s at 5k rows, a crash at 20k)."""
+    """One In() per key column: a 50 x 288 x 300 batch (4.3M rows) gives 638
+    literals, not an Or of 4.3M Ands, which pyiceberg cannot evaluate (22 s at 5k
+    rows, a crash at 20k)."""
     pytest.importorskip("pyiceberg")
     from pyiceberg.expressions import And, In
 
@@ -96,7 +97,12 @@ def test_composite_key_prune_filter_grows_with_distinct_values_not_rows():
     )
     result = _key_prune_filter(["date", "time", "duid"], df)
 
+    def leaves(expr):
+        if isinstance(expr, And):
+            return leaves(expr.left) + leaves(expr.right)
+        return [expr]
+
+    ins = leaves(result)
     assert isinstance(result, And)
-    ins = [result.left.left, result.left.right, result.right]
-    assert all(isinstance(e, In) for e in ins)
+    assert len(ins) == 3 and all(isinstance(e, In) for e in ins)
     assert sum(len(e.literals) for e in ins) == 50 + 288 + 300

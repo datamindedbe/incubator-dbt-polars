@@ -470,9 +470,7 @@ class IcebergCatalog(BaseCatalog):
 
         tbl = self._load_table(self._id(relation))
         with tbl.transaction() as transaction:
-            _overwrite_keys_and_append(
-                tbl, transaction, tbl.io, keys, df, df.clear()
-            )
+            _overwrite_keys_and_append(tbl, transaction, tbl.io, keys, df, df.clear())
         self._invalidate_table_cache(self._id(relation))
 
     def apply_snapshot_delta(

@@ -143,9 +143,10 @@ def _overwrite_scd_ids_and_append(
 
 
 def _key_prune_filter(keys: list[str], key_rows: pl.DataFrame):
-    """One In() per key column over its distinct values: a superset of the matching rows,
-    used only to skip files. Its size is the sum of the distinct values per column, where an
-    Or of one And per row grows with the batch and does not scale."""
+    """One In() per key column over its distinct values: a superset of the
+    matching rows, used only to skip files. Its size is the sum of the distinct
+    values per column, where an Or of one And per row grows with the batch and
+    does not scale."""
     from pyiceberg.expressions import And, In
 
     filters = [
@@ -163,12 +164,13 @@ def _overwrite_keys_and_append(
     key_rows: pl.DataFrame,
     new_rows: pl.DataFrame,
 ) -> None:
-    """Delete the rows whose `keys` match a row of `key_rows`, then append `new_rows`, in ONE
-    overwrite snapshot (copy-on-write).
+    """Delete the rows whose `keys` match a row of `key_rows`, then append
+    `new_rows`, in ONE overwrite snapshot (copy-on-write).
 
-    Files are pruned with `_key_prune_filter`; each candidate file is read and anti-joined on
-    the keys in Polars, and rewritten only if it loses rows. A NULL key never matches, as in
-    SQL. The same shape as `_overwrite_scd_ids_and_append`, for any number of key columns.
+    Files are pruned with `_key_prune_filter`; each candidate file is read and
+    anti-joined on the keys in Polars, and rewritten only if it loses rows. A NULL
+    key never matches, as in SQL. The same shape as `_overwrite_scd_ids_and_append`,
+    for any number of key columns.
     """
     from pyiceberg.expressions import AlwaysTrue
     from pyiceberg.io.pyarrow import ArrowScan, _dataframe_to_data_files
@@ -178,7 +180,9 @@ def _overwrite_keys_and_append(
     matched = key_rows.select(keys).unique()
     with transaction.update_snapshot().overwrite() as snapshot_writer:
         if not matched.is_empty():
-            for task in tbl.scan(row_filter=_key_prune_filter(keys, matched)).plan_files():
+            for task in tbl.scan(
+                row_filter=_key_prune_filter(keys, matched)
+            ).plan_files():
                 all_rows = pl.DataFrame(
                     ArrowScan(
                         table_metadata=transaction.table_metadata,
@@ -187,7 +191,7 @@ def _overwrite_keys_and_append(
                         row_filter=AlwaysTrue(),
                     ).to_table(tasks=[task])
                 )
-                # The batch's key dtypes can differ from the stored ones (Int64 vs Int32).
+                # Batch key dtypes can differ from the stored ones (Int64 vs Int32).
                 probe = matched.cast({k: all_rows.schema[k] for k in keys})
                 kept_rows = all_rows.join(probe, on=keys, how="anti")
                 if len(kept_rows) < len(all_rows):
