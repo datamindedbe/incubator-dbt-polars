@@ -12,6 +12,7 @@ import polars as pl
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
 from dbt.adapters.polars.catalogs.iceberg_write_utils import (
     _append_in_single_snapshot,
+    _overwrite_keys_and_append,
     _overwrite_scd_ids_and_append,
     _replace_in_single_snapshot,
     _sync_partition_spec,
@@ -118,19 +119,6 @@ def _apply_partial_update(
         .with_columns([pl.col(f"{c}_new").alias(c) for c in update_cols])
         .select(matched_existing.columns)
     )
-
-
-def _build_key_delete_filter(keys: list[str], df: pl.DataFrame):
-    from pyiceberg.expressions import And, EqualTo, In, Or
-
-    if len(keys) == 1:
-        return In(keys[0], df[keys[0]].to_list())  # type: ignore[misc,call-arg,arg-type]
-
-    row_filters = [
-        And(*[EqualTo(k, row[k]) for k in keys])  # type: ignore[misc,call-arg,arg-type]
-        for row in df.select(keys).to_dicts()
-    ]
-    return Or(*row_filters) if len(row_filters) > 1 else row_filters[0]
 
 
 SECRET_PROPERTY_MARKERS = ("token", "secret", "password", "credential", "key")
@@ -426,8 +414,9 @@ class IcebergCatalog(BaseCatalog):
                 update.union_by_name(df.to_arrow().schema)
         if except_cols is None:
             if not df.is_empty():
-                tbl.delete(_build_key_delete_filter(keys, df))
-                df.write_iceberg(tbl, mode="append")
+                with tbl.transaction() as transaction:
+                    _overwrite_keys_and_append(tbl, transaction, tbl.io, keys, df, df)
+                self._invalidate_table_cache(self._id(relation))
             return
 
         except_set = set(except_cols)
@@ -443,13 +432,16 @@ class IcebergCatalog(BaseCatalog):
             updated_rows = _apply_partial_update(
                 matched_existing, matched_incoming, keys, update_cols
             )
-            tbl.delete(_build_key_delete_filter(keys, matched_existing))
         else:
             updated_rows = pl.DataFrame(schema=matched_existing.schema)
 
         rows_to_append = pl.concat([updated_rows, incoming_new_rows])
-        if not rows_to_append.is_empty():
-            rows_to_append.write_iceberg(tbl, mode="append")
+        if not matched_existing.is_empty() or not rows_to_append.is_empty():
+            with tbl.transaction() as transaction:
+                _overwrite_keys_and_append(
+                    tbl, transaction, tbl.io, keys, matched_existing, rows_to_append
+                )
+            self._invalidate_table_cache(self._id(relation))
 
     def _scan_existing_matched_rows(
         self, tbl, df: pl.DataFrame, keys: list[str]
@@ -477,7 +469,11 @@ class IcebergCatalog(BaseCatalog):
             return
 
         tbl = self._load_table(self._id(relation))
-        tbl.delete(_build_key_delete_filter(keys, df))
+        with tbl.transaction() as transaction:
+            _overwrite_keys_and_append(
+                tbl, transaction, tbl.io, keys, df, df.clear()
+            )
+        self._invalidate_table_cache(self._id(relation))
 
     def apply_snapshot_delta(
         self,

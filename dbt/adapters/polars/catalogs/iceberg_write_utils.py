@@ -142,6 +142,70 @@ def _overwrite_scd_ids_and_append(
         )
 
 
+def _key_prune_filter(keys: list[str], key_rows: pl.DataFrame):
+    """One In() per key column over its distinct values: a superset of the matching rows,
+    used only to skip files. Its size is the sum of the distinct values per column, where an
+    Or of one And per row grows with the batch and does not scale."""
+    from pyiceberg.expressions import And, In
+
+    filters = [
+        In(k, key_rows[k].drop_nulls().unique().to_list())  # type: ignore[misc,call-arg,arg-type]
+        for k in keys
+    ]
+    return filters[0] if len(filters) == 1 else And(*filters)
+
+
+def _overwrite_keys_and_append(
+    tbl: Table,
+    transaction: Transaction,
+    io: FileIO,
+    keys: list[str],
+    key_rows: pl.DataFrame,
+    new_rows: pl.DataFrame,
+) -> None:
+    """Delete the rows whose `keys` match a row of `key_rows`, then append `new_rows`, in ONE
+    overwrite snapshot (copy-on-write).
+
+    Files are pruned with `_key_prune_filter`; each candidate file is read and anti-joined on
+    the keys in Polars, and rewritten only if it loses rows. A NULL key never matches, as in
+    SQL. The same shape as `_overwrite_scd_ids_and_append`, for any number of key columns.
+    """
+    from pyiceberg.expressions import AlwaysTrue
+    from pyiceberg.io.pyarrow import ArrowScan, _dataframe_to_data_files
+
+    schema = transaction.table_metadata.schema()
+    file_counter = itertools.count(0)
+    matched = key_rows.select(keys).unique()
+    with transaction.update_snapshot().overwrite() as snapshot_writer:
+        if not matched.is_empty():
+            for task in tbl.scan(row_filter=_key_prune_filter(keys, matched)).plan_files():
+                all_rows = pl.DataFrame(
+                    ArrowScan(
+                        table_metadata=transaction.table_metadata,
+                        io=io,
+                        projected_schema=schema,
+                        row_filter=AlwaysTrue(),
+                    ).to_table(tasks=[task])
+                )
+                # The batch's key dtypes can differ from the stored ones (Int64 vs Int32).
+                probe = matched.cast({k: all_rows.schema[k] for k in keys})
+                kept_rows = all_rows.join(probe, on=keys, how="anti")
+                if len(kept_rows) < len(all_rows):
+                    snapshot_writer.delete_data_file(task.file)
+                    if kept_rows.shape[0] > 0:
+                        for data_file in _dataframe_to_data_files(
+                            table_metadata=transaction.table_metadata,
+                            write_uuid=snapshot_writer.commit_uuid,
+                            df=kept_rows.to_arrow(),
+                            io=io,
+                            counter=file_counter,
+                        ):
+                            snapshot_writer.append_data_file(data_file)
+        _write_data_files(
+            snapshot_writer, transaction, io, new_rows, {}, counter=file_counter
+        )
+
+
 def _sync_schema(
     transaction: Transaction, current_schema: Schema, arrow_schema: pa.Schema
 ) -> None:

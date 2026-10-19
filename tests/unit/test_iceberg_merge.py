@@ -1,10 +1,8 @@
 import polars as pl
 import pytest
 
-from dbt.adapters.polars.catalogs.icebergCatalog import (
-    _apply_partial_update,
-    _build_key_delete_filter,
-)
+from dbt.adapters.polars.catalogs.iceberg_write_utils import _key_prune_filter
+from dbt.adapters.polars.catalogs.icebergCatalog import _apply_partial_update
 
 
 def test_update_cols_are_replaced_from_incoming():
@@ -75,31 +73,30 @@ def test_apply_partial_update_output_columns_match_existing():
     assert result.columns == existing.columns
 
 
-def test_single_key_produces_in_expression():
+def test_single_key_prune_filter_is_one_in():
     pytest.importorskip("pyiceberg")
     from pyiceberg.expressions import In
 
-    df = pl.DataFrame({"id": [1, 2, 3]})
-    result = _build_key_delete_filter(["id"], df)
+    result = _key_prune_filter(["id"], pl.DataFrame({"id": [1, 2, 2, None]}))
 
     assert isinstance(result, In)
+    assert {lit.value for lit in result.literals} == {1, 2}
 
 
-def test_composite_key_single_row_produces_and():
+def test_composite_key_prune_filter_grows_with_distinct_values_not_rows():
+    """One In() per key column: a 50 x 288 x 300 batch (4.3M rows) gives 638 literals, not
+    an Or of 4.3M Ands, which pyiceberg cannot evaluate (22 s at 5k rows, a crash at 20k)."""
     pytest.importorskip("pyiceberg")
-    from pyiceberg.expressions import And as IcebergAnd
+    from pyiceberg.expressions import And, In
 
-    df = pl.DataFrame({"k1": [1], "k2": ["a"]})
-    result = _build_key_delete_filter(["k1", "k2"], df)
+    df = (
+        pl.DataFrame({"date": list(range(50))})
+        .join(pl.DataFrame({"time": list(range(288))}), how="cross")
+        .join(pl.DataFrame({"duid": [f"u{i}" for i in range(300)]}), how="cross")
+    )
+    result = _key_prune_filter(["date", "time", "duid"], df)
 
-    assert isinstance(result, IcebergAnd)
-
-
-def test_composite_key_multiple_rows_produces_or_of_ands():
-    pytest.importorskip("pyiceberg")
-    from pyiceberg.expressions import Or
-
-    df = pl.DataFrame({"k1": [1, 2], "k2": ["a", "b"]})
-    result = _build_key_delete_filter(["k1", "k2"], df)
-
-    assert isinstance(result, Or)
+    assert isinstance(result, And)
+    ins = [result.left.left, result.left.right, result.right]
+    assert all(isinstance(e, In) for e in ins)
+    assert sum(len(e.literals) for e in ins) == 50 + 288 + 300

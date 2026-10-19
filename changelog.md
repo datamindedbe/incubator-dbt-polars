@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- Iceberg `merge` and `delete+insert` with a composite `unique_key` no longer build one pyiceberg `And` per batch row, which took minutes at a few thousand rows and crashed the process at ~20k; they prune files with one `In` per key column, anti-join the candidate files in Polars, and commit the delete and the insert in one snapshot
+
 ## v0.4.0
 
 ### Implements
