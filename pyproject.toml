@@ -57,7 +57,7 @@ dev = [
 [project.optional-dependencies]
 # Pinned: iceberg_write_utils.py uses private pyiceberg APIs
 # Test with each new adapter version to see if pyiceberg can be upgraded
-iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
+iceberg = ["pyiceberg[sql-sqlite, adlfs]==0.12.0"]
 s3 = ["dbt-polars-catalog-s3"]
 azure = ["dbt-polars-catalog-azure"]
 databricks = ["dbt-polars-catalog-databricks"]

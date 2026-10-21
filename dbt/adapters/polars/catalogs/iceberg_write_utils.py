@@ -115,8 +115,8 @@ def key_prune_filter(keys: list[str], key_rows: pl.DataFrame):
     """File-pruning predicate: a superset of the rows matching `key_rows`, never
     used to decide which rows are deleted. Float keys are left out because Iceberg
     pruning never matches NaN while the join does; nested keys have no literal.
-    Above IN_PREDICATE_LIMIT values pyiceberg skips In() for pruning but still
-    re-binds it for every data file, so a min/max range is used instead."""
+    Above IN_PREDICATE_LIMIT values pyiceberg ignores In() for pruning, so a
+    min/max range is used instead."""
     from pyiceberg.expressions import (
         AlwaysFalse,
         AlwaysTrue,
