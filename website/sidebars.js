@@ -15,6 +15,7 @@ const sidebars = {
         'catalogs/iceberg',
         'catalogs/databricks',
         'catalogs/fabric',
+        'catalogs/snowflake',
         'catalogs/custom',
       ],
     },

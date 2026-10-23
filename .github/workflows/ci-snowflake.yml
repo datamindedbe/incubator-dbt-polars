@@ -1,0 +1,43 @@
+name: CI (Snowflake)
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-snowflake-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test-snowflake:
+    name: "Test snowflake"
+    environment: snowflake
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --python 3.12 --extra snowflake
+
+      - name: Get Snowflake workload identity token
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('snowflakecomputing.com')
+            core.setSecret(token)
+            core.exportVariable('SNOWFLAKE_OIDC_TOKEN', token)
+
+      - name: Run tests
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+          SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+        run: uv run --python 3.12 pytest -n auto --profile snowflake

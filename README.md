@@ -24,6 +24,7 @@ Extra dependencies are required for cloud and Iceberg backends:
 pip install 'dbt-polars[azure]'       # Azure Blob Storage
 pip install 'dbt-polars[databricks]'  # Azure Blob Storage
 pip install 'dbt-polars[fabric]'      # Microsoft Fabric Lakehouse
+pip install 'dbt-polars[snowflake]'   # Snowflake (Iceberg tables)
 pip install 'dbt-polars[iceberg]'     # Apache Iceberg (SQLite, REST, Databricks, …)
 ```
 
@@ -40,6 +41,7 @@ dbt-polars uses **catalogs** to define where data is stored. Each catalog maps t
 | `azure` | Azure Blob Storage / ADLS Gen2 | Experimental |
 | `databricks` | Unity Catalog REST API + credential vending | Experimental |
 | `fabric` | Microsoft Fabric Lakehouse via OneLake | Experimental |
+| `snowflake` | Snowflake Horizon Catalog (Iceberg REST) | Experimental |
 
 ## Quick start
 
@@ -68,5 +70,6 @@ my_project:
 - [Iceberg catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/iceberg)
 - [Databricks catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/databricks)
 - [Fabric catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/fabric)
+- [Snowflake catalog](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/snowflake)
 - [Custom catalogs](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/custom)
 - [Python models and tests](https://datamindedbe.github.io/incubator-dbt-polars/python-models)

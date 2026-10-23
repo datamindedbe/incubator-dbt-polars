@@ -143,3 +143,31 @@ def fabric_target(schema: str) -> dict:
         "type": "polars",
         "catalogs": [fabric_catalog("primary", schema)],
     }
+
+
+def snowflake_credentials() -> dict:
+    if "SNOWFLAKE_OIDC_TOKEN" in os.environ:
+        return {
+            "credential": os.environ["SNOWFLAKE_OIDC_TOKEN"],
+            "header.X-Snowflake-Workload-Identity-Provider": "OIDC",
+        }
+    return {"credential": os.environ.get("SNOWFLAKE_PAT", "")}
+
+
+def snowflake_catalog(name: str, schema: str) -> dict:
+    return {
+        "type": "snowflake",
+        "name": name,
+        "account": os.environ.get("SNOWFLAKE_ACCOUNT", ""),
+        "database": os.environ.get("SNOWFLAKE_DATABASE", ""),
+        "role": os.environ.get("SNOWFLAKE_ROLE"),
+        **snowflake_credentials(),
+        "schema": schema,
+    }
+
+
+def snowflake_target(schema: str) -> dict:
+    return {
+        "type": "polars",
+        "catalogs": [snowflake_catalog("primary", schema)],
+    }

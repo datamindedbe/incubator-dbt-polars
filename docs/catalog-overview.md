@@ -19,7 +19,7 @@ my_project:
     dev:
       type: polars
       schema: my_schema      # required
-      catalog_type: local    # local | azure | s3 | iceberg | databricks | fabric
+      catalog_type: local    # local | azure | s3 | iceberg | databricks | fabric | snowflake
       root: ./data           # local's own option(s)
 ```
 
@@ -123,4 +123,5 @@ sources:
 - [Iceberg](catalogs/iceberg.md) — Apache Iceberg tables via pyiceberg
 - [Databricks](catalogs/databricks.md) — Unity Catalog tables via REST, compute-free (an optional SQL warehouse can persist docs into Unity Catalog's native comments)
 - [Fabric](catalogs/fabric.md) — Delta and Iceberg tables in a Microsoft Fabric Lakehouse via OneLake, compute-free
+- [Snowflake](catalogs/snowflake.md) — Snowflake-managed Iceberg tables via Horizon Catalog, compute-free
 - [Custom catalogs](catalogs/custom.md) — add your own storage backend as a separate package

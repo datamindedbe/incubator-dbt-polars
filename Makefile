@@ -1,4 +1,4 @@
-.PHONY: test-generic test xtest lint
+W.PHONY: test-generic test xtest lint
 
 test-iceberg:
 	uv run --extra iceberg pytest --profile iceberg -n 0
@@ -23,6 +23,9 @@ test-s3:
 
 test-fabric:
 	uv run --extra fabric pytest --profile fabric -n 0
+
+test-snowflake:
+	uv run --extra snowflake pytest --profile snowflake -n 0
 
 
 xtest:

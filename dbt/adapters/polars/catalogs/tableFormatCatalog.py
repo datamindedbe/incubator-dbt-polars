@@ -4,7 +4,11 @@ from abc import abstractmethod
 from dbt_common.exceptions import DbtRuntimeError
 
 import polars as pl
-from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
+from dbt.adapters.polars.catalogs.baseCatalog import (
+    BaseCatalog,
+    CatalogConfig,
+    reject_file_format,
+)
 from dbt.adapters.polars.relation import PolarsRelation
 
 SUPPORTED_TABLE_FORMATS = ("delta", "iceberg")
@@ -113,12 +117,11 @@ class TableFormatCatalog(BaseCatalog):
         return self.catalog_for_format(self.existing_format(relation))
 
     def reject_file_format(self, relation: PolarsRelation) -> None:
-        if relation.file_format is not None:
-            raise DbtRuntimeError(
-                f"file_format is not supported by the {self.config.type} catalog "
-                f"(got {relation.file_format!r} for {relation}). Remove it and use "
-                "table_format to choose between delta and iceberg."
-            )
+        reject_file_format(
+            relation,
+            self.config.type,
+            "use table_format to choose between delta and iceberg.",
+        )
 
     def validate_incremental_relation(
         self, relation: PolarsRelation, model_config: dict

@@ -10,6 +10,7 @@ from dbt.adapters.polars.catalogs.baseCatalog import (
     BaseCatalog,
     CatalogConfig,
     get_write_options,
+    reject_file_format,
 )
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
 from dbt.adapters.polars.catalogs.icebergCatalog import (
@@ -43,13 +44,16 @@ __all__ = [
     "external_location_of",
     "file_format_of",
     "get_write_options",
+    "reject_file_format",
     "resolve_catalog_plugin",
     "resolve_relative_path",
 ]
 
 EXTENSION_MODULE_PREFIX = "dbt_polars_catalog_"
 CATALOG_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-CATALOG_TYPES_INSTALLED_VIA_EXTRA = frozenset({"s3", "azure", "databricks", "fabric"})
+CATALOG_TYPES_INSTALLED_VIA_EXTRA = frozenset(
+    {"s3", "azure", "databricks", "fabric", "snowflake"}
+)
 
 
 @dataclass(frozen=True)
