@@ -42,7 +42,7 @@ class RecordingCatalog:
 
 
 def make_catalog(workspace: str = "ws", lakehouse: str = "lh", **kwargs):
-    return FabricCatalog(
+    catalog = FabricCatalog(
         FabricCatalogConfig(
             name="fabric",
             type="fabric",
@@ -53,6 +53,9 @@ def make_catalog(workspace: str = "ws", lakehouse: str = "lh", **kwargs):
         ),
         project_root=".",
     )
+    # Unit tests never authenticate against Azure
+    catalog.onelake.credential = FakeCredential()
+    return catalog
 
 
 def relation(schema: str = "analytics", identifier: str = "orders") -> PolarsRelation:
