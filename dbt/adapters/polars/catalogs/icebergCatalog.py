@@ -198,6 +198,9 @@ def _resolve_relative_uri(uri: str, prefix: str, project_root: str) -> str:
 
 class IcebergCatalog(BaseCatalog):
     config: IcebergCatalogConfig
+    # Seconds to wait between commits to the same table, for catalogs that
+    # reject a commit right after the previous one
+    min_commit_interval: float = 0
 
     def __init__(self, config: IcebergCatalogConfig, project_root: str) -> None:
         super().__init__(config)
@@ -211,6 +214,7 @@ class IcebergCatalog(BaseCatalog):
                     break
         self._catalog_properties = properties
         self._table_cache: dict[tuple[str, str], Any] = {}
+        self.last_commit_times: dict[tuple[str, str], float] = {}
         self._known_namespaces: set[str] = set()
         self._catalog_lock = threading.Lock()
 
@@ -254,8 +258,14 @@ class IcebergCatalog(BaseCatalog):
 
         for attempt in range(1, COMMIT_ATTEMPTS + 1):
             start = self._load_table(identifier).metadata.current_snapshot_id
+            since_last_commit = time.monotonic() - self.last_commit_times.get(
+                identifier, float("-inf")
+            )
+            if since_last_commit < self.min_commit_interval:
+                time.sleep(self.min_commit_interval - since_last_commit)
             try:
                 write(self._load_table(identifier))
+                self.last_commit_times[identifier] = time.monotonic()
                 return
             except CommitFailedException:
                 if attempt == COMMIT_ATTEMPTS:
@@ -268,6 +278,7 @@ class IcebergCatalog(BaseCatalog):
                     and current.snapshot_id != start
                     and current.parent_snapshot_id == start
                 ):
+                    self.last_commit_times[identifier] = time.monotonic()
                     return
                 if attempt == COMMIT_ATTEMPTS:
                     raise
@@ -584,16 +595,38 @@ class IcebergCatalog(BaseCatalog):
         self._commit(self._id(relation), apply_delta)
         self._invalidate_table_cache(self._id(relation))
 
-    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
+    def set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        column_comments: dict[str, str],
+    ) -> None:
+        tbl = self._load_table(self._id(relation))
         # Skipped when unchanged, e.g. after a table was replaced in place
-        if self._load_table(self._id(relation)).properties.get("comment") == comment:
+        if tbl.properties.get("comment") == relation_comment:
+            relation_comment = None
+        current = {field.name: field.doc for field in tbl.schema().fields}
+        changed = {
+            column: comment
+            for column, comment in column_comments.items()
+            if current.get(column) != comment
+        }
+        if relation_comment is None and not changed:
             return
 
-        def set_comment(tbl: Table) -> None:
+        def set_all(tbl: Table) -> None:
             with tbl.transaction() as tx:
-                tx.set_properties(comment=comment)
+                if relation_comment is not None:
+                    tx.set_properties(comment=relation_comment)
+                if changed:
+                    with tx.update_schema() as update:
+                        for column, comment in changed.items():
+                            update.update_column(column, doc=comment)
 
-        self._commit(self._id(relation), set_comment)
+        self._commit(self._id(relation), set_all)
+
+    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
+        self.set_comments(relation, comment, {})
 
     def get_relation_comment(self, relation: PolarsRelation) -> str | None:
         tbl = self._load_table(self._id(relation))
@@ -602,24 +635,7 @@ class IcebergCatalog(BaseCatalog):
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None:
-        current = {
-            field.name: field.doc
-            for field in self._load_table(self._id(relation)).schema().fields
-        }
-        changed = {
-            column: comment
-            for column, comment in comments.items()
-            if current.get(column) != comment
-        }
-        if not changed:
-            return
-
-        def set_comments(tbl: Table) -> None:
-            with tbl.update_schema() as update:
-                for column, comment in changed.items():
-                    update.update_column(column, doc=comment)
-
-        self._commit(self._id(relation), set_comments)
+        self.set_comments(relation, None, comments)
 
     def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
         tbl = self._load_table(self._id(relation))

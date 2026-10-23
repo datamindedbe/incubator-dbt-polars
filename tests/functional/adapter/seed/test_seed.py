@@ -93,11 +93,11 @@ class TestSeedParsing(BaseSeedParsing):
     pass
 
 
-@pytest.mark.skip_profiles("databricks", "fabric")
+@pytest.mark.skip_profiles("databricks", "fabric", "snowflake")
 class TestSeedWithExplicitCatalogParsing(BaseSeedWithExplicitCatalogParsing):
     pass
 
 
-@pytest.mark.skip_profiles("databricks", "fabric")
+@pytest.mark.skip_profiles("databricks", "fabric", "snowflake")
 class TestSeedWithExplicitCatalog(BaseSeedWithExplicitCatalog):
     pass

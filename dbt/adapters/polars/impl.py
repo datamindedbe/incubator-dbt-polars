@@ -351,25 +351,20 @@ class PolarsAdapter(BaseAdapter):
 
     # --- persist_docs ---
     @available
-    def polars_set_relation_comment(
-        self, relation: PolarsRelation, comment: str
+    def polars_set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        columns: dict[str, Any],
     ) -> None:
-        self.get_storage_catalog(relation.catalog).set_relation_comment(
-            relation, comment
-        )
-
-    @available
-    def polars_set_column_comments(
-        self, relation: PolarsRelation, columns: dict[str, Any]
-    ) -> None:
-        comments = {
+        column_comments = {
             name: info["description"]
             for name, info in columns.items()
             if info.get("description")
         }
-        if comments:
-            self.get_storage_catalog(relation.catalog).set_column_comments(
-                relation, comments
+        if relation_comment or column_comments:
+            self.get_storage_catalog(relation.catalog).set_comments(
+                relation, relation_comment or None, column_comments
             )
 
     # --- docs generate / catalog.json ---

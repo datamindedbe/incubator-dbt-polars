@@ -156,6 +156,17 @@ class BaseCatalog(ABC):
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None: ...
 
+    def set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        column_comments: dict[str, str],
+    ) -> None:
+        if relation_comment is not None:
+            self.set_relation_comment(relation, relation_comment)
+        if column_comments:
+            self.set_column_comments(relation, column_comments)
+
     @abstractmethod
     def get_relation_comment(self, relation: PolarsRelation) -> str | None: ...
 

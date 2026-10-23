@@ -35,8 +35,14 @@ class FakeCatalog:
         )
 
 
-def make_catalog(monkeypatch, states: list) -> IcebergCatalog:
-    monkeypatch.setattr(icebergCatalog.time, "sleep", lambda seconds: None)
+def make_catalog(
+    monkeypatch, states: list, sleeps: list | None = None
+) -> IcebergCatalog:
+    monkeypatch.setattr(
+        icebergCatalog.time,
+        "sleep",
+        lambda seconds: sleeps.append(seconds) if sleeps is not None else None,
+    )
     catalog = IcebergCatalog(
         IcebergCatalogConfig(name="test", type="iceberg", schema="s"), ""
     )
@@ -82,6 +88,20 @@ def test_unknown_commit_that_was_not_applied_is_retried(monkeypatch):
     catalog._commit(IDENTIFIER, write)
 
     assert len(calls) == 2
+
+
+def test_waits_for_the_minimum_interval_between_commits(monkeypatch):
+    sleeps: list[float] = []
+    catalog = make_catalog(monkeypatch, [snapshot(1, None)], sleeps)
+    catalog.min_commit_interval = 2
+    write, calls = failing_write([])
+
+    catalog._commit(IDENTIFIER, write)
+    assert sleeps == []
+    catalog._commit(IDENTIFIER, write)
+    assert len(sleeps) == 1 and 0 < sleeps[0] <= 2
+    catalog._commit(("SCHEMA", "OTHER"), write)
+    assert len(sleeps) == 1
 
 
 def test_gives_up_after_the_last_attempt(monkeypatch):

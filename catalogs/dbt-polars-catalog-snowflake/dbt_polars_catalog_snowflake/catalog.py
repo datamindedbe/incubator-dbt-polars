@@ -43,6 +43,7 @@ class SnowflakeCatalog(IcebergCatalog):
     """
 
     config: SnowflakeCatalogConfig  # type: ignore[assignment]
+    min_commit_interval = 2
 
     def __init__(self, config: SnowflakeCatalogConfig, project_root: str) -> None:
         super().__init__(config.iceberg_config(), project_root)
@@ -175,10 +176,17 @@ class SnowflakeCatalog(IcebergCatalog):
             model_config,
         )
 
-    def set_column_comments(
-        self, relation: PolarsRelation, comments: dict[str, str]
+    def set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        column_comments: dict[str, str],
     ) -> None:
-        super().set_column_comments(
+        super().set_comments(
             relation,
-            {self.column_name(column): comment for column, comment in comments.items()},
+            relation_comment,
+            {
+                self.column_name(column): comment
+                for column, comment in column_comments.items()
+            },
         )
