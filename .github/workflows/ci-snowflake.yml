@@ -27,14 +27,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --python 3.12 --extra snowflake
 
-      - name: Get Snowflake workload identity token
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const token = await core.getIDToken('snowflakecomputing.com')
-            core.setSecret(token)
-            core.exportVariable('SNOWFLAKE_OIDC_TOKEN', token)
-
       - name: Run tests
         env:
           SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
