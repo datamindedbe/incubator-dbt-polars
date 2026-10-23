@@ -21,6 +21,9 @@ test-azure:
 test-s3:
 	uv run --extra s3 pytest --profile s3 -n 0
 
+test-fabric:
+	uv run --extra fabric pytest --profile fabric -n 0
+
 
 xtest:
 	uv run pytest --profile local -n auto

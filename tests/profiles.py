@@ -125,3 +125,21 @@ def databricks_target(token: str, schema: str) -> dict:
         "type": "polars",
         "catalogs": [databricks_catalog(token, "primary", schema)],
     }
+
+
+def fabric_catalog(name: str, schema: str) -> dict:
+    return {
+        "type": "fabric",
+        "name": name,
+        "workspace": os.environ.get("FABRIC_WORKSPACE", ""),
+        "lakehouse": os.environ.get("FABRIC_LAKEHOUSE", ""),
+        "exclude_managed_identity_credential": True,
+        "schema": schema,
+    }
+
+
+def fabric_target(schema: str) -> dict:
+    return {
+        "type": "polars",
+        "catalogs": [fabric_catalog("primary", schema)],
+    }

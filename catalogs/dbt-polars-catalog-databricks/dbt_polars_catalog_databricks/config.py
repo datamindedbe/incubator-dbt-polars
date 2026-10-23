@@ -1,7 +1,5 @@
-from dbt.adapters.polars.catalogs import CatalogConfig
+from dbt.adapters.polars.catalogs import SUPPORTED_TABLE_FORMATS, CatalogConfig
 from dbt_common.exceptions import DbtRuntimeError
-
-SUPPORTED_TABLE_FORMATS = ("delta", "iceberg")
 
 
 class DatabricksCatalogConfig(CatalogConfig):

@@ -2,10 +2,6 @@
 
 Register Delta or Iceberg tables in Databricks Unity Catalog via the Databricks REST API.
 
-:::warning Enable external data access
-[External data access](https://docs.databricks.com/aws/external-access/admin) must be enabled on the metastore for dbt-polars to read and write tables.
-:::
-
 ## Supported features
 
 | Feature | Status | Remarks |
@@ -14,6 +10,16 @@ Register Delta or Iceberg tables in Databricks Unity Catalog via the Databricks 
 | Read/write Iceberg tables | ✅ | Creates managed Databricks tables |
 | Push table and column descriptions to Unity Catalog | ✅ | Requires a SQL warehouse, see [`persist_docs_http_path`](#persist_docs_http_path) |
 | Read/write Databricks views | ❌️ | |
+
+## Prerequisites
+
+* A Databricks workspace with Unity Catalog, with
+  [external data access](https://docs.databricks.com/aws/external-access/admin)
+  enabled on its metastore.
+* A Unity Catalog catalog with a managed storage location (`CREATE CATALOG ...
+  MANAGED LOCATION '...'`). Delta tables are written to its storage root.
+* Optionally, a SQL warehouse to push descriptions to Unity Catalog. No other
+  Databricks compute is used.
 
 ## Installation
 
