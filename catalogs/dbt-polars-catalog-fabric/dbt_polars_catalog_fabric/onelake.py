@@ -30,6 +30,8 @@ ONELAKE_ICEBERG_URI = "https://onelake.table.fabric.microsoft.com/iceberg"
 ONELAKE_DELTA_URI = "https://onelake.table.fabric.microsoft.com/delta"
 STORAGE_TOKEN_SCOPE = "https://storage.azure.com/.default"
 DEFAULT_SCHEMA = "dbo"
+METADATA_API_ATTEMPTS = 4
+RETRIED_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 GUID_PATTERN = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -132,6 +134,28 @@ class OneLakeClient:
 
     # ── Delta metadata API ──────────────────────────────────────────────────────
 
+    def get_with_retries(self, url: str, params: dict) -> requests.Response:
+        """GET that retries timeouts, connection errors and temporary server errors."""
+        attempt = 1
+        while True:
+            try:
+                response = requests.get(
+                    url,
+                    params=params,
+                    headers={"Authorization": f"Bearer {self.storage_token()}"},
+                    timeout=60,
+                )
+                if (
+                    response.status_code not in RETRIED_STATUS_CODES
+                    or attempt == METADATA_API_ATTEMPTS
+                ):
+                    return response
+            except (requests.Timeout, requests.ConnectionError):
+                if attempt == METADATA_API_ATTEMPTS:
+                    raise
+            time.sleep(2**attempt)
+            attempt += 1
+
     def list_metadata(self, endpoint: str, items_key: str, **params) -> list[dict]:
         """All items of a Delta metadata API list call, [] for a missing path."""
         item = lakehouse_item_path(self.config.lakehouse)
@@ -142,12 +166,7 @@ class OneLakeClient:
         params = {"catalog_name": item, **params}
         items: list[dict] = []
         while True:
-            response = requests.get(
-                url,
-                params=params,
-                headers={"Authorization": f"Bearer {self.storage_token()}"},
-                timeout=60,
-            )
+            response = self.get_with_retries(url, params)
             if response.status_code == 404 and is_missing_path(
                 response.json().get("error", {}).get("code")
             ):

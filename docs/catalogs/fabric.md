@@ -2,19 +2,22 @@
 
 Write Delta or Iceberg tables to a Microsoft Fabric Lakehouse via OneLake.
 
-:::warning Fabric capacity must be running
-The workspace's Fabric capacity must be running. OneLake is unavailable while
-the capacity is paused, so every read and write fails.
-:::
-
 ## Supported features
 
 | Feature | Status | Remarks |
 |---|---|---|
 | Read/write Delta tables | ✅ | Fabric discovers them in the Lakehouse automatically |
 | Read/write Iceberg tables | ✅ | Through OneLake's Iceberg REST catalog |
-| Table descriptions in Fabric | 🟡 | Shown for Delta tables only, from `persist_docs` |
-| Column descriptions in Fabric | ❌️ | Fabric doesn't display them |
+| Table descriptions in OneLake Catalog | 🟡 | Only supported for Delta tables |
+| Column descriptions in OneLake Catalog | ❌️ |  |
+| Read/write views | ❌️ |  |
+
+## Prerequisites
+
+* A Fabric workspace on a Fabric capacity (F or P SKU, or a Fabric trial). The
+  capacity must be running: OneLake is unavailable while it's paused.
+* A Lakehouse in that workspace with schemas enabled, which is the default for
+  new Lakehouses.
 
 ## Installation
 
@@ -93,9 +96,13 @@ The following custom model parameters are available for Fabric:
 
 ## Required permissions
 
-- The principal dbt-polars authenticates as needs the **Contributor** role, or
-  higher, on the workspace.
-- The tenant setting *Users can access data stored in OneLake with apps
-  external to Fabric* must be enabled. It is by default.
-- For a service principal, the tenant setting *Service principals can use
-  Fabric APIs* must be enabled too.
+The principal dbt-polars authenticates as needs these permissions:
+
+| Permission | On | Needed for |
+|---|---|---|
+| **Read** item permission, e.g. the Viewer workspace role or a shared Lakehouse | the Lakehouse | Accessing the Lakehouse at all |
+| **Read** OneLake security role | the schemas or tables dbt-polars reads | Reading tables, e.g. sources |
+| **ReadWrite** OneLake security role | the Lakehouse's `Tables` folder | Creating schemas |
+| **ReadWrite** OneLake security role | the schemas dbt-polars writes to | Writing tables |
+
+Granting the **Contributor** workspace role, or higher, covers all of these.

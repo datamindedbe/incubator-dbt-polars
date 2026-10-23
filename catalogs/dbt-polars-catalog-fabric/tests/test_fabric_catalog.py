@@ -80,18 +80,25 @@ def fake_delta_log(monkeypatch, configuration: dict | None) -> list[str]:
     return opened
 
 
-def fake_metadata_api(monkeypatch, pages: list[tuple[int, dict]]) -> list[dict]:
-    """Answer Delta metadata API calls with (status, body) pages, in order."""
+def fake_metadata_api(monkeypatch, pages: list) -> list[dict]:
+    """Answer Delta metadata API calls with (status, body) pages, in order.
+
+    A page that is an exception is raised instead.
+    """
     sent = []
 
     def get(url, params, headers, timeout):
         sent.append(dict(params))
-        status, body = pages[len(sent) - 1]
+        page = pages[len(sent) - 1]
+        if isinstance(page, Exception):
+            raise page
+        status, body = page
         return SimpleNamespace(
             status_code=status, ok=status == 200, json=lambda: body, text=str(body)
         )
 
     monkeypatch.setattr(onelake.requests, "get", get)
+    monkeypatch.setattr(onelake.time, "sleep", lambda seconds: None)
     return sent
 
 
@@ -236,6 +243,27 @@ def test_schemas_are_listed_through_the_metadata_api(monkeypatch):
     fake_metadata_api(monkeypatch, [(200, {"schemas": [{"name": "dbo"}]})])
 
     assert make_catalog().list_schemas() == ["dbo"]
+
+
+def test_metadata_api_retries_timeouts_and_server_errors(monkeypatch):
+    sent = fake_metadata_api(
+        monkeypatch,
+        [
+            onelake.requests.ReadTimeout("Read timed out"),
+            (503, {"error": {"code": "ServiceUnavailable"}}),
+            (200, {"schemas": [{"name": "dbo"}]}),
+        ],
+    )
+
+    assert make_catalog().list_schemas() == ["dbo"]
+    assert len(sent) == 3
+
+
+def test_metadata_api_gives_up_after_the_last_attempt(monkeypatch):
+    fake_metadata_api(monkeypatch, [onelake.requests.ReadTimeout("Read timed out")] * 4)
+
+    with pytest.raises(onelake.requests.ReadTimeout):
+        make_catalog().list_schemas()
 
 
 # ── routing ─────────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ const sidebars = {
         'catalogs/azure',
         'catalogs/iceberg',
         'catalogs/databricks',
+        'catalogs/fabric',
         'catalogs/custom',
       ],
     },
