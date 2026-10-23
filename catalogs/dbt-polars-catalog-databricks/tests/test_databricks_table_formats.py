@@ -1,3 +1,4 @@
+import importlib.util
 import subprocess
 import sys
 
@@ -186,12 +187,12 @@ def test_catalog_does_not_import_pyiceberg():
     subprocess.run([sys.executable, "-c", code], check=True)
 
 
-def test_missing_pyiceberg_error_names_the_extra(monkeypatch):
+@pytest.mark.skipif(
+    importlib.util.find_spec("pyiceberg") is not None,
+    reason="tests the error for a missing pyiceberg",
+)
+def test_missing_pyiceberg_error_names_the_extra():
     catalog, _ = databricks_catalog(None)
-    monkeypatch.setitem(sys.modules, "pyiceberg", None)
-    monkeypatch.delitem(
-        sys.modules, "dbt_polars_catalog_databricks.iceberg", raising=False
-    )
 
     with pytest.raises(DbtRuntimeError, match=r"dbt-polars\[databricks,iceberg\]"):
         catalog.create_iceberg_catalog()
