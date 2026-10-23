@@ -108,28 +108,6 @@ def get_databricks_token() -> str:
     return response.json()["token_value"]
 
 
-def iceberg_databricks_catalog(token: str, schema: str) -> dict:
-    DATABRICKS_UC_CATALOG = os.environ.get("DATABRICKS_UC_CATALOG")
-    DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
-
-    return {
-        "type": "iceberg",
-        "pyiceberg_type": "rest",
-        "name": DATABRICKS_UC_CATALOG,
-        "uri": f"{DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
-        "token": token,
-        "warehouse": DATABRICKS_UC_CATALOG,
-        "schema": schema,
-    }
-
-
-def iceberg_databricks_target(token: str, schema: str) -> dict:
-    return {
-        "type": "polars",
-        "catalogs": [iceberg_databricks_catalog(token, schema)],
-    }
-
-
 def databricks_catalog(token: str, name: str, schema: str) -> dict:
     return {
         "type": "databricks",
@@ -147,20 +125,3 @@ def databricks_target(token: str, schema: str) -> dict:
         "type": "polars",
         "catalogs": [databricks_catalog(token, "primary", schema)],
     }
-
-
-def get_databricks_pyiceberg_catalog(token: str):
-    from pyiceberg.catalog import load_catalog
-
-    DATABRICKS_UC_CATALOG = os.environ.get("DATABRICKS_UC_CATALOG")
-    DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
-
-    return load_catalog(
-        DATABRICKS_UC_CATALOG,
-        **{
-            "type": "rest",
-            "uri": f"{DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
-            "token": token,
-            "warehouse": DATABRICKS_UC_CATALOG,
-        },
-    )

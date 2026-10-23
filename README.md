@@ -34,7 +34,7 @@ dbt-polars uses **catalogs** to define where data is stored. Each catalog maps t
 |---|---|---|
 | `local` | Local filesystem | Usable |
 | `iceberg` with SQLite | Iceberg + SQLite metastore | Usable |
-| `iceberg` with REST + Databricks | Iceberg REST API (Unity Catalog) | Experimental |
+| `iceberg` with REST + Databricks or OneLake | Iceberg REST API (Unity Catalog, Microsoft Fabric OneLake) | Experimental |
 | `iceberg` with other backends | Any pyiceberg-supported backend | Experimental |
 | `azure` | Azure Blob Storage / ADLS Gen2 | Experimental |
 | `databricks` | Unity Catalog REST API + credential vending | Experimental |

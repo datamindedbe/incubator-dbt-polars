@@ -10,9 +10,7 @@ from tests.profiles import (
     azure_target,
     databricks_target,
     default_target,
-    get_databricks_pyiceberg_catalog,
     get_databricks_token,
-    iceberg_databricks_target,
     iceberg_target,
     s3_target,
 )
@@ -27,7 +25,6 @@ def pytest_addoption(parser):
         choices=[
             "local",
             "iceberg",
-            "iceberg-databricks",
             "azure",
             "s3",
             "databricks",
@@ -80,7 +77,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(scope="session")
 def databricks_token(request):
-    if request.config.option.profile not in ("iceberg-databricks", "databricks"):
+    if request.config.option.profile != "databricks":
         return None
     return get_databricks_token()
 
@@ -91,8 +88,6 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
     if profile == "iceberg":
         base = str(tmp_path_factory.mktemp("iceberg"))
         return iceberg_target(base, unique_schema)
-    if profile == "iceberg-databricks":
-        return iceberg_databricks_target(databricks_token, unique_schema)
     if profile == "azure":
         return azure_target(unique_schema)
     if profile == "s3":
@@ -193,23 +188,6 @@ def cleanup_s3_test_schemas(request):
         ]
         if objects:
             s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
-
-
-@pytest.fixture(scope="session", autouse=True)
-def cleanup_databricks_test_schemas(request, databricks_token):
-    yield
-    if request.config.option.profile != "iceberg-databricks":
-        return
-    catalog = get_databricks_pyiceberg_catalog(databricks_token)
-    for namespace in catalog.list_namespaces():
-        if not is_removable_test_schema(namespace[0]):
-            continue
-        try:
-            for table_id in catalog.list_tables(namespace):
-                catalog.purge_table(table_id)
-            catalog.drop_namespace(namespace)
-        except Exception:
-            pass
 
 
 @pytest.fixture(scope="session", autouse=True)

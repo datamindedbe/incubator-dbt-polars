@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Implements
+
+- [Databricks Catalog]: Add support for iceberg tables in the Databricks catalog.
+
 ### Fixes
 
 - [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/incubator-dbt-polars/issues/45)).

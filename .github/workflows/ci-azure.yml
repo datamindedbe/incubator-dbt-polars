@@ -2,12 +2,15 @@ name: CI (Azure)
 
 on:
   pull_request:
-    types: [labeled]
+
+concurrency:
+  group: ci-azure-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   test-azure:
     name: "Test azure"
-    if: github.event.label.name == 'azure verified'
+    environment: azure
     runs-on: ubuntu-latest
     permissions:
       id-token: write

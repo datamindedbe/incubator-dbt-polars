@@ -1,35 +1,42 @@
+import pytest
+
 from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
-from dbt_polars_catalog_databricks.delta import (
-    DatabricksDeltaCatalog,
+from dbt_polars_catalog_databricks.delta import DatabricksDeltaCatalog
+from dbt_polars_catalog_databricks.unity_catalog import (
+    UnityCatalogClient,
     alter_column_comments_sql,
     comment_on_table_sql,
     quote_identifier,
     quoted_full_name,
+    table_format_of,
 )
 
 TABLE_URI = "abfss://container@account.dfs.core.windows.net/schema/table"
+TABLE_INFO = {
+    "full_name": "main.schema.table",
+    "table_id": "table-id",
+    "storage_location": TABLE_URI,
+}
 
 
 def catalog_recording_credential_requests():
-    catalog = DatabricksDeltaCatalog(
-        DatabricksCatalogConfig(
-            name="uc", type="databricks", schema="schema", catalog_name="main"
-        ),
-        project_root=".",
+    config = DatabricksCatalogConfig(
+        name="uc", type="databricks", schema="schema", catalog_name="main"
     )
+    catalog = DatabricksDeltaCatalog(config, UnityCatalogClient(config))
     requests = []
 
-    def fake_unity_catalog_request(method, path, *, query=None, body=None):
+    def fake_request(method, path, *, query=None, body=None):
         requests.append(body)
         return {"azure_user_delegation_sas": {"sas_token": "token"}}
 
-    catalog.unity_catalog_request = fake_unity_catalog_request
+    catalog.unity_catalog.request = fake_request
     return catalog, requests
 
 
 def test_registered_table_read_requests_read_credentials():
     catalog, requests = catalog_recording_credential_requests()
-    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+    catalog.unity_catalog.remember_table(TABLE_INFO)
 
     catalog.get_storage_options(TABLE_URI, read_only=True)
 
@@ -38,7 +45,7 @@ def test_registered_table_read_requests_read_credentials():
 
 def test_registered_table_write_requests_read_write_credentials():
     catalog, requests = catalog_recording_credential_requests()
-    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+    catalog.unity_catalog.remember_table(TABLE_INFO)
 
     catalog.get_storage_options(TABLE_URI)
 
@@ -55,7 +62,7 @@ def test_unregistered_path_read_requests_path_read_credentials():
 
 def test_credentials_are_cached_per_operation():
     catalog, requests = catalog_recording_credential_requests()
-    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+    catalog.unity_catalog.remember_table(TABLE_INFO)
 
     catalog.get_storage_options(TABLE_URI, read_only=True)
     catalog.get_storage_options(TABLE_URI, read_only=True)
@@ -66,12 +73,27 @@ def test_credentials_are_cached_per_operation():
 
 def test_read_reuses_cached_read_write_credentials():
     catalog, requests = catalog_recording_credential_requests()
-    catalog.remember_table("main.schema.table", "table-id", TABLE_URI)
+    catalog.unity_catalog.remember_table(TABLE_INFO)
 
     catalog.get_storage_options(TABLE_URI)
     catalog.get_storage_options(TABLE_URI, read_only=True)
 
     assert [r["operation"] for r in requests] == ["READ_WRITE"]
+
+
+def test_dropping_managed_delta_table_only_unregisters_it():
+    catalog, _ = catalog_recording_credential_requests()
+    table = catalog.unity_catalog.remember_table(
+        {**TABLE_INFO, "table_type": "MANAGED"}
+    )
+    requests = []
+    catalog.unity_catalog.request = lambda method, path, *, query=None, body=None: (
+        requests.append((method, path))
+    )
+
+    catalog.drop_table(table)
+
+    assert requests == [("DELETE", "/api/2.1/unity-catalog/tables/main.schema.table")]
 
 
 def test_quote_identifier_wraps_in_backticks():
@@ -130,3 +152,35 @@ def test_alter_column_comments_sql_escapes_backtick_in_column_name():
     name = quoted_full_name("cat", "schema", "table")
     sql = alter_column_comments_sql(name, {"weird`col": "a comment"})
     assert "`weird``col`" in sql
+
+
+UNIFORM_PROPERTIES = {"delta.universalFormat.enabledFormats": "iceberg"}
+
+
+@pytest.mark.parametrize(
+    ("info", "table_format"),
+    [
+        ({"data_source_format": "DELTA", "table_type": "EXTERNAL"}, "delta"),
+        ({"data_source_format": "ICEBERG", "table_type": "MANAGED"}, "iceberg"),
+        ({"data_source_format": "PARQUET", "table_type": "EXTERNAL"}, "parquet"),
+        ({"table_type": "VIEW"}, "delta"),
+        (
+            {
+                "data_source_format": "DELTA",
+                "table_type": "MANAGED",
+                "properties": UNIFORM_PROPERTIES,
+            },
+            "iceberg",
+        ),
+        (
+            {
+                "data_source_format": "DELTA",
+                "table_type": "EXTERNAL",
+                "properties": UNIFORM_PROPERTIES,
+            },
+            "delta",
+        ),
+    ],
+)
+def test_table_format_of(info, table_format):
+    assert table_format_of(info) == table_format

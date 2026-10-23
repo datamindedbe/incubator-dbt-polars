@@ -1,8 +1,5 @@
 .PHONY: test-generic test xtest lint
 
-test-iceberg-databricks:
-	uv run --extra iceberg pytest --profile iceberg-databricks -n 0
-
 test-iceberg:
 	uv run --extra iceberg pytest --profile iceberg -n 0
 
