@@ -1,7 +1,7 @@
 from dbt.adapters.polars.catalogs import CatalogConfig
 from dbt_common.exceptions import DbtRuntimeError
 
-SUPPORTED_TABLE_FORMATS = ("delta",)
+SUPPORTED_TABLE_FORMATS = ("delta", "iceberg")
 
 
 class DatabricksCatalogConfig(CatalogConfig):
@@ -22,6 +22,10 @@ class DatabricksCatalogConfig(CatalogConfig):
     `ALTER TABLE ... ALTER COLUMN ... COMMENT` - the only way to set those,
     since Unity Catalog's REST API has no endpoint for it at all. Left unset,
     docs never reach Unity Catalog itself.
+
+    `default_table_format` (alias `table_format`): the format of new tables,
+    `delta` or `iceberg`. Models override it with their own `table_format`
+    config.
     """
 
     def __init__(
@@ -33,20 +37,28 @@ class DatabricksCatalogConfig(CatalogConfig):
         catalog_name: str,
         host: str | None = None,
         persist_docs_http_path: str | None = None,
-        table_format: str = "delta",
+        default_table_format: str | None = None,
+        table_format: str | None = None,
         **kwargs: object,
     ) -> None:
-        if table_format not in SUPPORTED_TABLE_FORMATS:
+        if default_table_format and table_format:
             raise DbtRuntimeError(
-                f"Databricks catalog '{name}': table_format '{table_format}' is not "
-                f"supported, only {', '.join(SUPPORTED_TABLE_FORMATS)} for now."
+                f"Databricks catalog '{name}': set default_table_format or its "
+                "alias table_format, not both."
+            )
+        default_table_format = default_table_format or table_format or "delta"
+        if default_table_format not in SUPPORTED_TABLE_FORMATS:
+            raise DbtRuntimeError(
+                f"Databricks catalog '{name}': default_table_format "
+                f"'{default_table_format}' is not supported, use one of: "
+                f"{', '.join(SUPPORTED_TABLE_FORMATS)}."
             )
         self.name = name
         self.type = type
         self.schema = schema
         self.catalog_name = catalog_name
         self.persist_docs_http_path = persist_docs_http_path
-        self.table_format = table_format
+        self.default_table_format = default_table_format
         self.sdk_kwargs: dict[str, object] = {
             **({"host": host} if host else {}),
             **kwargs,

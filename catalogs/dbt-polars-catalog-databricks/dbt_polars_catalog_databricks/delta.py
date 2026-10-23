@@ -1,24 +1,20 @@
-import threading
 import time
 
 import polars as pl
-from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
-from dbt.adapters.polars.catalogs import (
-    PolarsRelation,
-    StorageCatalog,
-    file_format_of,
-)
+from dbt.adapters.polars.catalogs import PolarsRelation, StorageCatalog
 from dbt_common.exceptions import DbtRuntimeError
 
 from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
 from dbt_polars_catalog_databricks.databricks_types import polars_dtype_to_uc_type
+from dbt_polars_catalog_databricks.unity_catalog import (
+    UnityCatalogClient,
+    UnityCatalogTable,
+    is_already_exists_error,
+)
 
 logger = AdapterLogger("polars")
 
-# Credential-vending response field name -> polars/deltalake storage_options mapper.
-# Key names chosen to match what AzureBlobStorageCatalog already uses for the same
-# concepts (sas_token/bearer_token), for consistency within this repo.
 CREDENTIAL_RESPONSE_FIELDS = (
     "aws_temp_credentials",
     "azure_user_delegation_sas",
@@ -55,78 +51,21 @@ def map_vended_credentials(response: dict) -> dict[str, str]:
     )
 
 
-def is_already_exists_error(exc: Exception, error_code: str) -> bool:
-    """True if `exc` represents Unity Catalog rejecting a duplicate create.
-
-    Unity Catalog isn't consistent about the HTTP status for this across
-    resource types: schema creation returns 400 with `error_code=
-    SCHEMA_ALREADY_EXISTS` (confirmed against a live workspace), while other
-    endpoints may use the dedicated 409 `AlreadyExists` exception - check both.
-    """
-    from databricks.sdk.errors import AlreadyExists
-
-    if isinstance(exc, AlreadyExists):
-        return True
-    return getattr(exc, "error_code", None) == error_code
-
-
-def quote_identifier(name: str) -> str:
-    return "`" + name.replace("`", "``") + "`"
-
-
-def quoted_full_name(catalog_name: str, schema: str, identifier: str) -> str:
-    return ".".join(quote_identifier(p) for p in (catalog_name, schema, identifier))
-
-
-def escape_sql_string(value: str) -> str:
-    return value.replace("'", "''")
-
-
-def comment_on_table_sql(quoted_name: str, comment: str) -> str:
-    return f"COMMENT ON TABLE {quoted_name} IS '{escape_sql_string(comment)}'"
-
-
-def alter_column_comments_sql(quoted_name: str, comments: dict[str, str]) -> str:
-    column_changes = ", ".join(
-        f"{quote_identifier(column)} COMMENT '{escape_sql_string(comment)}'"
-        for column, comment in comments.items()
-    )
-    return f"ALTER TABLE {quoted_name} ALTER COLUMN {column_changes}"
-
-
 class DatabricksDeltaCatalog(StorageCatalog):
     """Registers external Delta tables in Unity Catalog via the REST API.
 
     No Databricks compute/SQL warehouse is ever used: schema/table management and
-    credential vending go straight to the Unity Catalog REST API (authenticated via
-    databricks-sdk's `WorkspaceClient`, called through its low-level `api_client`
-    rather than its per-resource wrappers, since those don't always expose every
-    documented request/response field - e.g. table creation's `comment`).
-
-    Data reads/writes use Unity-Catalog-vended credentials: table-based (by
-    table_id) for any table already registered (works for managed and external
-    tables alike, gated by `EXTERNAL USE SCHEMA`), and path-based only to
-    bootstrap the very first write of a brand-new table that has no table_id yet
-    (gated by `EXTERNAL USE LOCATION`). Reads request READ-only credentials,
-    since Unity Catalog refuses READ_WRITE on managed tables.
+    credential vending go straight to the Unity Catalog REST API.
     """
 
     config: DatabricksCatalogConfig
 
-    def __init__(self, config: DatabricksCatalogConfig, project_root: str) -> None:
+    def __init__(
+        self, config: DatabricksCatalogConfig, unity_catalog: UnityCatalogClient
+    ) -> None:
         super().__init__(config)
-        self.client = None
-        self.lock = threading.Lock()
-        self.registered_tables: set[str] = set()
-        self.known_schemas: set[str] = set()
+        self.unity_catalog = unity_catalog
         self.catalog_root: str | None = None
-        # full_name -> (table_id, storage_location)
-        self.table_metadata: dict[str, tuple[str, str]] = {}
-        # full_name confirmed not registered yet, so a fresh write_relation
-        # doesn't re-check via REST 2-3x over before it registers the table
-        self.confirmed_not_registered: set[str] = set()
-        # storage uri -> table_id, so get_storage_options(uri) can find the table
-        self.storage_uri_to_table_id: dict[str, str] = {}
         self.uris_pending_creation: set[str] = set()
         # (uri or table_id, operation) -> (storage_options, expiry)
         self.path_credential_cache: dict[
@@ -136,69 +75,12 @@ class DatabricksDeltaCatalog(StorageCatalog):
             tuple[str, str], tuple[dict[str, str], float]
         ] = {}
 
-    @property
-    def workspace_client(self):
-        if self.client is None:
-            with self.lock:
-                if self.client is None:
-                    from databricks.sdk import WorkspaceClient
-
-                    self.client = WorkspaceClient(**self.config.sdk_kwargs)
-        return self.client
-
-    # ── raw Unity Catalog REST access ───────────────────────────────────────────
-
-    def unity_catalog_request(
-        self,
-        method: str,
-        path: str,
-        *,
-        query: dict | None = None,
-        body: dict | None = None,
-    ) -> dict:
-        headers = {"Accept": "application/json"}
-        if body is not None:
-            headers["Content-Type"] = "application/json"
-        workspace_id = self.workspace_client.config.workspace_id
-        if workspace_id:
-            headers["X-Databricks-Workspace-Id"] = workspace_id
-        return self.workspace_client.api_client.do(
-            method, path, query=query, body=body, headers=headers
-        )
-
-    def unity_catalog_pages(
-        self, path: str, *, query: dict | None = None, items_key: str
-    ):
-        """Yield items across every page of a paginated Unity Catalog list endpoint."""
-        query = dict(query or {})
-        query.setdefault("max_results", 0)
-        while True:
-            response = self.unity_catalog_request("GET", path, query=query)
-            yield from response.get(items_key, [])
-            next_page_token = response.get("next_page_token")
-            if not next_page_token:
-                return
-            query["page_token"] = next_page_token
-
-    # ── naming helpers ─────────────────────────────────────────────────────────
-
-    def table_full_name(self, relation: PolarsRelation) -> str:
-        return f"{self.config.catalog_name}.{relation.schema}.{relation.identifier}"
-
-    def quoted_full_name(self, relation: PolarsRelation) -> str:
-        if relation.schema is None or relation.identifier is None:
-            raise DbtRuntimeError(f"Relation {relation} is missing a schema/identifier")
-        return quoted_full_name(
-            self.config.catalog_name, relation.schema, relation.identifier
-        )
-
-    def schema_full_name(self, schema: str) -> str:
-        return f"{self.config.catalog_name}.{schema}"
+    # ── storage locations ──────────────────────────────────────────────────────
 
     def catalog_storage_root(self) -> str:
         if self.catalog_root is not None:
             return self.catalog_root
-        info = self.unity_catalog_request(
+        info = self.unity_catalog.request(
             "GET", f"/api/2.1/unity-catalog/catalogs/{self.config.catalog_name}"
         )
         root = (info.get("storage_root") or "").rstrip("/")
@@ -213,43 +95,12 @@ class DatabricksDeltaCatalog(StorageCatalog):
         return root
 
     def schema_storage_root(self, schema: str) -> str:
-        # Computed directly from the catalog's own storage_root rather than
-        # setting/reading one on the schema itself - doing that would require
-        # the CREATE MANAGED STORAGE privilege on top of EXTERNAL_USE_LOCATION/
-        # CREATE_EXTERNAL_TABLE, which this catalog otherwise never needs.
         return f"{self.catalog_storage_root()}/{schema}"
 
-    def remember_table(
-        self, full_name: str, table_id: str, storage_location: str
-    ) -> None:
-        self.table_metadata[full_name] = (table_id, storage_location)
-        self.storage_uri_to_table_id[storage_location] = table_id
-        self.registered_tables.add(full_name)
-        self.confirmed_not_registered.discard(full_name)
-
-    def registered_table_info(self, relation: PolarsRelation) -> tuple[str, str] | None:
-        """Return (table_id, storage_location) for an already-registered table."""
-        full = self.table_full_name(relation)
-        if full in self.table_metadata:
-            return self.table_metadata[full]
-        if full in self.confirmed_not_registered:
-            return None
-        from databricks.sdk.errors import NotFound
-
-        try:
-            info = self.unity_catalog_request(
-                "GET", f"/api/2.1/unity-catalog/tables/{full}"
-            )
-        except NotFound:
-            self.confirmed_not_registered.add(full)
-            return None
-        self.remember_table(full, info["table_id"], info["storage_location"])
-        return self.table_metadata[full]
-
     def get_uri(self, relation: PolarsRelation) -> str:
-        info = self.registered_table_info(relation)
-        if info is not None:
-            return info[1]
+        table = self.unity_catalog.registered_table(relation)
+        if table is not None:
+            return table.storage_location
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
         return f"{self.schema_storage_root(relation.schema)}/{relation.identifier}"
@@ -259,7 +110,7 @@ class DatabricksDeltaCatalog(StorageCatalog):
     def get_storage_options(
         self, uri: str, read_only: bool = False
     ) -> dict[str, str] | None:
-        table_id = self.storage_uri_to_table_id.get(uri)
+        table_id = self.unity_catalog.storage_uri_to_table_id.get(uri)
         if table_id is not None:
             return self.vend_table_credentials(
                 table_id, "READ" if read_only else "READ_WRITE"
@@ -285,7 +136,7 @@ class DatabricksDeltaCatalog(StorageCatalog):
             return cached
 
         now = time.time()
-        response = self.unity_catalog_request("POST", endpoint, body=body)
+        response = self.unity_catalog.request("POST", endpoint, body=body)
         opts = map_vended_credentials(response)
         expiry = (
             response["expiration_time"] / 1000.0
@@ -327,154 +178,45 @@ class DatabricksDeltaCatalog(StorageCatalog):
             {"url": uri, "operation": operation},
         )
 
-    # ── schema management ────────────────────────────────────────────────────────
+    # ── schema management and listing ──────────────────────────────────────────
 
     def create_schema(self, relation: PolarsRelation) -> None:
-        schema = relation.schema
-        if schema is None:
-            raise DbtRuntimeError(f"Relation {relation} is missing a schema")
-        if schema in self.known_schemas:
-            return
-        from databricks.sdk.errors import DatabricksError
-
-        logger.debug(f"Creating schema {relation.catalog}/{schema}")
-        try:
-            self.unity_catalog_request(
-                "POST",
-                "/api/2.1/unity-catalog/schemas",
-                body={"name": schema, "catalog_name": self.config.catalog_name},
-            )
-        except DatabricksError as exc:
-            # A concurrent creator (another thread in this run, or an entirely
-            # different process) may have won the race using an error shape
-            # is_already_exists_error doesn't recognize - confirm via a fresh
-            # GET rather than assuming failure.
-            if not is_already_exists_error(
-                exc, "SCHEMA_ALREADY_EXISTS"
-            ) and not self.schema_exists_now(schema):
-                raise
-        self.known_schemas.add(schema)
-
-    def schema_exists_now(self, schema: str) -> bool:
-        from databricks.sdk.errors import NotFound
-
-        try:
-            self.unity_catalog_request(
-                "GET", f"/api/2.1/unity-catalog/schemas/{self.schema_full_name(schema)}"
-            )
-            return True
-        except NotFound:
-            return False
+        self.unity_catalog.create_schema(relation)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
-        from databricks.sdk.errors import NotFound
-
-        schema = relation.schema
-        if schema is None:
-            raise DbtRuntimeError(f"Relation {relation} is missing a schema")
-        logger.debug(f"Dropping schema {relation.catalog}/{schema}")
-        try:
-            tables = list(
-                self.unity_catalog_pages(
-                    "/api/2.1/unity-catalog/tables",
-                    query={
-                        "catalog_name": self.config.catalog_name,
-                        "schema_name": schema,
-                    },
-                    items_key="tables",
-                )
-            )
-            for t in tables:
-                self.drop_registered_table(
-                    t["full_name"], t["table_id"], t["storage_location"]
-                )
-            self.unity_catalog_request(
-                "DELETE",
-                f"/api/2.1/unity-catalog/schemas/{self.schema_full_name(schema)}",
-                query={"force": True},
-            )
-        except NotFound:
-            pass
-        self.known_schemas.discard(schema)
+        self.unity_catalog.drop_schema(relation, self.drop_table)
 
     def list_schemas(self) -> list[str]:
-        return [
-            s["name"]
-            for s in self.unity_catalog_pages(
-                "/api/2.1/unity-catalog/schemas",
-                query={"catalog_name": self.config.catalog_name},
-                items_key="schemas",
-            )
-        ]
-
-    # ── table existence / listing ───────────────────────────────────────────────
+        return self.unity_catalog.list_schemas()
 
     def table_exists(self, relation: PolarsRelation) -> bool:
-        return self.registered_table_info(relation) is not None
+        return self.unity_catalog.registered_table(relation) is not None
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
     ) -> list[PolarsRelation]:
-        if schema_relation.schema is None:
-            raise DbtRuntimeError(f"Relation {schema_relation} is missing a schema")
-        from databricks.sdk.errors import NotFound
-
-        try:
-            tables = list(
-                self.unity_catalog_pages(
-                    "/api/2.1/unity-catalog/tables",
-                    query={
-                        "catalog_name": self.config.catalog_name,
-                        "schema_name": schema_relation.schema,
-                    },
-                    items_key="tables",
-                )
-            )
-        except NotFound:
-            return []
-
-        result = []
-        for t in tables:
-            self.remember_table(t["full_name"], t["table_id"], t["storage_location"])
-            result.append(
-                schema_relation.create(
-                    database=schema_relation.database,
-                    schema=schema_relation.schema,
-                    identifier=t["name"],
-                    type=RelationType.Table,
-                    catalog=schema_relation.catalog,
-                )
-            )
-        return result
+        return self.unity_catalog.list_relations(schema_relation)
 
     # ── drop ─────────────────────────────────────────────────────────────────────
 
     def drop_relation(self, relation: PolarsRelation) -> None:
-        full = self.table_full_name(relation)
-        info = self.registered_table_info(relation)
-        logger.debug(f"Dropping table if exists {full}")
-        if info is None:
+        logger.debug(
+            f"Dropping table if exists {self.unity_catalog.table_full_name(relation)}"
+        )
+        table = self.unity_catalog.registered_table(relation)
+        if table is not None:
+            self.drop_table(table)
+
+    def drop_table(self, table: UnityCatalogTable) -> None:
+        if table.managed:
+            # Unity Catalog removes a managed table's data itself
+            self.unity_catalog.delete_table(table.full_name)
             return
-        table_id, uri = info
-        self.drop_registered_table(full, table_id, uri)
-
-    def drop_registered_table(self, full_name: str, table_id: str, uri: str) -> None:
-        from databricks.sdk.errors import NotFound
-
-        opts = self.vend_table_credentials(table_id, "READ_WRITE")
-        try:
-            self.unity_catalog_request(
-                "DELETE", f"/api/2.1/unity-catalog/tables/{full_name}"
-            )
-        except NotFound:
-            pass
-        self.registered_tables.discard(full_name)
-        self.table_metadata.pop(full_name, None)
-        self.confirmed_not_registered.add(full_name)
-        self.storage_uri_to_table_id.pop(uri, None)
-        self.table_credential_cache.pop((table_id, "READ"), None)
-        self.table_credential_cache.pop((table_id, "READ_WRITE"), None)
-        self.delete_storage(uri, opts)
+        opts = self.vend_table_credentials(table.table_id, "READ_WRITE")
+        self.unity_catalog.delete_table(table.full_name)
+        self.table_credential_cache.pop((table.table_id, "READ"), None)
+        self.table_credential_cache.pop((table.table_id, "READ_WRITE"), None)
+        self.delete_storage(table.storage_location, opts)
 
     def delete_storage(self, uri: str, opts: dict[str, str]) -> None:
         from deltalake import DeltaTable
@@ -502,12 +244,6 @@ class DatabricksDeltaCatalog(StorageCatalog):
         partition_by: list[str],
         model_config: dict | None = None,
     ) -> None:
-        if file_format_of(relation) != "delta":
-            raise DbtRuntimeError(
-                "file_format is not a supported config for the databricks "
-                f"catalog (got {file_format_of(relation)!r} for {relation}) - "
-                "tables are always registered as Delta in Unity Catalog."
-            )
         model_config = model_config or {}
         self.create_schema(relation)
 
@@ -535,7 +271,7 @@ class DatabricksDeltaCatalog(StorageCatalog):
     ) -> None:
         from databricks.sdk.errors import DatabricksError
 
-        full = self.table_full_name(relation)
+        full = self.unity_catalog.table_full_name(relation)
         schema = (
             data.collect_schema() if isinstance(data, pl.LazyFrame) else data.schema
         )
@@ -565,89 +301,20 @@ class DatabricksDeltaCatalog(StorageCatalog):
         }
 
         try:
-            info = self.unity_catalog_request(
+            info = self.unity_catalog.request(
                 "POST", "/api/2.1/unity-catalog/tables", body=body
             )
         except DatabricksError as exc:
             if not is_already_exists_error(exc, "TABLE_ALREADY_EXISTS"):
                 raise
-            info = self.unity_catalog_request(
+            info = self.unity_catalog.request(
                 "GET", f"/api/2.1/unity-catalog/tables/{full}"
             )
 
-        self.remember_table(full, info["table_id"], info.get("storage_location") or uri)
-
-    # ── comments ─────────────────────────────────────────────────────────────────
-
-    def persist_docs_warehouse_id(self) -> str:
-        http_path = (self.config.persist_docs_http_path or "").rstrip("/")
-        warehouse_id = http_path.rsplit("/", 1)[-1] if http_path else ""
-        if not warehouse_id:
-            raise DbtRuntimeError(
-                f"Catalog {self.config.name!r} has an invalid "
-                f"persist_docs_http_path {self.config.persist_docs_http_path!r}; "
-                "expected something like /sql/1.0/warehouses/<warehouse_id>."
-            )
-        return warehouse_id
-
-    def run_sql_statement(self, statement: str) -> None:
-        from databricks.sdk.service.sql import StatementState
-
-        warehouse_id = self.persist_docs_warehouse_id()
-        response = self.workspace_client.statement_execution.execute_statement(
-            statement=statement, warehouse_id=warehouse_id, wait_timeout="30s"
-        )
-        if response.status.state != StatementState.SUCCEEDED:
-            error = response.status.error
-            raise DbtRuntimeError(
-                f"Failed to run SQL on warehouse {warehouse_id}: "
-                f"{error.message if error else response.status.state}"
-            )
-
-    def current_unity_catalog_docs(
-        self, full_name: str
-    ) -> tuple[str | None, dict[str, str]]:
-        info = self.unity_catalog_request(
-            "GET", f"/api/2.1/unity-catalog/tables/{full_name}"
-        )
-        comment = info.get("comment")
-        column_comments = {
-            c["name"]: c["comment"] for c in info.get("columns", []) if c.get("comment")
-        }
-        return comment, column_comments
-
-    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        # Always keep the Delta table's own metadata current — it's freely
-        # updatable and is what dbt's own `docs generate`/catalog.json reads back
-        # (see get_relation_comment/get_column_comments, inherited unchanged below).
-        super().set_relation_comment(relation, comment)
-
-        if not self.config.persist_docs_http_path:
-            return
-        full = self.table_full_name(relation)
-        current_comment, _ = self.current_unity_catalog_docs(full)
-        if (current_comment or "") == (comment or ""):
-            return
-        self.run_sql_statement(
-            comment_on_table_sql(self.quoted_full_name(relation), comment)
-        )
-
-    def set_column_comments(
-        self, relation: PolarsRelation, comments: dict[str, str]
-    ) -> None:
-        super().set_column_comments(relation, comments)
-
-        if not self.config.persist_docs_http_path:
-            return
-        full = self.table_full_name(relation)
-        _, current_columns = self.current_unity_catalog_docs(full)
-        diffs = {
-            col: desired
-            for col, desired in comments.items()
-            if (current_columns.get(col) or "") != (desired or "")
-        }
-        if not diffs:
-            return
-        self.run_sql_statement(
-            alter_column_comments_sql(self.quoted_full_name(relation), diffs)
+        self.unity_catalog.remember_table(
+            {
+                "full_name": full,
+                **info,
+                "storage_location": info.get("storage_location") or uri,
+            }
         )

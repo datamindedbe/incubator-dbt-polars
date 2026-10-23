@@ -29,6 +29,8 @@ __all__ = [
     "BaseCatalog",
     "CatalogConfig",
     "CatalogPlugin",
+    "IcebergCatalog",
+    "IcebergCatalogConfig",
     "PolarsRelation",
     "StorageCatalog",
     "create_catalog",
