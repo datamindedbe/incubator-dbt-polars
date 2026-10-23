@@ -5,7 +5,6 @@ from dbt_common.exceptions import DbtRuntimeError
 
 import polars as pl
 from dbt.adapters.polars.catalogs.baseCatalog import BaseCatalog, CatalogConfig
-from dbt.adapters.polars.catalogs.storageCatalog import file_format_of
 from dbt.adapters.polars.relation import PolarsRelation
 
 SUPPORTED_TABLE_FORMATS = ("delta", "iceberg")
@@ -50,10 +49,8 @@ class TableFormatCatalog(BaseCatalog):
     def load_iceberg_catalog(self) -> BaseCatalog:
         """Import the Iceberg catalog module here, so pyiceberg loads lazily."""
 
-    def after_write(
-        self, relation: PolarsRelation, table_format: str, created: bool
-    ) -> None:
-        pass
+    def after_create(self, relation: PolarsRelation, table_format: str) -> None:
+        """Called after write_relation created a new table."""
 
     def push_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
         pass
@@ -115,9 +112,18 @@ class TableFormatCatalog(BaseCatalog):
     def catalog_for_existing(self, relation: PolarsRelation) -> BaseCatalog:
         return self.catalog_for_format(self.existing_format(relation))
 
+    def reject_file_format(self, relation: PolarsRelation) -> None:
+        if relation.file_format is not None:
+            raise DbtRuntimeError(
+                f"file_format is not supported by the {self.config.type} catalog "
+                f"(got {relation.file_format!r} for {relation}). Remove it and use "
+                "table_format to choose between delta and iceberg."
+            )
+
     def validate_incremental_relation(
         self, relation: PolarsRelation, model_config: dict
     ) -> None:
+        self.reject_file_format(relation)
         table_format = self.existing_format(relation)
         requested = self.requested_format(model_config)
         if requested != table_format:
@@ -144,12 +150,7 @@ class TableFormatCatalog(BaseCatalog):
         partition_by: list[str],
         model_config: dict | None = None,
     ) -> None:
-        if file_format_of(relation) != "delta":
-            raise DbtRuntimeError(
-                f"file_format is not a supported config for the {self.config.type} "
-                f"catalog (got {file_format_of(relation)!r} for {relation}) - "
-                "use table_format to choose between delta and iceberg."
-            )
+        self.reject_file_format(relation)
         model_config = model_config or {}
         table_format = self.requested_format(model_config)
         existing_format = self.existing_table_format(relation)
@@ -161,7 +162,8 @@ class TableFormatCatalog(BaseCatalog):
         self.catalog_for_format(table_format).write_relation(
             relation, data, partition_by, model_config
         )
-        self.after_write(relation, table_format, created=existing_format is None)
+        if existing_format is None:
+            self.after_create(relation, table_format)
 
     def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
         return self.catalog_for_existing(relation).get_relation(relation)
@@ -225,6 +227,7 @@ class TableFormatCatalog(BaseCatalog):
         scd_id_col: str = "dbt_scd_id",
         model_config: dict | None = None,
     ) -> None:
+        self.reject_file_format(relation)
         self.catalog_for_existing(relation).apply_snapshot_delta(
             relation, rows_to_close, rows_to_insert, scd_id_col, model_config
         )

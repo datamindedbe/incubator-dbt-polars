@@ -6,10 +6,16 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+import requests
+from azure.core.exceptions import ResourceNotFoundError
+from azure.identity import DefaultAzureCredential
+from azure.storage.filedatalake import DataLakeServiceClient
 from dbt.adapters.contracts.relation import RelationType
 from dbt.adapters.events.logging import AdapterLogger
 from dbt.adapters.polars.catalogs import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
+from deltalake import DeltaTable
+from deltalake.exceptions import TableNotFoundError
 
 from dbt_polars_catalog_fabric.config import FabricCatalogConfig
 
@@ -21,6 +27,7 @@ logger = AdapterLogger("polars")
 ONELAKE_DFS_HOST = "onelake.dfs.fabric.microsoft.com"
 ONELAKE_BLOB_HOST = "onelake.blob.fabric.microsoft.com"
 ONELAKE_ICEBERG_URI = "https://onelake.table.fabric.microsoft.com/iceberg"
+ONELAKE_DELTA_URI = "https://onelake.table.fabric.microsoft.com/delta"
 STORAGE_TOKEN_SCOPE = "https://storage.azure.com/.default"
 DEFAULT_SCHEMA = "dbo"
 GUID_PATTERN = re.compile(
@@ -35,17 +42,13 @@ def lakehouse_item_path(lakehouse: str) -> str:
     return f"{lakehouse}.Lakehouse"
 
 
-def is_missing_path(exc: Exception) -> bool:
+def is_missing_path(error_code: str | None) -> bool:
     """True only for a path that really doesn't exist.
 
     OneLake also answers 404 when e.g. the Fabric capacity is paused
     (error code `NotFound`), which must not be mistaken for an absent table.
     """
-    return getattr(exc, "error_code", None) == "PathNotFound"
-
-
-def onelake_error(exc: Exception) -> DbtRuntimeError:
-    return DbtRuntimeError(f"OneLake request failed: {exc}")
+    return error_code == "PathNotFound"
 
 
 def schema_of(relation: PolarsRelation) -> str:
@@ -61,17 +64,18 @@ def identifier_of(relation: PolarsRelation) -> str:
 
 
 class OneLakeClient:
-    """Lakehouse schemas and tables as OneLake directories.
+    """Lakehouse schemas and tables in OneLake.
 
     Fabric discovers tables under `Tables/<schema>/<table>` by itself, so there
-    is no registration step. Every call authenticates as the principal resolved
-    by DefaultAzureCredential.
+    is no registration step: schemas and tables are created and dropped as
+    OneLake directories, and listed through OneLake's Delta metadata API. Every
+    call authenticates as the principal resolved by DefaultAzureCredential.
     """
 
     def __init__(self, config: FabricCatalogConfig) -> None:
         self.config = config
         self.lock = threading.RLock()
-        self.credential = None
+        self.credential: DefaultAzureCredential | None = None
         self.file_system = None
         self.access_token: AccessToken | None = None
         self.known_schemas: set[str] = set()
@@ -80,11 +84,9 @@ class OneLakeClient:
 
     # ── auth and clients ────────────────────────────────────────────────────────
 
-    def azure_credential(self):
+    def azure_credential(self) -> DefaultAzureCredential:
         with self.lock:
             if self.credential is None:
-                from azure.identity import DefaultAzureCredential
-
                 self.credential = DefaultAzureCredential(
                     **self.config.credential_kwargs
                 )
@@ -104,90 +106,89 @@ class OneLakeClient:
     def file_system_client(self):
         with self.lock:
             if self.file_system is None:
-                from azure.storage.filedatalake import DataLakeServiceClient
-
                 self.file_system = DataLakeServiceClient(
                     f"https://{ONELAKE_DFS_HOST}", credential=self.azure_credential()
                 ).get_file_system_client(self.config.workspace)
             return self.file_system
+
+    def storage_options(self) -> dict[str, str]:
+        return {"bearer_token": self.storage_token(), "use_fabric_endpoint": "true"}
 
     # ── paths ───────────────────────────────────────────────────────────────────
 
     def tables_path(self, *parts: str) -> str:
         return "/".join([lakehouse_item_path(self.config.lakehouse), "Tables", *parts])
 
-    def uri_for_path(self, path: str) -> str:
+    def table_uri(self, relation: PolarsRelation) -> str:
+        path = self.tables_path(schema_of(relation), identifier_of(relation))
         return f"abfss://{self.config.workspace}@{ONELAKE_DFS_HOST}/{path}"
 
-    def table_uri(self, relation: PolarsRelation) -> str:
-        return self.uri_for_path(
-            self.tables_path(schema_of(relation), identifier_of(relation))
-        )
-
-    def iceberg_warehouse(self) -> str:
-        return f"{self.config.workspace}/{lakehouse_item_path(self.config.lakehouse)}"
-
-    def child_names(self, path: str) -> list[str] | None:
-        """Names of the entries directly under `path`, None if it doesn't exist."""
-        from azure.core.exceptions import ResourceNotFoundError
-
-        try:
-            paths = list(
-                self.file_system_client().get_paths(path=path, recursive=False)
-            )
-        except ResourceNotFoundError as exc:
-            if not is_missing_path(exc):
-                raise onelake_error(exc) from exc
-            return None
-        return [p.name.rsplit("/", 1)[-1] for p in paths if p.is_directory]
-
     def remove_directory(self, path: str) -> None:
-        from azure.core.exceptions import ResourceNotFoundError
-
         try:
             self.file_system_client().get_directory_client(path).delete_directory()
         except ResourceNotFoundError as exc:
-            if not is_missing_path(exc):
-                raise onelake_error(exc) from exc
+            if not is_missing_path(getattr(exc, "error_code", None)):
+                raise DbtRuntimeError(f"OneLake request failed: {exc}") from exc
+
+    # ── Delta metadata API ──────────────────────────────────────────────────────
+
+    def list_metadata(self, endpoint: str, items_key: str, **params) -> list[dict]:
+        """All items of a Delta metadata API list call, [] for a missing path."""
+        item = lakehouse_item_path(self.config.lakehouse)
+        url = (
+            f"{ONELAKE_DELTA_URI}/{self.config.workspace}/{item}"
+            f"/api/2.1/unity-catalog/{endpoint}"
+        )
+        params = {"catalog_name": item, **params}
+        items: list[dict] = []
+        while True:
+            response = requests.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Bearer {self.storage_token()}"},
+                timeout=60,
+            )
+            if response.status_code == 404 and is_missing_path(
+                response.json().get("error", {}).get("code")
+            ):
+                return []
+            if not response.ok:
+                raise DbtRuntimeError(
+                    f"OneLake request failed: {response.status_code} {response.text}"
+                )
+            body = response.json()
+            items.extend(body.get(items_key) or [])
+            if not body.get("next_page_token"):
+                return items
+            params["page_token"] = body["next_page_token"]
 
     # ── tables ──────────────────────────────────────────────────────────────────
 
     def table_format(self, relation: PolarsRelation) -> str | None:
-        """`delta`, `iceberg`, or None when the directory holds no table."""
+        """`delta`, `iceberg`, or None when there is no table.
+
+        Every table has a Delta log: Fabric generates one for Iceberg tables,
+        marking Iceberg as the source format in `XTABLE_METADATA`.
+        """
         key = (schema_of(relation), identifier_of(relation))
         if key in self.table_formats:
             return self.table_formats[key]
-        children = self.child_names(self.tables_path(*key)) or []
-        # Fabric adds a Delta log to Iceberg tables and can add Iceberg metadata
-        # to Delta tables, so a Delta log alone doesn't decide the format.
-        if "_delta_log" in children:
-            table_format = self.delta_log_source_format(relation)
-        elif "metadata" in children:
-            table_format = "iceberg"
-        else:
+        try:
+            delta_table = DeltaTable(
+                self.table_uri(relation), storage_options=self.storage_options()
+            )
+        except TableNotFoundError:
             return None
+        xtable_metadata = json.loads(
+            delta_table.metadata().configuration.get("XTABLE_METADATA") or "{}"
+        )
+        table_format = (
+            "iceberg"
+            if xtable_metadata.get("sourceTableFormat") == "ICEBERG"
+            else "delta"
+        )
         self.table_formats[key] = table_format
         return table_format
-
-    def delta_log_source_format(self, relation: PolarsRelation) -> str:
-        """`iceberg` when Fabric generated the Delta log for an Iceberg table."""
-        from deltalake import DeltaTable
-
-        configuration = (
-            DeltaTable(
-                self.table_uri(relation),
-                storage_options={
-                    "bearer_token": self.storage_token(),
-                    "use_fabric_endpoint": "true",
-                },
-            )
-            .metadata()
-            .configuration
-        )
-        xtable_metadata = json.loads(configuration.get("XTABLE_METADATA") or "{}")
-        if xtable_metadata.get("sourceTableFormat") == "ICEBERG":
-            return "iceberg"
-        return "delta"
 
     def remember_table(self, relation: PolarsRelation, table_format: str) -> None:
         self.table_formats[(schema_of(relation), identifier_of(relation))] = (
@@ -209,11 +210,11 @@ class OneLakeClient:
             schema_relation.create(
                 database=schema_relation.database,
                 schema=schema,
-                identifier=name,
+                identifier=table["name"],
                 type=RelationType.Table,
                 catalog=schema_relation.catalog,
             )
-            for name in self.child_names(self.tables_path(schema)) or []
+            for table in self.list_metadata("tables", "tables", schema_name=schema)
         ]
 
     # ── schema management ───────────────────────────────────────────────────────
@@ -222,13 +223,11 @@ class OneLakeClient:
         schema = schema_of(relation)
         if schema in self.known_schemas:
             return
-        from azure.core.exceptions import ResourceNotFoundError
-
         logger.debug(f"Creating schema {relation.catalog}/{schema}")
         try:
             self.file_system_client().create_directory(self.tables_path(schema))
         except ResourceNotFoundError as exc:
-            raise onelake_error(exc) from exc
+            raise DbtRuntimeError(f"OneLake request failed: {exc}") from exc
         self.known_schemas.add(schema)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
@@ -245,10 +244,4 @@ class OneLakeClient:
             del self.table_formats[key]
 
     def list_schemas(self) -> list[str]:
-        names = self.child_names(self.tables_path())
-        if names is None:
-            raise DbtRuntimeError(
-                f"Lakehouse {self.config.lakehouse} in workspace "
-                f"{self.config.workspace} has no Tables folder."
-            )
-        return names
+        return [schema["name"] for schema in self.list_metadata("schemas", "schemas")]

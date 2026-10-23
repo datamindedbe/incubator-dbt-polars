@@ -17,11 +17,7 @@ class FabricDeltaCatalog(StorageCatalog):
         return self.onelake.table_uri(relation)
 
     def get_storage_options(self, uri: str, read_only: bool = False) -> dict[str, str]:
-        return {
-            "bearer_token": self.onelake.storage_token(),
-            "use_fabric_endpoint": "true",
-            "timeout": "120s",
-        }
+        return {**self.onelake.storage_options(), "timeout": "120s"}
 
     # ── schema management and listing ──────────────────────────────────────────
 

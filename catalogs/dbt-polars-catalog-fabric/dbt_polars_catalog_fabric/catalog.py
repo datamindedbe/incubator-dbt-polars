@@ -41,9 +41,7 @@ class FabricCatalog(TableFormatCatalog):
         self.onelake.drop_table(relation)
         self.forget_iceberg_table(relation)
 
-    def after_write(
-        self, relation: PolarsRelation, table_format: str, created: bool
-    ) -> None:
+    def after_create(self, relation: PolarsRelation, table_format: str) -> None:
         self.onelake.remember_table(relation, table_format)
 
     # ── schema management and listing ──────────────────────────────────────────

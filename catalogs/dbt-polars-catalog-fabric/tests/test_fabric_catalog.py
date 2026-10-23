@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 import time
@@ -6,10 +7,12 @@ from types import SimpleNamespace
 
 import polars as pl
 import pytest
+from azure.core.exceptions import ResourceNotFoundError
 from dbt.adapters.polars.catalogs import PolarsRelation
 from dbt_common.exceptions import DbtRuntimeError
+from deltalake.exceptions import TableNotFoundError
 
-from dbt_polars_catalog_fabric import FabricCatalog, FabricCatalogConfig
+from dbt_polars_catalog_fabric import FabricCatalog, FabricCatalogConfig, onelake
 
 WORKSPACE_ID = "11111111-2222-3333-4444-555555555555"
 LAKEHOUSE_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -58,24 +61,35 @@ def relation(schema: str = "analytics", identifier: str = "orders") -> PolarsRel
     )
 
 
-def directory(name: str):
-    return SimpleNamespace(name=name, is_directory=True)
+def fake_delta_log(monkeypatch, configuration: dict | None) -> list[str]:
+    """Make every Delta log have `configuration`, or not exist when None."""
+    opened = []
+
+    def delta_table(uri, storage_options):
+        opened.append(uri)
+        if configuration is None:
+            raise TableNotFoundError("No files in log segment")
+        return SimpleNamespace(
+            metadata=lambda: SimpleNamespace(configuration=configuration)
+        )
+
+    monkeypatch.setattr(onelake, "DeltaTable", delta_table)
+    return opened
 
 
-def catalog_with_directories(
-    directories: dict[str, list[str]], delta_log_source: str = "delta", **config
-):
-    """A catalog whose OneLake has the given directory -> child directories."""
-    catalog = make_catalog(**config)
-    requests = []
+def fake_metadata_api(monkeypatch, pages: list[tuple[int, dict]]) -> list[dict]:
+    """Answer Delta metadata API calls with (status, body) pages, in order."""
+    sent = []
 
-    def get_paths(path, recursive=False):
-        requests.append(path)
-        return [directory(f"{path}/{child}") for child in directories.get(path, [])]
+    def get(url, params, headers, timeout):
+        sent.append(dict(params))
+        status, body = pages[len(sent) - 1]
+        return SimpleNamespace(
+            status_code=status, ok=status == 200, json=lambda: body, text=str(body)
+        )
 
-    catalog.onelake.file_system = SimpleNamespace(get_paths=get_paths)
-    catalog.onelake.delta_log_source_format = lambda relation: delta_log_source
-    return catalog, requests
+    monkeypatch.setattr(onelake.requests, "get", get)
+    return sent
 
 
 def routing_catalog(existing_format: str | None, **config):
@@ -106,12 +120,6 @@ def test_uri_uses_bare_ids_for_guids():
         f"abfss://{WORKSPACE_ID}@onelake.dfs.fabric.microsoft.com/"
         f"{LAKEHOUSE_ID}/Tables/analytics/orders"
     )
-
-
-def test_iceberg_warehouse_uses_the_same_item_path():
-    assert make_catalog().onelake.iceberg_warehouse() == "ws/lh.Lakehouse"
-    catalog = make_catalog(workspace=WORKSPACE_ID, lakehouse=LAKEHOUSE_ID)
-    assert catalog.onelake.iceberg_warehouse() == f"{WORKSPACE_ID}/{LAKEHOUSE_ID}"
 
 
 def test_extra_profile_keys_go_to_the_credential():
@@ -170,47 +178,61 @@ def test_token_is_refreshed_when_about_to_expire():
 
 # ── table format detection ──────────────────────────────────────────────────
 
-TABLE_PATH = "lh.Lakehouse/Tables/analytics/orders"
+ICEBERG_SOURCE = {"XTABLE_METADATA": json.dumps({"sourceTableFormat": "ICEBERG"})}
 
 
 @pytest.mark.parametrize(
-    ("children", "delta_log_source", "table_format"),
+    ("configuration", "table_format"),
     [
-        (["_delta_log"], "delta", "delta"),
-        # Fabric can add Iceberg metadata to a Delta table
-        (["_delta_log", "metadata"], "delta", "delta"),
-        # and adds a Delta log to every Iceberg table
-        (["_delta_log", "metadata", "data"], "iceberg", "iceberg"),
-        (["metadata", "data"], "delta", "iceberg"),
-        (["something_else"], "delta", None),
-        ([], "delta", None),
+        ({}, "delta"),
+        # Fabric's Delta log for an Iceberg table
+        (ICEBERG_SOURCE, "iceberg"),
+        (None, None),
     ],
 )
-def test_table_format_is_detected_from_the_table_directory(
-    children, delta_log_source, table_format
+def test_table_format_is_read_from_the_delta_log(
+    monkeypatch, configuration, table_format
 ):
-    catalog, _ = catalog_with_directories({TABLE_PATH: children}, delta_log_source)
+    fake_delta_log(monkeypatch, configuration)
 
-    assert catalog.existing_table_format(relation()) == table_format
+    assert make_catalog().existing_table_format(relation()) == table_format
 
 
-def test_detected_table_format_is_cached():
-    catalog, requests = catalog_with_directories({TABLE_PATH: ["_delta_log"]})
+def test_detected_table_format_is_cached(monkeypatch):
+    opened = fake_delta_log(monkeypatch, {})
+    catalog = make_catalog()
 
     catalog.existing_table_format(relation())
     catalog.existing_table_format(relation())
 
-    assert requests == [TABLE_PATH]
+    assert len(opened) == 1
 
 
-def test_relations_are_the_schema_directories():
-    catalog, _ = catalog_with_directories(
-        {"lh.Lakehouse/Tables/analytics": ["orders", "customers"]}
+def test_relations_are_listed_across_pages(monkeypatch):
+    sent = fake_metadata_api(
+        monkeypatch,
+        [
+            (200, {"tables": [{"name": "orders"}], "next_page_token": "next"}),
+            (200, {"tables": [{"name": "customers"}]}),
+        ],
     )
 
-    names = [r.identifier for r in catalog.list_relations_without_caching(relation())]
+    names = [
+        r.identifier for r in make_catalog().list_relations_without_caching(relation())
+    ]
 
     assert names == ["orders", "customers"]
+    assert sent[1] == {
+        "catalog_name": "lh.Lakehouse",
+        "schema_name": "analytics",
+        "page_token": "next",
+    }
+
+
+def test_schemas_are_listed_through_the_metadata_api(monkeypatch):
+    fake_metadata_api(monkeypatch, [(200, {"schemas": [{"name": "dbo"}]})])
+
+    assert make_catalog().list_schemas() == ["dbo"]
 
 
 # ── routing ─────────────────────────────────────────────────────────────────
@@ -261,24 +283,35 @@ def test_incremental_into_table_of_other_format_asks_for_full_refresh():
         catalog.validate_incremental_relation(relation(), {})
 
 
-def test_write_rejects_file_format():
-    csv_relation = PolarsRelation.create(
+@pytest.mark.parametrize("file_format", ["csv", "delta", "iceberg"])
+def test_write_rejects_any_file_format(file_format):
+    file_format_relation = PolarsRelation.create(
         database="fabric",
         schema="analytics",
         identifier="orders",
         catalog="fabric",
-        file_format="csv",
+        file_format=file_format,
     )
-    with pytest.raises(DbtRuntimeError, match="file_format"):
-        make_catalog().write_relation(csv_relation, DATA, [])
+    with pytest.raises(DbtRuntimeError, match="use table_format"):
+        make_catalog().write_relation(file_format_relation, DATA, [])
+
+
+def test_incremental_and_snapshot_writes_reject_file_format():
+    catalog, calls = routing_catalog("delta")
+    file_format_relation = relation().incorporate(file_format="iceberg")
+
+    with pytest.raises(DbtRuntimeError, match="use table_format"):
+        catalog.validate_incremental_relation(file_format_relation, {})
+    with pytest.raises(DbtRuntimeError, match="use table_format"):
+        catalog.apply_snapshot_delta(file_format_relation, DATA, DATA)
+    assert calls == []
 
 
 # ── OneLake errors ──────────────────────────────────────────────────────────
 
 
-def catalog_failing_with(error_code: str):
-    from azure.core.exceptions import ResourceNotFoundError
-
+def catalog_failing_with(monkeypatch, error_code: str):
+    """OneLake answers every call with a 404 carrying `error_code`."""
     error = ResourceNotFoundError(message=f"OneLake error {error_code}")
     error.error_code = error_code
 
@@ -287,28 +320,28 @@ def catalog_failing_with(error_code: str):
 
     catalog = make_catalog()
     catalog.onelake.file_system = SimpleNamespace(
-        get_paths=fail,
         create_directory=fail,
         get_directory_client=lambda path: SimpleNamespace(delete_directory=fail),
     )
+    body = {"error": {"code": error_code, "message": f"OneLake error {error_code}"}}
+    fake_metadata_api(monkeypatch, [(404, body)] * 5)
     return catalog
 
 
-def test_missing_path_is_treated_as_absent():
-    catalog = catalog_failing_with("PathNotFound")
+def test_missing_path_is_treated_as_absent(monkeypatch):
+    catalog = catalog_failing_with(monkeypatch, "PathNotFound")
 
     assert catalog.list_relations_without_caching(relation()) == []
-    assert catalog.existing_table_format(relation()) is None
-    catalog.drop_relation(relation())
+    assert catalog.list_schemas() == []
     catalog.drop_schema(relation())
 
 
-def test_other_not_found_errors_are_raised_as_dbt_errors():
-    catalog = catalog_failing_with("NotFound")
+def test_other_not_found_errors_are_raised_as_dbt_errors(monkeypatch):
+    # e.g. a paused capacity
+    catalog = catalog_failing_with(monkeypatch, "NotFound")
 
     for call in (
         lambda: catalog.list_relations_without_caching(relation()),
-        lambda: catalog.drop_relation(relation()),
         lambda: catalog.drop_schema(relation()),
         lambda: catalog.create_schema(relation()),
         catalog.list_schemas,
@@ -357,6 +390,15 @@ def test_iceberg_catalog_uses_onelake_iceberg_rest_endpoint():
     assert properties["uri"] == "https://onelake.table.fabric.microsoft.com/iceberg"
     assert properties["warehouse"] == "ws/lh.Lakehouse"
     assert properties["adls.account-host"] == "onelake.blob.fabric.microsoft.com"
-    assert properties["py-io-impl"] == "pyiceberg.io.fsspec.FsspecFileIO"
     manager = AuthManagerFactory.create(auth["impl"], auth["custom"])
     assert manager.auth_header() == "Bearer token-1"
+
+
+def test_iceberg_warehouse_uses_ids_as_given():
+    pytest.importorskip("pyiceberg")
+    catalog = make_catalog(workspace=WORKSPACE_ID, lakehouse=LAKEHOUSE_ID)
+    catalog.onelake.credential = FakeCredential()
+
+    properties = catalog.create_iceberg_catalog()._catalog_properties
+
+    assert properties["warehouse"] == f"{WORKSPACE_ID}/{LAKEHOUSE_ID}"

@@ -17,6 +17,7 @@ from dbt_polars_catalog_fabric.onelake import (
     ONELAKE_BLOB_HOST,
     ONELAKE_ICEBERG_URI,
     OneLakeClient,
+    lakehouse_item_path,
 )
 
 
@@ -42,7 +43,7 @@ class FabricIcebergCatalog(IcebergCatalog):
                 schema=config.schema,
                 pyiceberg_type="rest",
                 uri=ONELAKE_ICEBERG_URI,
-                warehouse=onelake.iceberg_warehouse(),
+                warehouse=f"{config.workspace}/{lakehouse_item_path(config.lakehouse)}",
                 auth={
                     "type": "custom",
                     "impl": f"{__name__}.{OneLakeAuthManager.__name__}",
@@ -51,12 +52,10 @@ class FabricIcebergCatalog(IcebergCatalog):
                 # Without the host, pyiceberg's ADLS client targets
                 # onelake.blob.core.windows.net, an unrelated storage account.
                 **{
-                    "adls.account-name": "onelake",
                     "adls.account-host": ONELAKE_BLOB_HOST,
                     "adls.credential": AsyncDefaultAzureCredential(
                         **config.credential_kwargs
                     ),
-                    "py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO",
                 },
             ),
             project_root="",
@@ -69,8 +68,5 @@ class FabricIcebergCatalog(IcebergCatalog):
     def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
         return pl.scan_iceberg(
             self._load_table(self._id(relation)),
-            storage_options={
-                "bearer_token": self.onelake.storage_token(),
-                "use_fabric_endpoint": "true",
-            },
+            storage_options=self.onelake.storage_options(),
         )

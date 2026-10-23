@@ -77,10 +77,8 @@ class DatabricksCatalog(TableFormatCatalog):
 
     # ── hooks ────────────────────────────────────────────────────────────────────
 
-    def after_write(
-        self, relation: PolarsRelation, table_format: str, created: bool
-    ) -> None:
-        if table_format == "iceberg" and created:
+    def after_create(self, relation: PolarsRelation, table_format: str) -> None:
+        if table_format == "iceberg":
             # Created through Iceberg REST, so Unity Catalog's info isn't cached yet
             self.unity_catalog.forget_table(
                 self.unity_catalog.table_full_name(relation)
