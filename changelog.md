@@ -6,6 +6,11 @@
 
 - [Databricks Catalog]: Add support for iceberg tables in the Databricks catalog.
 
+### Fixes
+
+- [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/incubator-dbt-polars/issues/45)).
+- [Iceberg Catalog] Merge and delete+insert no longer fail when a `unique_key` column contains NULL values.
+
 ## v0.4.0
 
 ### Implements
