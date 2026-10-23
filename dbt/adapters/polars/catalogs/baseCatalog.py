@@ -161,6 +161,14 @@ class BaseCatalog(ABC):
         model_config: dict | None = None,
     ) -> None: ...
 
+    def validate_incremental_relation(
+        self, relation: PolarsRelation, model_config: dict
+    ) -> None:
+        """Raise if `relation` can't be updated incrementally with `model_config`.
+
+        Runs before every incremental write, also one that rewrites the table.
+        """
+
     def expand_column_types(
         self, goal: PolarsRelation, current: PolarsRelation
     ) -> None:

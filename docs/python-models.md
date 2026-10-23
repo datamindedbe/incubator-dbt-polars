@@ -83,7 +83,6 @@ The test suite uses pytest and the `--profile` option to select the catalog back
 ```bash
 pytest --profile local          # local filesystem (default)
 pytest --profile iceberg        # Iceberg with SQLite
-pytest --profile iceberg-databricks
 pytest --profile azure
 pytest --profile s3
 ```
@@ -103,7 +102,7 @@ Tests can be restricted to or excluded from specific profiles:
 ```python
 import pytest
 
-@pytest.mark.require_profiles("iceberg", "iceberg-databricks")
+@pytest.mark.require_profiles("iceberg")
 class TestIcebergOnly:
     ...
 

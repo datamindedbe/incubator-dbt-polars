@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Implements
+
+- [Databricks Catalog]: Add support for iceberg tables in the Databricks catalog.
+
 ## v0.4.0
 
 ### Implements

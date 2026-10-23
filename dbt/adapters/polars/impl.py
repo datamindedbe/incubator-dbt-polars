@@ -904,6 +904,7 @@ class PolarsAdapter(BaseAdapter):
         model_config: dict | None = None,
     ) -> None:
         model_config = model_config or {}
+        catalog.validate_incremental_relation(relation, model_config)
         partition_by = _normalize_partition_by(partition_by)
         current_partitions = catalog.get_partition_columns(relation)
         if current_partitions != partition_by:
