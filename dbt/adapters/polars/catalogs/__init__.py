@@ -21,11 +21,16 @@ from dbt.adapters.polars.catalogs.storageCatalog import (
     external_location_of,
     file_format_of,
 )
+from dbt.adapters.polars.catalogs.tableFormatCatalog import (
+    SUPPORTED_TABLE_FORMATS,
+    TableFormatCatalog,
+)
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.utils import resolve_relative_path
 
 __all__ = [
     "FILE_FORMATS",
+    "SUPPORTED_TABLE_FORMATS",
     "BaseCatalog",
     "CatalogConfig",
     "CatalogPlugin",
@@ -33,6 +38,7 @@ __all__ = [
     "IcebergCatalogConfig",
     "PolarsRelation",
     "StorageCatalog",
+    "TableFormatCatalog",
     "create_catalog",
     "external_location_of",
     "file_format_of",

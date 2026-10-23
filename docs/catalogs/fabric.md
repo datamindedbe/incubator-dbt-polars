@@ -1,34 +1,31 @@
 # Fabric catalog
 
-The Fabric catalog writes Delta tables into a Microsoft Fabric Lakehouse
-through OneLake. Fabric discovers tables written under the Lakehouse's
-`Tables/<schema>/<table>` folders automatically, so they show up in the
-Lakehouse explorer, the SQL analytics endpoint and Power BI without any
-registration step. **No Fabric compute (Spark or SQL) is used.**
+Write Delta or Iceberg tables to a Microsoft Fabric Lakehouse via OneLake.
 
-**Status:** Experimental
+:::warning Fabric capacity must be running
+The workspace's Fabric capacity must be running. OneLake is unavailable while
+the capacity is paused, so every read and write fails.
+:::
 
-> **Limitations (read before using):**
-> - **Only schema-enabled Lakehouses are supported.** dbt schemas map to
->   Lakehouse schemas. Schemas are enabled by default for Lakehouses created in
->   the Fabric portal.
-> - **Tables are always Delta.** Setting `file_format` to anything other than
->   `delta` on a model raises an error.
-> - **The SQL analytics endpoint syncs asynchronously.** A table written by
->   dbt-polars is immediately readable through OneLake (and by downstream
->   dbt-polars models), but can take seconds to minutes to appear in the SQL
->   analytics endpoint.
-> - **Writes are bounded by the access token's lifetime** (typically 60-90
->   minutes): the token is handed to delta-rs as-is and can't be refreshed in
->   the middle of a single write.
+## Supported features
+
+| Feature | Status | Remarks |
+|---|---|---|
+| Read/write Delta tables | ✅ | Fabric discovers them in the Lakehouse automatically |
+| Read/write Iceberg tables | ✅ | Through OneLake's Iceberg REST catalog |
+| Table descriptions in Fabric | 🟡 | Shown for Delta tables only, from `persist_docs` |
+| Column descriptions in Fabric | ❌️ | Fabric doesn't display them |
 
 ## Installation
 
 ```bash
-pip install 'dbt-polars[fabric]'
+pip install 'dbt-polars[fabric]'          # Delta tables
+pip install 'dbt-polars[fabric,iceberg]'  # Delta and Iceberg tables
 ```
 
 ## Profile configuration
+
+### Example
 
 ```yaml
 my_project:
@@ -36,65 +33,69 @@ my_project:
   outputs:
     dev:
       type: polars
+      catalog_type: fabric
       schema: dev
-      catalogs:
-        - name: my_catalog
-          type: fabric
-          workspace: my_workspace
-          lakehouse: my_lakehouse
-          # optional DefaultAzureCredential options - see Authentication below
+      workspace: my_workspace
+      lakehouse: my_lakehouse
+      default_table_format: delta
 ```
 
-### Configuration options
+To combine this catalog with others, put the same parameters in an entry of
+`catalogs`, with `type: fabric` and a `name`, see
+[Catalog overview](../catalog-overview.md).
 
-| Key | Required | Description |
-|---|---|---|
-| `name` | Yes | Catalog name. Used as the `database` identifier in dbt. |
-| `type` | Yes | Must be `fabric`. |
-| `workspace` | Yes | Fabric workspace name or ID. |
-| `lakehouse` | Yes | Lakehouse name or ID. |
-| *(anything else)* | No | Forwarded to `azure.identity.DefaultAzureCredential` - see Authentication below. |
+### Parameter Reference
 
-## Authentication
+The following parameters are supported:
 
-dbt-polars authenticates as the Microsoft Entra principal running dbt, using
-`DefaultAzureCredential` from `azure-identity`. It tries environment
-variables (service principal), workload identity, the Azure CLI, managed
-identity and more, in order. Locally, `az login` is enough.
+* `catalog_type` - (Required) Must be `fabric`.
 
-Every key besides `name`, `type`, `workspace`, `lakehouse` and `schema` is
-passed to `DefaultAzureCredential(**kwargs)`, for example:
+* `workspace` - (Required) Name or ID of the Fabric workspace.
 
-```yaml
-exclude_managed_identity_credential: true
-managed_identity_client_id: "<client-id>"
-```
+* `lakehouse` - (Required) Name or ID of the Lakehouse. It must have schemas
+  enabled, which is the default for new Lakehouses. Use IDs when a name
+  contains spaces or special characters.
 
-A single token for the Azure Storage audience
-(`https://storage.azure.com/.default`) is used for all OneLake calls.
+* `schema` - (Required) Default schema for models. dbt-polars creates missing
+  schemas. The Lakehouse's default schema `dbo` can't be dropped.
 
-## Requirements
+* `default_table_format` - (Optional) Format of new tables: `delta` or
+  `iceberg`. Defaults to `delta`. Models can override it by setting
+  `table_format`.
 
-- The workspace must be on a Fabric capacity (F or P SKU, or a Fabric
-  trial). OneLake is unavailable while the capacity is paused.
-- The principal needs the **Contributor** workspace role (or higher) to
-  create schemas and write tables.
+* Authentication parameters - (Optional) Passed to
+  [`azure.identity.DefaultAzureCredential`](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential),
+  which tries environment variables, workload identity, the Azure CLI,
+  managed identity and more, in that order. Locally, `az login` is enough.
+  Delta and Iceberg tables use the same credentials. Commonly used:
+  * `exclude_managed_identity_credential` - Skip managed identity, e.g. on a
+    machine where it isn't the identity you want.
+  * `managed_identity_client_id` - Client ID of a user-assigned managed
+    identity.
+  * `exclude_interactive_browser_credential` - Set to `false` to allow a
+    browser login.
+
+  For a service principal, set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` and
+  `AZURE_TENANT_ID` in the environment.
+
+## Model configuration
+
+The following custom model parameters are available for Fabric:
+
+* `table_format` - (Optional) `delta` or `iceberg`. Overrides the profile's
+  `default_table_format`. When the existing table has another format, a
+  `table` model recreates it and an incremental model requires
+  `--full-refresh`.
+
+  ```sql
+  {{ config(materialized='table', table_format='iceberg') }}
+  ```
+
+## Required permissions
+
+- The principal dbt-polars authenticates as needs the **Contributor** role, or
+  higher, on the workspace.
 - The tenant setting *Users can access data stored in OneLake with apps
-  external to Fabric* must be enabled (it is by default). For service
-  principals, *Service principals can use Fabric APIs* must be enabled too.
-
-## Table layout
-
-A table is written to
-`abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<lakehouse>.Lakehouse/Tables/<schema>/<table_name>`
-(or `<lakehouse_id>/Tables/...` when the Lakehouse is configured by ID), and
-appears in Fabric as `<lakehouse>.<schema>.<table_name>`.
-
-Dropping a table or schema deletes its folder in OneLake, including the
-`_delta_log`. The Lakehouse's default `dbo` schema can't be dropped.
-
-## Persisting docs
-
-Table and column descriptions from `persist_docs` are written to the Delta
-table's own metadata, which is what dbt's `docs generate` reads back. Fabric
-has no API to write them into its own catalog.
+  external to Fabric* must be enabled. It is by default.
+- For a service principal, the tenant setting *Service principals can use
+  Fabric APIs* must be enabled too.

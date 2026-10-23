@@ -2,16 +2,25 @@ name: CI (Fabric)
 
 on:
   pull_request:
-    types: [labeled]
+
+# One run at a time on the capacity: a finishing run pauses it for everyone.
+concurrency:
+  group: fabric-capacity
+  cancel-in-progress: false
 
 jobs:
   test-fabric:
     name: "Test fabric"
-    if: github.event.label.name == 'fabric verified'
+    environment: fabric
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
+    env:
+      CAPACITY_URL: https://management.azure.com${{ vars.FABRIC_CAPACITY_ID }}
+      CAPACITY_API: api-version=2023-11-01
+      FABRIC_WORKSPACE: ${{ vars.FABRIC_WORKSPACE }}
+      FABRIC_LAKEHOUSE: ${{ vars.FABRIC_LAKEHOUSE }}
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +31,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --python 3.12 --extra fabric
+        run: uv sync --python 3.12 --extra fabric --extra iceberg
 
       - uses: azure/login@v2
         with:
@@ -30,8 +39,31 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Run tests (fabric catalog)
-        env:
-          FABRIC_WORKSPACE: ${{ vars.FABRIC_WORKSPACE }}
-          FABRIC_LAKEHOUSE: ${{ vars.FABRIC_LAKEHOUSE }}
+      - name: Resume capacity
+        id: resume
+        run: |
+          state() { az rest --method get --url "$CAPACITY_URL?$CAPACITY_API" --query properties.state -o tsv; }
+          if [ "$(state)" != "Active" ]; then
+            az rest --method post --url "$CAPACITY_URL/resume?$CAPACITY_API"
+          fi
+          for _ in $(seq 60); do
+            [ "$(state)" = "Active" ] && exit 0
+            sleep 10
+          done
+          echo "Capacity did not become active" >&2
+          exit 1
+
+      - name: Run tests (delta tables)
         run: uv run --python 3.12 pytest -n auto --profile fabric
+
+      - name: Run tests (iceberg tables)
+        if: (success() || failure()) && steps.resume.outcome == 'success'
+        run: uv run --python 3.12 pytest -n auto --profile fabric --config table_format_iceberg
+
+      - name: Pause capacity
+        if: always()
+        run: |
+          state=$(az rest --method get --url "$CAPACITY_URL?$CAPACITY_API" --query properties.state -o tsv)
+          if [ "$state" != "Paused" ]; then
+            az rest --method post --url "$CAPACITY_URL/suspend?$CAPACITY_API"
+          fi

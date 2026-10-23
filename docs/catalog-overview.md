@@ -122,5 +122,5 @@ sources:
 - [Azure](catalogs/azure.md) — reads and writes files on Azure Blob Storage / ADLS Gen2
 - [Iceberg](catalogs/iceberg.md) — Apache Iceberg tables via pyiceberg
 - [Databricks](catalogs/databricks.md) — Unity Catalog tables via REST, compute-free (an optional SQL warehouse can persist docs into Unity Catalog's native comments)
-- [Fabric](catalogs/fabric.md) — Delta tables in a Microsoft Fabric Lakehouse via OneLake, compute-free
+- [Fabric](catalogs/fabric.md) — Delta and Iceberg tables in a Microsoft Fabric Lakehouse via OneLake, compute-free
 - [Custom catalogs](catalogs/custom.md) — add your own storage backend as a separate package

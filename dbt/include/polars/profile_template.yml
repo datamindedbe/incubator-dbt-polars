@@ -40,5 +40,14 @@ prompts:
       default_table_format:
         hint: "format of new tables: delta or iceberg"
         default: "delta"
+    fabric:
+      _fixed_catalog_type: fabric
+      workspace:
+        hint: "Fabric workspace name or ID"
+      lakehouse:
+        hint: "Lakehouse name or ID"
+      default_table_format:
+        hint: "format of new tables: delta or iceberg"
+        default: "delta"
     iceberg:
       _fixed_catalog_type: iceberg
