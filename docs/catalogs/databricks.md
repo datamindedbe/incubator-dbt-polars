@@ -28,6 +28,13 @@ pip install 'dbt-polars[databricks]'          # Delta tables
 pip install 'dbt-polars[databricks,iceberg]'  # Delta and Iceberg tables
 ```
 
+On Azure, also install the `azure` extra of the catalog. dbt-polars uses it to
+delete the storage of Delta tables it drops:
+
+```bash
+pip install 'dbt-polars-catalog-databricks[azure]'
+```
+
 ## Profile configuration
 
 ### Example

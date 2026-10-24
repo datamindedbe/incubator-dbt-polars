@@ -14,7 +14,7 @@
 
 - [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/incubator-dbt-polars/issues/45)).
 - [Iceberg Catalog] Merge and delete+insert no longer fail when a `unique_key` column contains NULL values.
-- [Databricks Catalog] Dropping a Delta table on Azure now deletes its storage folder; before, its files were left behind.
+- [Databricks Catalog] Dropping a Delta table on Azure now deletes its storage folder; before, its files were left behind. Needs the new `azure` extra: `pip install 'dbt-polars-catalog-databricks[azure]'`.
 
 ## v0.4.0
 

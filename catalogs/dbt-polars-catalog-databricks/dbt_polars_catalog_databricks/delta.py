@@ -57,33 +57,46 @@ def map_vended_credentials(response: dict) -> dict[str, str]:
     )
 
 
+class StaticTokenCredential:
+    """An Azure credential for a vended Microsoft Entra ID token."""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def get_token(self, *args, **kwargs):
+        from azure.core.credentials import AccessToken
+
+        return AccessToken(self.token, int(time.time()) + 3600)
+
+
 def delete_azure_directory(uri: str, opts: dict[str, str]) -> None:
     """Delete an ADLS Gen2 directory with everything in it, with vended credentials."""
-    import requests
+    try:
+        from azure.core.exceptions import ResourceNotFoundError
+        from azure.storage.filedatalake import DataLakeServiceClient
+    except ImportError as exc:
+        raise DbtRuntimeError(
+            "Deleting storage on Azure needs the azure extra: "
+            "pip install 'dbt-polars-catalog-databricks[azure]'"
+        ) from exc
 
     match = AZURE_URI.fullmatch(uri)
     if match is None:
         raise DbtRuntimeError(f"Not an ADLS Gen2 location: {uri}")
-    url = (
-        f"https://{match['account']}.dfs.core.windows.net/"
-        f"{match['container']}/{match['path']}"
-    )
-    params = {"recursive": "true"}
-    headers = {"x-ms-version": "2021-08-06"}
+    url = f"https://{match['account']}.dfs.core.windows.net"
     if "sas_token" in opts:
-        url = f"{url}?{opts['sas_token'].lstrip('?')}"
+        service = DataLakeServiceClient(f"{url}?{opts['sas_token'].lstrip('?')}")
     else:
-        headers["Authorization"] = f"Bearer {opts['bearer_token']}"
-    while True:
-        response = requests.delete(url, params=params, headers=headers, timeout=60)
-        if response.status_code == 404:
-            return
-        response.raise_for_status()
-        # A large directory is deleted in batches
-        continuation = response.headers.get("x-ms-continuation")
-        if not continuation:
-            return
-        params["continuation"] = continuation
+        service = DataLakeServiceClient(
+            url, credential=StaticTokenCredential(opts["bearer_token"])
+        )
+    directory = service.get_file_system_client(match["container"]).get_directory_client(
+        match["path"]
+    )
+    try:
+        directory.delete_directory()
+    except ResourceNotFoundError:
+        pass
 
 
 class DatabricksDeltaCatalog(StorageCatalog):

@@ -22,6 +22,10 @@ classifiers = [
     "Topic :: Database",
 ]
 
+[project.optional-dependencies]
+# Deletes the storage of dropped Delta tables on Azure
+azure = ["azure-storage-file-datalake>=12.10.0"]
+
 [project.urls]
 Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
 Repository = "https://github.com/datamindedbe/incubator-dbt-polars"

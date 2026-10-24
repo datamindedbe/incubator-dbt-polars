@@ -41,7 +41,7 @@ Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
 dev = [
     "dbt-polars-catalog-s3",
     "dbt-polars-catalog-azure",
-    "dbt-polars-catalog-databricks",
+    "dbt-polars-catalog-databricks[azure]",
     "dbt-polars-catalog-fabric",
     "dbt-polars-catalog-snowflake",
     "dbt-tests-adapter~=1.20.0",
