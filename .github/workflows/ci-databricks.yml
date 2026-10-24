@@ -10,7 +10,9 @@ concurrency:
 jobs:
   test-databricks:
     name: "Test databricks / ${{ matrix.table_format }}"
-    environment: databricks
+    environment:
+      name: databricks
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write

@@ -10,7 +10,9 @@ concurrency:
 jobs:
   test-azure:
     name: "Test azure"
-    environment: azure
+    environment:
+      name: azure
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write

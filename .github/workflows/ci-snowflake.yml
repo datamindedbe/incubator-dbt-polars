@@ -10,7 +10,9 @@ concurrency:
 jobs:
   test-snowflake:
     name: "Test snowflake"
-    environment: snowflake
+    environment:
+      name: snowflake
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -32,4 +34,4 @@ jobs:
           SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
           SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-        run: uv run --python 3.12 pytest -n auto --profile snowflake
+        run: uv run --python 3.12 pytest -n 8 --profile snowflake

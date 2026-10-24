@@ -11,7 +11,9 @@ concurrency:
 jobs:
   test-fabric:
     name: "Test fabric"
-    environment: fabric
+    environment:
+      name: fabric
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write
