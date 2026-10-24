@@ -38,6 +38,9 @@ class BaseIncrementalOnSchemaChange(DbtBaseIncrementalOnSchemaChange, PolarsTest
         # Anything other than additions to the target table will fail for now
         self.run_incremental_sync_all_columns(project)
 
+    def test_run_incremental_sync_remove_only(self, project):
+        self.run_incremental_sync_remove_only(project)
+
 
 class BaseIncrementalOnSchemaChangeAppend(
     DbtBaseIncrementalOnSchemaChange, PolarsTestMixin

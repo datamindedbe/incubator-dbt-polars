@@ -828,18 +828,21 @@ class PolarsAdapter(BaseAdapter):
         if on_schema_change == "sync_all_columns":
             if not removed:
                 return new_data, bool(added)
-            existing_df = catalog.get_relation(relation).collect()
+            existing_data = catalog.get_relation(relation)
             if added:
-                existing_df = existing_df.with_columns(
+                existing_data = existing_data.with_columns(
                     [pl.lit(None).cast(new_schema[col]).alias(col) for col in added]
                 )
-            existing_df = existing_df.select(new_cols)
-            catalog.write_relation(
-                relation,
-                pl.concat([existing_df.lazy(), new_data.lazy()]),
-                partition_by,
-                model_config,
-            )
+            synced_data = pl.concat([existing_data.select(new_cols), new_data.lazy()])
+            # A file format is overwritten in place, so it can't be read while written
+            if relation.file_format not in (None, "delta"):
+                logger.warning(
+                    f"Removing columns from {relation} with "
+                    f"file_format='{relation.file_format}' reads the whole table "
+                    "into memory. Use file_format='delta' to avoid this."
+                )
+                synced_data = synced_data.collect()
+            catalog.write_relation(relation, synced_data, partition_by, model_config)
             return None, False
 
         return new_data, False

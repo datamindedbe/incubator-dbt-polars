@@ -58,30 +58,41 @@ def test_other_profile_keys_go_to_pyiceberg():
     assert properties["scope"] == "session:role:OTHER"
 
 
-def test_names_are_upper_cased_in_snowflake_and_lower_cased_for_dbt():
-    catalog = make_catalog()
+def test_profile_overrides_uri_and_warehouse():
+    properties = make_catalog(
+        uri="https://private.example/polaris/api/catalog", warehouse="OTHER_DB"
+    )._catalog_properties
 
-    assert catalog._id(relation()) == ("ANALYTICS", "ORDERS")
-    assert catalog.dbt_name("ORDERS") == "orders"
+    assert properties["uri"] == "https://private.example/polaris/api/catalog"
+    assert properties["warehouse"] == "OTHER_DB"
 
 
-def test_listed_tables_get_dbt_names():
+def test_names_are_kept_as_in_dbt():
     pytest.importorskip("pyiceberg")
     catalog = make_catalog()
     listed = []
     catalog._catalog_instance = SimpleNamespace(
         list_tables=lambda namespace: (
             listed.append(namespace)
-            or [("ANALYTICS", "ORDERS"), ("ANALYTICS", "CUSTOMERS")]
+            or [("Analytics", "MyOrders"), ("Analytics", "customers")]
         ),
-        list_namespaces=lambda: [("ANALYTICS",), ("RAW",)],
+        list_namespaces=lambda: [("Analytics",), ("raw",)],
+    )
+    schema_relation = PolarsRelation.create(
+        database="snowflake",
+        schema="Analytics",
+        identifier="MyOrders",
+        catalog="snowflake",
     )
 
-    names = [r.identifier for r in catalog.list_relations_without_caching(relation())]
+    names = [
+        r.identifier for r in catalog.list_relations_without_caching(schema_relation)
+    ]
 
-    assert names == ["orders", "customers"]
-    assert listed == [("ANALYTICS",)]
-    assert catalog.list_schemas() == ["analytics", "raw"]
+    assert catalog._id(schema_relation) == ("Analytics", "MyOrders")
+    assert names == ["MyOrders", "customers"]
+    assert listed == [("Analytics",)]
+    assert catalog.list_schemas() == ["Analytics", "raw"]
 
 
 @pytest.mark.parametrize(

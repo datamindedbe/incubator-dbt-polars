@@ -293,31 +293,19 @@ class IcebergCatalog(BaseCatalog):
                 if attempt == COMMIT_ATTEMPTS:
                     raise
             logger.debug(f"Retrying commit to {identifier} (attempt {attempt + 1})")
-            compute_slots.release()
             time.sleep(2**attempt)
-
-    def catalog_name(self, name: str) -> str:
-        """The name of a dbt schema or table in the Iceberg catalog."""
-        return name
-
-    def dbt_name(self, name: str) -> str:
-        """The dbt name of a schema or table listed by the Iceberg catalog."""
-        return name
 
     def _id(self, relation: PolarsRelation) -> tuple[str, str]:
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
         if relation.identifier is None:
             raise DbtRuntimeError(f"Relation {relation} is missing an identifier")
-        return (
-            self.catalog_name(relation.schema),
-            self.catalog_name(relation.identifier),
-        )
+        return (relation.schema, relation.identifier)
 
     def create_schema(self, relation: PolarsRelation) -> None:
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
-        namespace = self.catalog_name(relation.schema)
+        namespace = relation.schema
         if namespace in self._known_namespaces:
             return
         from pyiceberg.exceptions import NamespaceAlreadyExistsError
@@ -334,7 +322,7 @@ class IcebergCatalog(BaseCatalog):
 
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
-        namespace = self.catalog_name(relation.schema)
+        namespace = relation.schema
         logger.debug(f"Dropping schema {relation.catalog}/{namespace}")
         try:
             for table_id in self._catalog.list_tables((namespace,)):
@@ -346,7 +334,7 @@ class IcebergCatalog(BaseCatalog):
         self._known_namespaces.discard(namespace)
 
     def list_schemas(self) -> list[str]:
-        return [self.dbt_name(ns[0]) for ns in self._catalog.list_namespaces()]
+        return [ns[0] for ns in self._catalog.list_namespaces()]
 
     def table_exists(self, relation: PolarsRelation) -> bool:
         identifier = self._id(relation)
@@ -434,7 +422,7 @@ class IcebergCatalog(BaseCatalog):
     ) -> list[PolarsRelation]:
         if schema_relation.schema is None:
             raise DbtRuntimeError(f"Relation {schema_relation} is missing a schema")
-        namespace = (self.catalog_name(schema_relation.schema),)
+        namespace = (schema_relation.schema,)
         from pyiceberg.exceptions import NoSuchNamespaceError
 
         try:
@@ -445,7 +433,7 @@ class IcebergCatalog(BaseCatalog):
             schema_relation.create(
                 database=schema_relation.database,
                 schema=schema_relation.schema,
-                identifier=self.dbt_name(table_id[-1]),
+                identifier=table_id[-1],
                 type=RelationType.Table,
                 catalog=schema_relation.catalog,
             )
@@ -601,13 +589,14 @@ class IcebergCatalog(BaseCatalog):
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
 
-        all_new = _cast_unsigned_to_signed(pl.concat([rows_to_close, rows_to_insert]))
-
         def apply_delta(tbl: Table) -> None:
             with tbl.transaction() as transaction:
                 if rows_to_close.is_empty():
                     _append_in_single_snapshot(transaction, tbl.io, rows_to_insert, {})
                 else:
+                    all_new = _cast_unsigned_to_signed(
+                        pl.concat([rows_to_close, rows_to_insert])
+                    )
                     overwrite_keys_and_append(
                         tbl, transaction, tbl.io, [scd_id_col], rows_to_close, all_new
                     )

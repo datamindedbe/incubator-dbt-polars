@@ -1,4 +1,4 @@
-W.PHONY: test-generic test xtest lint
+.PHONY: test-generic test xtest lint
 
 test-iceberg:
 	uv run --extra iceberg pytest --profile iceberg -n 0

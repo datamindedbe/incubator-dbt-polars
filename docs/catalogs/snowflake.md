@@ -70,12 +70,6 @@ The following parameters are supported:
 
 * `role` - (Optional) Role dbt-polars acts as.
 
-:::info
-Schema and table names are stored in UPPERCASE, like dbt-snowflake does by
-default. Column names are stored as they are in the dbt project, so in Snowflake
-SQL, lowercase column names need quotes: `select "customer_id" from orders`.
-:::
-
 * Authentication parameters - (Optional) Passed to pyiceberg's
   [REST catalog](https://py.iceberg.apache.org/configuration/#rest-catalog),
   which exchanges them for an access token at Snowflake. Commonly used:

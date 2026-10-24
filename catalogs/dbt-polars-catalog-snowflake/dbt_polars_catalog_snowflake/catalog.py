@@ -43,9 +43,9 @@ class SnowflakeCatalogConfig(CatalogConfig):
             type="iceberg",
             schema=self.schema,
             pyiceberg_type="rest",
-            uri=HORIZON_URI.format(account=self.account),
-            warehouse=self.database_name.upper(),
             **{
+                "uri": HORIZON_URI.format(account=self.account),
+                "warehouse": self.database_name.upper(),
                 "header.X-Iceberg-Access-Delegation": "vended-credentials",
                 **role_scope,
                 **self.pyiceberg_kwargs,
@@ -63,9 +63,7 @@ class SnowflakeCatalog(IcebergCatalog):
     """Snowflake-managed Iceberg tables through Snowflake Horizon Catalog.
 
     Uses Horizon's Iceberg REST endpoint with credentials vended by Snowflake,
-    so no Snowflake warehouse is needed. Schema and table names are stored in
-    UPPERCASE, as Snowflake does for unquoted names, and lower-cased again for
-    dbt.
+    so no Snowflake warehouse is needed.
     """
 
     config: SnowflakeCatalogConfig  # type: ignore[assignment]
@@ -74,9 +72,3 @@ class SnowflakeCatalog(IcebergCatalog):
     def __init__(self, config: SnowflakeCatalogConfig, project_root: str) -> None:
         super().__init__(config.iceberg_config(), project_root)
         self.config = config
-
-    def catalog_name(self, name: str) -> str:
-        return name.upper()
-
-    def dbt_name(self, name: str) -> str:
-        return name.lower()
