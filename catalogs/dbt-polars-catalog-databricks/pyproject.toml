@@ -28,6 +28,7 @@ azure = ["azure-storage-file-datalake>=12.10.0"]
 
 [project.urls]
 Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
+Documentation = "https://datamindedbe.github.io/incubator-dbt-polars/catalogs/databricks"
 Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
 Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
 

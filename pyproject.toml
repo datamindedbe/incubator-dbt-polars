@@ -34,6 +34,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
+Documentation = "https://datamindedbe.github.io/incubator-dbt-polars/"
 Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
 Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
 
