@@ -8,13 +8,12 @@
 - [Fabric Catalog]: New catalog for Delta and Iceberg tables in a Microsoft Fabric Lakehouse.
 - [Snowflake Catalog]: New catalog for Snowflake-managed Iceberg tables through Snowflake Horizon Catalog.
 - `compute_threads` in the profile limits how many of the `threads` models run Polars at the same time; models waiting for an Iceberg commit let others compute.
-- [Iceberg Catalog]: Description and schema changes that the catalog rejects or can't confirm are retried, table and column descriptions are written in one commit, and unchanged descriptions are no longer committed again.
 
 ### Fixes
 
 - [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/incubator-dbt-polars/issues/45)).
 - [Iceberg Catalog] Merge and delete+insert no longer fail when a `unique_key` column contains NULL values.
-- [Databricks Catalog] Dropping a Delta table on Azure now deletes its storage folder; before, its files were left behind. Needs the new `azure` extra: `pip install 'dbt-polars-catalog-databricks[azure]'`.
+- [Databricks Catalog] Dropping a Delta table on Azure now deletes its storage folder. Requires installing `dbt-polars-catalog-databricks[azure]`.
 
 ## v0.4.0
 
