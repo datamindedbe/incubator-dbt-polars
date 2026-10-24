@@ -1,4 +1,4 @@
-# Databricks catalog
+# Databricks Unity Catalog
 
 Register Delta or Iceberg tables in Databricks Unity Catalog via the Databricks REST API.
 
@@ -62,7 +62,8 @@ To combine this catalog with others, put the same parameters in an entry of
 
 ### Parameter Reference
 
-The following parameters are supported:
+The following parameters are supported, in addition to the
+[common profile parameters](../catalog-overview.md#common-profile-parameters):
 
 * `catalog_type` - (Required) Must be `databricks`.
 

@@ -56,6 +56,26 @@ override), look it up from `target.catalogs` instead:
 schema: "{{ (target.catalogs | selectattr('name', 'equalto', 'archive') | first)['schema'] }}"
 ```
 
+### Common profile parameters
+
+These parameters apply to every catalog type. Each catalog page lists the
+parameters of that catalog on top of these.
+
+* `type` - (Required) Must be `polars`.
+
+* `catalog` - (Optional) Name of the default catalog. Defaults to
+  the first entry of `catalogs`, or `default` when `catalogs` isn't set.
+
+* `catalogs` - (Optional) List of catalogs, each with a `name`, a `type`, a
+  `schema` and the parameters of its catalog type.
+
+* `threads` - (Optional) Number of models dbt runs at the same time. Defaults
+  to 1.
+
+* `compute_threads` - (Optional) Number of those models that run Polars at the
+  same time, see [Running models in parallel](#running-models-in-parallel).
+  Unlimited by default.
+
 ### Running models in parallel
 
 Polars already uses all CPU cores for a single model, so `threads: 1` is usually

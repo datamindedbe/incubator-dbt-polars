@@ -1,4 +1,4 @@
-# Fabric catalog
+# Fabric OneLake
 
 Write Delta or Iceberg tables to a Microsoft Fabric Lakehouse via OneLake.
 
@@ -49,7 +49,8 @@ To combine this catalog with others, put the same parameters in an entry of
 
 ### Parameter Reference
 
-The following parameters are supported:
+The following parameters are supported, in addition to the
+[common profile parameters](../catalog-overview.md#common-profile-parameters):
 
 * `catalog_type` - (Required) Must be `fabric`.
 
