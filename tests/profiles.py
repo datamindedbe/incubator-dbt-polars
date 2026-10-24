@@ -172,7 +172,7 @@ def snowflake_catalog(name: str, schema: str) -> dict:
         "type": "snowflake",
         "name": name,
         "account": os.environ.get("SNOWFLAKE_ACCOUNT", ""),
-        "database": os.environ.get("SNOWFLAKE_DATABASE", ""),
+        "database_name": os.environ.get("SNOWFLAKE_DATABASE", ""),
         "role": os.environ.get("SNOWFLAKE_ROLE"),
         **snowflake_credentials(),
         "schema": schema,

@@ -282,7 +282,7 @@ def cleanup_snowflake_test_schemas(request):
     from tests.profiles import snowflake_catalog
 
     profile_config = snowflake_catalog("cleanup", "cleanup")
-    if not profile_config["account"] or not profile_config["database"]:
+    if not profile_config["account"] or not profile_config["database_name"]:
         return
     catalog = create_catalog(
         resolve_catalog_plugin("snowflake").config_class(**profile_config), ""

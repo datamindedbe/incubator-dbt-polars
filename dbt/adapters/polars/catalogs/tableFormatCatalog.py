@@ -237,15 +237,27 @@ class TableFormatCatalog(BaseCatalog):
 
     # ── comments ───────────────────────────────────────────────────────────────
 
+    def set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        column_comments: dict[str, str],
+    ) -> None:
+        self.catalog_for_existing(relation).set_comments(
+            relation, relation_comment, column_comments
+        )
+        if relation_comment is not None:
+            self.push_relation_comment(relation, relation_comment)
+        if column_comments:
+            self.push_column_comments(relation, column_comments)
+
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        self.catalog_for_existing(relation).set_relation_comment(relation, comment)
-        self.push_relation_comment(relation, comment)
+        self.set_comments(relation, comment, {})
 
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None:
-        self.catalog_for_existing(relation).set_column_comments(relation, comments)
-        self.push_column_comments(relation, comments)
+        self.set_comments(relation, None, comments)
 
     def get_relation_comment(self, relation: PolarsRelation) -> str | None:
         return self.catalog_for_existing(relation).get_relation_comment(relation)

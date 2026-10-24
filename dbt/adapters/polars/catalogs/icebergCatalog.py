@@ -22,6 +22,7 @@ from dbt.adapters.polars.catalogs.iceberg_write_utils import (
     delete_rows_by_keys,
     overwrite_keys_and_append,
 )
+from dbt.adapters.polars.compute_slots import compute_slots, releases_compute_slot
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.utils import resolve_relative_path
 
@@ -225,10 +226,13 @@ class IcebergCatalog(BaseCatalog):
                 if not hasattr(self, "_catalog_instance"):
                     from pyiceberg.catalog import load_catalog
 
-                    self._catalog_instance = load_catalog(
+                    catalog = load_catalog(
                         self.config.name,
                         **self._catalog_properties,
                     )
+                    # Table commits go through the catalog's commit_table
+                    catalog.commit_table = releases_compute_slot(catalog.commit_table)
+                    self._catalog_instance = catalog
         return self._catalog_instance
 
     def _load_table(self, identifier: tuple[str, str]) -> Table:
@@ -241,15 +245,40 @@ class IcebergCatalog(BaseCatalog):
         self._table_cache.pop(identifier, None)
 
     def _commit(
+        self,
+        identifier: tuple[str, str],
+        write: Callable[[Table], None],
+        data: pl.DataFrame | pl.LazyFrame | None = None,
+    ) -> None:
+        """Run `write`, which commits one change to the table.
+
+        The model's compute slot is released while it waits on the commit when
+        `data` is lazy: a collected DataFrame stays in memory until the model is
+        done, so the slot is kept.
+        """
+        with compute_slots.releasable(isinstance(data, pl.LazyFrame)):
+            since_last_commit = time.monotonic() - self.last_commit_times.get(
+                identifier, float("-inf")
+            )
+            if since_last_commit < self.min_commit_interval:
+                compute_slots.release()
+                time.sleep(self.min_commit_interval - since_last_commit)
+            # `write` computes and writes the data files before it commits
+            compute_slots.ensure_held()
+            try:
+                write(self._load_table(identifier))
+            except Exception:
+                self._invalidate_table_cache(identifier)
+                raise
+            self.last_commit_times[identifier] = time.monotonic()
+
+    def _commit_metadata(
         self, identifier: tuple[str, str], write: Callable[[Table], None]
     ) -> None:
-        """Run `write`, which commits one change to the table, with retries.
+        """Like `_commit`, but retried when rejected or when the result is unknown.
 
-        Some REST catalogs (e.g. Snowflake Horizon) reject a commit, or can't
-        tell whether it was applied, right after another commit on the table.
-        A commit with an unknown result counts as applied when the table's
-        current snapshot is a new one on top of the snapshot it started from;
-        otherwise, like a rejected commit, it's retried on a reloaded table.
+        Some REST catalogs (e.g. Snowflake Horizon) do this for a metadata commit
+        right after a data commit. Applying a metadata change twice is harmless.
         """
         from pyiceberg.exceptions import (
             CommitFailedException,
@@ -257,33 +286,14 @@ class IcebergCatalog(BaseCatalog):
         )
 
         for attempt in range(1, COMMIT_ATTEMPTS + 1):
-            start = self._load_table(identifier).metadata.current_snapshot_id
-            since_last_commit = time.monotonic() - self.last_commit_times.get(
-                identifier, float("-inf")
-            )
-            if since_last_commit < self.min_commit_interval:
-                time.sleep(self.min_commit_interval - since_last_commit)
             try:
-                write(self._load_table(identifier))
-                self.last_commit_times[identifier] = time.monotonic()
+                self._commit(identifier, write)
                 return
-            except CommitFailedException:
-                if attempt == COMMIT_ATTEMPTS:
-                    raise
-            except CommitStateUnknownException:
-                self._invalidate_table_cache(identifier)
-                current = self._load_table(identifier).current_snapshot()
-                if (
-                    current is not None
-                    and current.snapshot_id != start
-                    and current.parent_snapshot_id == start
-                ):
-                    self.last_commit_times[identifier] = time.monotonic()
-                    return
+            except (CommitFailedException, CommitStateUnknownException):
                 if attempt == COMMIT_ATTEMPTS:
                     raise
             logger.debug(f"Retrying commit to {identifier} (attempt {attempt + 1})")
-            self._invalidate_table_cache(identifier)
+            compute_slots.release()
             time.sleep(2**attempt)
 
     def catalog_name(self, name: str) -> str:
@@ -400,7 +410,7 @@ class IcebergCatalog(BaseCatalog):
                     _sync_partition_spec(transaction, partition_by)
                     _replace_in_single_snapshot(transaction, tbl.io, data, model_config)
 
-            self._commit(target_id, replace)
+            self._commit(target_id, replace, data)
         else:
             # Not create_table_transaction: Databricks Unity Catalog does not vend
             # storage credentials on a stage-create response, so writes to the
@@ -415,7 +425,7 @@ class IcebergCatalog(BaseCatalog):
                     _sync_partition_spec(transaction, partition_by)
                     _append_in_single_snapshot(transaction, tbl.io, data, model_config)
 
-            self._commit(target_id, append)
+            self._commit(target_id, append, data)
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
@@ -472,7 +482,7 @@ class IcebergCatalog(BaseCatalog):
                         update.union_by_name(arrow_schema)
                 _append_in_single_snapshot(transaction, tbl.io, data, model_config)
 
-        self._commit(self._id(relation), append)
+        self._commit(self._id(relation), append, data)
 
     def merge_relation(
         self,
@@ -503,7 +513,7 @@ class IcebergCatalog(BaseCatalog):
                 with tbl.update_schema() as update:
                     update.union_by_name(df.to_arrow().schema)
 
-            self._commit(identifier, evolve_schema)
+            self._commit_metadata(identifier, evolve_schema)
         if df.is_empty():
             return
         if except_cols is None:
@@ -623,7 +633,7 @@ class IcebergCatalog(BaseCatalog):
                         for column, comment in changed.items():
                             update.update_column(column, doc=comment)
 
-        self._commit(self._id(relation), set_all)
+        self._commit_metadata(self._id(relation), set_all)
 
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
         self.set_comments(relation, comment, {})

@@ -28,6 +28,7 @@ from dbt_common.exceptions import CompilationError, DbtRuntimeError
 
 import polars as pl
 from dbt.adapters.polars.catalogs import BaseCatalog, create_catalog
+from dbt.adapters.polars.compute_slots import compute_slots, holds_compute_slot
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
@@ -153,6 +154,7 @@ class PolarsAdapter(BaseAdapter):
         self._node_configs: dict[tuple, RelationConfig] = {}
         self._source_configs: dict[tuple, dict] = {}
         self.configs_loaded_from_manifest = False
+        compute_slots.configure(config.credentials.compute_threads)
 
     def set_macro_resolver(self, macro_resolver: Any) -> None:
         # Called when a new manifest is used
@@ -513,6 +515,7 @@ class PolarsAdapter(BaseAdapter):
         return "Duration"
 
     @available
+    @holds_compute_slot
     def polars_load_csv_rows(
         self,
         relation: PolarsRelation,
@@ -980,6 +983,7 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(f"Unknown incremental strategy: {strategy!r}")
 
     @available
+    @holds_compute_slot
     def polars_execute_incremental_model(
         self,
         relation: PolarsRelation,
@@ -1015,6 +1019,7 @@ class PolarsAdapter(BaseAdapter):
         )
 
     @available
+    @holds_compute_slot
     def polars_execute_model(
         self,
         relation: PolarsRelation,
@@ -1033,6 +1038,7 @@ class PolarsAdapter(BaseAdapter):
             relation, result, _normalize_partition_by(partition_by), model_config
         )
 
+    @holds_compute_slot
     def submit_python_job(
         self, parsed_model: dict, compiled_code: str
     ) -> AdapterResponse:
@@ -1095,6 +1101,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK")
 
     @available
+    @holds_compute_slot
     def polars_execute_sql_test(
         self,
         sql: str,
@@ -1131,6 +1138,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table
 
     @available
+    @holds_compute_slot
     def execute_python_test(
         self,
         parsed_model: dict,
@@ -1186,6 +1194,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table
 
     @available
+    @holds_compute_slot
     def polars_execute_snapshot(
         self,
         relation: PolarsRelation,
@@ -1412,6 +1421,7 @@ class PolarsAdapter(BaseAdapter):
             relation, rows_to_close, rows_to_insert, scd_id_col
         )
 
+    @holds_compute_slot
     def execute(
         self,
         sql: str,

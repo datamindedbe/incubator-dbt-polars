@@ -56,6 +56,28 @@ override), look it up from `target.catalogs` instead:
 schema: "{{ (target.catalogs | selectattr('name', 'equalto', 'archive') | first)['schema'] }}"
 ```
 
+### Running models in parallel
+
+Polars already uses all CPU cores for a single model, so `threads: 1` is usually
+fastest. With a remote catalog, such as Snowflake, much of a model's time is spent
+waiting for the catalog to commit. To use that time, run more models with `threads`
+and limit how many of them run Polars at the same time with `compute_threads`:
+
+```yaml
+    dev:
+      type: polars
+      threads: 4           # models dbt runs at the same time
+      compute_threads: 1   # of which run Polars at the same time
+      catalog_type: snowflake
+      ...
+```
+
+A model that waits for an Iceberg commit lets another model compute in the meantime.
+Models that hold a collected DataFrame, such as merge, delete+insert and snapshots,
+or Python models returning a DataFrame, keep running Polars until they finish, so
+memory stays bounded by `compute_threads` models. Without `compute_threads`, all
+`threads` models can run Polars at the same time.
+
 ### Supported file formats
 
 All storage-backed catalogs (local, azure) write files on disk. The `file_format` config on a model controls which format is used:

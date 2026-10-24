@@ -40,7 +40,7 @@ my_project:
       catalog_type: snowflake
       schema: dev
       account: myorg-myaccount
-      database: analytics
+      database_name: analytics
       role: transformer
       credential: "{{ env_var('SNOWFLAKE_PAT') }}"
 ```
@@ -48,6 +48,10 @@ my_project:
 To combine this catalog with others, put the same parameters in an entry of
 `catalogs`, with `type: snowflake` and a `name`, see
 [Catalog overview](../catalog-overview.md).
+
+Snowflake takes a few seconds per commit. Set for example `threads: 4` and
+`compute_threads: 1` so other models compute while a model waits for its commit, see
+[Running models in parallel](../catalog-overview.md#running-models-in-parallel).
 
 ### Parameter Reference
 
@@ -59,7 +63,7 @@ The following parameters are supported:
   `<organization>-<account>`, as returned by
   `SELECT CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME();`.
 
-* `database` - (Required) Snowflake database holding the Iceberg tables.
+* `database_name` - (Required) Snowflake database holding the Iceberg tables.
 
 * `schema` - (Required) Default schema for models. dbt-polars creates missing
   schemas.

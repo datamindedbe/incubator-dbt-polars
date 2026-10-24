@@ -18,7 +18,7 @@ def make_config(**kwargs) -> SnowflakeCatalogConfig:
         type="snowflake",
         schema="analytics",
         account="myorg-myaccount",
-        database="analytics_db",
+        database_name="analytics_db",
         **kwargs,
     )
 
@@ -168,7 +168,7 @@ def test_catalog_does_not_import_pyiceberg_until_used():
         "import sys\n"
         "from dbt_polars_catalog_snowflake import create_catalog, config_class\n"
         "create_catalog(config_class(name='s', type='snowflake', schema='s', "
-        "account='o-a', database='d'), '.')\n"
+        "account='o-a', database_name='d'), '.')\n"
         "assert not [m for m in sys.modules if m.startswith('pyiceberg')]\n"
     )
     subprocess.run([sys.executable, "-c", code], check=True)

@@ -1,4 +1,5 @@
-from typing import TypeVar, cast
+from collections.abc import Callable
+from typing import overload
 
 import polars as pl
 from dbt.adapters.polars.catalogs import (
@@ -12,8 +13,6 @@ from dbt_polars_catalog_snowflake.config import SnowflakeCatalogConfig
 
 FILE_FORMAT_HINT = "the snowflake catalog always writes Iceberg tables."
 
-Frame = TypeVar("Frame", bound=pl.DataFrame | pl.LazyFrame)
-
 
 def column_names(data: pl.DataFrame | pl.LazyFrame) -> list[str]:
     if isinstance(data, pl.LazyFrame):
@@ -21,7 +20,21 @@ def column_names(data: pl.DataFrame | pl.LazyFrame) -> list[str]:
     return data.columns
 
 
-def rename_columns(data: Frame, rename, description: str) -> Frame:
+@overload
+def rename_columns(
+    data: pl.DataFrame, rename: Callable[[str], str], description: str
+) -> pl.DataFrame: ...
+
+
+@overload
+def rename_columns(
+    data: pl.LazyFrame, rename: Callable[[str], str], description: str
+) -> pl.LazyFrame: ...
+
+
+def rename_columns(
+    data: pl.DataFrame | pl.LazyFrame, rename: Callable[[str], str], description: str
+) -> pl.DataFrame | pl.LazyFrame:
     """Rename every column with `rename`, failing on names that would collide."""
     names = column_names(data)
     renamed = [rename(name) for name in names]
@@ -30,7 +43,7 @@ def rename_columns(data: Frame, rename, description: str) -> Frame:
         raise DbtRuntimeError(
             f"Columns {', '.join(collisions)} only differ in case, which {description}."
         )
-    return cast(Frame, data.rename(dict(zip(names, renamed, strict=True))))
+    return data.rename(dict(zip(names, renamed, strict=True)))
 
 
 class SnowflakeCatalog(IcebergCatalog):
@@ -61,12 +74,20 @@ class SnowflakeCatalog(IcebergCatalog):
         """The name of a dbt column in Snowflake."""
         return name.upper() if self.config.uppercase_column_names else name
 
-    def to_snowflake(self, data: Frame) -> Frame:
+    @overload
+    def to_snowflake(self, data: pl.DataFrame) -> pl.DataFrame: ...
+
+    @overload
+    def to_snowflake(self, data: pl.LazyFrame) -> pl.LazyFrame: ...
+
+    def to_snowflake(
+        self, data: pl.DataFrame | pl.LazyFrame
+    ) -> pl.DataFrame | pl.LazyFrame:
         if not self.config.uppercase_column_names:
             return data
         return rename_columns(data, str.upper, "Snowflake stores as one column")
 
-    def to_dbt(self, data: Frame) -> Frame:
+    def to_dbt(self, data: pl.LazyFrame) -> pl.LazyFrame:
         if not self.config.uppercase_column_names:
             return data
         return rename_columns(data, str.lower, "dbt-polars reads as one column")

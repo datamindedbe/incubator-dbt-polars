@@ -6,7 +6,7 @@ HORIZON_URI = "https://{account}.snowflakecomputing.com/polaris/api/catalog"
 class SnowflakeCatalogConfig(CatalogConfig):
     """Config for Snowflake-managed Iceberg tables through Horizon Catalog.
 
-    `account` is the `<org>-<account>` identifier, `database` the Snowflake
+    `account` is the `<org>-<account>` identifier, `database_name` the Snowflake
     database holding the tables and `role` the role to act as.
     `uppercase_column_names` stores column names in UPPERCASE, as Snowflake does
     for unquoted names, and lower-cases them again when dbt-polars reads. Every
@@ -22,7 +22,7 @@ class SnowflakeCatalogConfig(CatalogConfig):
         type: str,
         schema: str,
         account: str,
-        database: str,
+        database_name: str,
         role: str | None = None,
         uppercase_column_names: bool = True,
         **kwargs: object,
@@ -31,7 +31,7 @@ class SnowflakeCatalogConfig(CatalogConfig):
         self.type = type
         self.schema = schema
         self.account = account
-        self.database = database
+        self.database_name = database_name
         self.role = role
         self.uppercase_column_names = uppercase_column_names
         self.pyiceberg_kwargs: dict[str, object] = kwargs
@@ -44,7 +44,7 @@ class SnowflakeCatalogConfig(CatalogConfig):
             schema=self.schema,
             pyiceberg_type="rest",
             uri=HORIZON_URI.format(account=self.account),
-            warehouse=self.database.upper(),
+            warehouse=self.database_name.upper(),
             **{
                 "header.X-Iceberg-Access-Delegation": "vended-credentials",
                 **role_scope,
@@ -53,7 +53,7 @@ class SnowflakeCatalogConfig(CatalogConfig):
         )
 
     def unique_field(self) -> str:
-        return f"{self.account}/{self.database}"
+        return f"{self.account}/{self.database_name}"
 
     def connection_keys(self) -> tuple[str, ...]:
-        return ("name", "account", "database", "role")
+        return ("name", "account", "database_name", "role")

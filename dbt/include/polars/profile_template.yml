@@ -53,7 +53,7 @@ prompts:
       _fixed_catalog_type: snowflake
       account:
         hint: "account identifier: <organization>-<account>"
-      database:
+      database_name:
         hint: "Snowflake database for the Iceberg tables"
       role:
         hint: "role to act as"

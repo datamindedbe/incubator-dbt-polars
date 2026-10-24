@@ -1,6 +1,9 @@
 from .adapter_methods import (
     BaseAdapterMethod,
 )
+from .compute_threads import (
+    BaseComputeThreads,
+)
 from .concurrency import (
     BaseConcurrency,
 )
@@ -41,6 +44,7 @@ from .table_materialization import (
 __all__ = [
     "BaseAdapterMethod",
     "BaseBasicSeedTests",
+    "BaseComputeThreads",
     "BaseConcurrency",
     "BaseDocsGenReferences",
     "BaseDocsGenerate",

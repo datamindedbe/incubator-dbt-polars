@@ -7,7 +7,8 @@
 - [Databricks Catalog]: Add support for iceberg tables in the Databricks catalog.
 - [Fabric Catalog]: New catalog for Delta and Iceberg tables in a Microsoft Fabric Lakehouse.
 - [Snowflake Catalog]: New catalog for Snowflake-managed Iceberg tables through Snowflake Horizon Catalog.
-- [Iceberg Catalog]: Commits that the catalog rejects or can't confirm are retried, and unchanged descriptions are no longer committed again.
+- `compute_threads` in the profile limits how many of the `threads` models run Polars at the same time; models waiting for an Iceberg commit let others compute.
+- [Iceberg Catalog]: Description and schema changes that the catalog rejects or can't confirm are retried, table and column descriptions are written in one commit, and unchanged descriptions are no longer committed again.
 
 ### Fixes
 
