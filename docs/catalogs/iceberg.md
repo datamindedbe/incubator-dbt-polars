@@ -69,6 +69,6 @@ catalogs:
 
 ## Notes
 
-Iceberg tables have no `file_format` setting — the format is always Iceberg. The `file_format` model config is ignored for Iceberg catalogs.
+Iceberg tables have no `file_format` setting — the format is always Iceberg. A model that sets `file_format` fails.
 
 Unsigned integer types (`UInt8`, `UInt16`, `UInt32`, `UInt64`) are automatically cast to their signed equivalents before writing, because Iceberg has no unsigned integer types.

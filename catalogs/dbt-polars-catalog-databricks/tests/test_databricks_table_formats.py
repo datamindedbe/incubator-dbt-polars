@@ -139,7 +139,7 @@ def test_iceberg_table_is_dropped_through_unity_catalog():
 def test_file_format_is_rejected():
     catalog, _ = databricks_catalog(None)
 
-    with pytest.raises(DbtRuntimeError, match="table_format"):
+    with pytest.raises(DbtRuntimeError, match="file_format is not supported"):
         catalog.write_relation(
             RELATION.incorporate(file_format="parquet"), DATA, [], {}
         )

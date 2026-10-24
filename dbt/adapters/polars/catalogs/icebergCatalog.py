@@ -378,6 +378,8 @@ class IcebergCatalog(BaseCatalog):
         partition_by: list[str],
         model_config: dict | None = None,
     ) -> None:
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
         model_config = model_config or {}
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
@@ -449,6 +451,12 @@ class IcebergCatalog(BaseCatalog):
             )
             for table_id in tables
         ]
+
+    def validate_incremental_relation(
+        self, relation: PolarsRelation, model_config: dict
+    ) -> None:
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
 
     def truncate_relation(
         self, relation: PolarsRelation, model_config: dict | None = None
@@ -588,6 +596,8 @@ class IcebergCatalog(BaseCatalog):
         scd_id_col: str = "dbt_scd_id",
         model_config: dict | None = None,
     ) -> None:
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
 

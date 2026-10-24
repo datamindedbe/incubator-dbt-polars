@@ -93,7 +93,9 @@ def test_listed_tables_get_dbt_names():
     ],
 )
 def test_writes_reject_file_format(write):
-    with pytest.raises(DbtRuntimeError, match="always writes Iceberg"):
+    with pytest.raises(
+        DbtRuntimeError, match="file_format is not supported for the snowflake catalog"
+    ):
         write(make_catalog(), relation(file_format="parquet"))
 
 
@@ -109,57 +111,15 @@ def record_iceberg_calls(monkeypatch, method: str, returns=None) -> list[tuple]:
     return calls
 
 
-def test_written_columns_are_upper_cased(monkeypatch):
+def test_column_names_are_written_as_they_are_in_dbt(monkeypatch):
     calls = record_iceberg_calls(monkeypatch, "write_relation")
 
     make_catalog().write_relation(
-        relation(), pl.DataFrame({"id": [1], "Name": ["a"]}), ["id"], {}
+        relation(), pl.DataFrame({"id": [1], "CustomerName": ["a"]}), ["id"], {}
     )
 
     _, data, partition_by, _ = calls[0]
-    assert data.columns == ["ID", "NAME"]
-    assert partition_by == ["ID"]
-
-
-def test_merge_keys_and_except_columns_are_upper_cased(monkeypatch):
-    calls = record_iceberg_calls(monkeypatch, "merge_relation")
-
-    make_catalog().merge_relation(
-        relation(), pl.DataFrame({"id": [1], "name": ["a"]}), ["id"], ["name"]
-    )
-
-    _, df, keys, except_cols, *_ = calls[0]
-    assert df.columns == ["ID", "NAME"]
-    assert keys == ["ID"]
-    assert except_cols == ["NAME"]
-
-
-def test_read_columns_are_lower_cased(monkeypatch):
-    record_iceberg_calls(
-        monkeypatch, "get_relation", pl.LazyFrame({"ID": [1], "NAME": ["a"]})
-    )
-
-    frame = make_catalog().get_relation(relation())
-
-    assert frame.collect_schema().names() == ["id", "name"]
-
-
-def test_columns_differing_only_in_case_are_rejected(monkeypatch):
-    record_iceberg_calls(monkeypatch, "append_relation")
-
-    with pytest.raises(DbtRuntimeError, match="only differ in case"):
-        make_catalog().append_relation(relation(), pl.DataFrame({"id": [1], "ID": [2]}))
-
-
-def test_column_names_are_kept_when_upper_casing_is_off(monkeypatch):
-    calls = record_iceberg_calls(monkeypatch, "write_relation")
-
-    make_catalog(uppercase_column_names=False).write_relation(
-        relation(), pl.DataFrame({"id": [1]}), ["id"], {}
-    )
-
-    _, data, partition_by, _ = calls[0]
-    assert data.columns == ["id"]
+    assert data.columns == ["id", "CustomerName"]
     assert partition_by == ["id"]
 
 

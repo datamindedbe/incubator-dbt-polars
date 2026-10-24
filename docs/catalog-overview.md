@@ -97,7 +97,7 @@ models:
     +file_format: delta
 ```
 
-Iceberg catalogs always use the Iceberg format — the `file_format` config has no effect there.
+Iceberg catalogs always use the Iceberg format, so a model that sets `file_format` fails there.
 
 ### Reading files as sources
 

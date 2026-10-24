@@ -8,15 +8,6 @@ import polars as pl
 from dbt.adapters.polars.relation import PolarsRelation
 
 
-def reject_file_format(relation: PolarsRelation, catalog_type: str, hint: str) -> None:
-    """Fail when a model sets file_format in a catalog that would ignore it."""
-    if relation.file_format is not None:
-        raise DbtRuntimeError(
-            f"file_format is not supported by the {catalog_type} catalog "
-            f"(got {relation.file_format!r} for {relation}). Remove it; {hint}"
-        )
-
-
 def get_write_options(
     method: Callable,
     model_config: dict,
@@ -76,6 +67,12 @@ class BaseCatalog(ABC):
     def __init__(self, config: CatalogConfig, project_root: str = ""):
         self.schema = config.schema
         self.config = config
+
+    def file_format_not_supported(self) -> DbtRuntimeError:
+        """For catalogs whose table format doesn't come from `file_format`."""
+        return DbtRuntimeError(
+            f"file_format is not supported for the {self.config.type} catalog."
+        )
 
     @abstractmethod
     def create_schema(self, relation: PolarsRelation) -> None: ...

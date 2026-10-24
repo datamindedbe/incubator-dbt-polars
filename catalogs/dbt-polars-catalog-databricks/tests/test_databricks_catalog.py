@@ -1,7 +1,10 @@
 import pytest
 
 from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
-from dbt_polars_catalog_databricks.delta import DatabricksDeltaCatalog
+from dbt_polars_catalog_databricks.delta import (
+    DatabricksDeltaCatalog,
+    delete_azure_directory,
+)
 from dbt_polars_catalog_databricks.unity_catalog import (
     UnityCatalogClient,
     alter_column_comments_sql,
@@ -94,6 +97,64 @@ def test_dropping_managed_delta_table_only_unregisters_it():
     catalog.drop_table(table)
 
     assert requests == [("DELETE", "/api/2.1/unity-catalog/tables/main.schema.table")]
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, continuation: str | None = None) -> None:
+        self.status_code = status_code
+        self.headers = {"x-ms-continuation": continuation} if continuation else {}
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def record_azure_deletes(monkeypatch, responses: list) -> list[dict]:
+    import requests
+
+    calls: list[dict] = []
+
+    def delete(url, *, params, headers, timeout):
+        calls.append({"url": url, "params": dict(params), "headers": headers})
+        return responses.pop(0)
+
+    monkeypatch.setattr(requests, "delete", delete)
+    return calls
+
+
+def test_azure_storage_is_deleted_as_one_directory(monkeypatch):
+    calls = record_azure_deletes(monkeypatch, [FakeResponse(200)])
+
+    delete_azure_directory(f"{TABLE_URI}/", {"sas_token": "?sv=1&sig=x"})
+
+    assert calls == [
+        {
+            "url": "https://account.dfs.core.windows.net/container/schema/table"
+            "?sv=1&sig=x",
+            "params": {"recursive": "true"},
+            "headers": {"x-ms-version": "2021-08-06"},
+        }
+    ]
+
+
+def test_azure_directory_delete_follows_continuations(monkeypatch):
+    calls = record_azure_deletes(
+        monkeypatch, [FakeResponse(200, "next"), FakeResponse(200)]
+    )
+
+    delete_azure_directory(TABLE_URI, {"bearer_token": "aad"})
+
+    assert [call["params"] for call in calls] == [
+        {"recursive": "true"},
+        {"recursive": "true", "continuation": "next"},
+    ]
+    assert calls[0]["headers"]["Authorization"] == "Bearer aad"
+
+
+def test_already_deleted_azure_directory_is_not_an_error(monkeypatch):
+    record_azure_deletes(monkeypatch, [FakeResponse(404)])
+
+    delete_azure_directory(TABLE_URI, {"sas_token": "sv=1"})
 
 
 def test_quote_identifier_wraps_in_backticks():

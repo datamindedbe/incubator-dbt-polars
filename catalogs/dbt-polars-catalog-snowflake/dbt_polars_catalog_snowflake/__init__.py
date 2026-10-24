@@ -1,5 +1,7 @@
-from dbt_polars_catalog_snowflake.catalog import SnowflakeCatalog
-from dbt_polars_catalog_snowflake.config import SnowflakeCatalogConfig
+from dbt_polars_catalog_snowflake.catalog import (
+    SnowflakeCatalog,
+    SnowflakeCatalogConfig,
+)
 
 config_class = SnowflakeCatalogConfig
 create_catalog = SnowflakeCatalog

@@ -70,14 +70,10 @@ The following parameters are supported:
 
 * `role` - (Optional) Role dbt-polars acts as.
 
-* `uppercase_column_names` - (Optional) Store column names in UPPERCASE, as
-  Snowflake does for unquoted names, so they can be queried without quotes.
-  dbt-polars reads them back in lowercase. Defaults to `true`. Changing it for
-  an existing table requires `--full-refresh`.
-
 :::info
-Schema and table names are always stored in UPPERCASE, like dbt-snowflake does
-by default.
+Schema and table names are stored in UPPERCASE, like dbt-snowflake does by
+default. Column names are stored as they are in the dbt project, so in Snowflake
+SQL, lowercase column names need quotes: `select "customer_id" from orders`.
 :::
 
 * Authentication parameters - (Optional) Passed to pyiceberg's

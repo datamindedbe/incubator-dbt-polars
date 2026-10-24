@@ -10,7 +10,6 @@ from dbt.adapters.polars.catalogs.baseCatalog import (
     BaseCatalog,
     CatalogConfig,
     get_write_options,
-    reject_file_format,
 )
 from dbt.adapters.polars.catalogs.formats import FILE_FORMATS
 from dbt.adapters.polars.catalogs.icebergCatalog import (
@@ -44,7 +43,6 @@ __all__ = [
     "external_location_of",
     "file_format_of",
     "get_write_options",
-    "reject_file_format",
     "resolve_catalog_plugin",
     "resolve_relative_path",
 ]

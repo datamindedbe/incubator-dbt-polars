@@ -3,14 +3,17 @@ name: CI (Fabric)
 on:
   pull_request:
 
-# One run at a time on the capacity: a finishing run pauses it for everyone.
 concurrency:
-  group: fabric-capacity
-  cancel-in-progress: false
+  group: ci-fabric-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   test-fabric:
     name: "Test fabric"
+    # One run at a time on the capacity: a finishing run pauses it for everyone.
+    concurrency:
+      group: fabric-capacity
+      cancel-in-progress: false
     environment:
       name: fabric
       deployment: false
@@ -56,11 +59,11 @@ jobs:
           exit 1
 
       - name: Run tests (delta tables)
-        run: uv run --python 3.12 pytest -n auto --profile fabric
+        run: uv run --python 3.12 pytest -n 8 --profile fabric
 
       - name: Run tests (iceberg tables)
         if: (success() || failure()) && steps.resume.outcome == 'success'
-        run: uv run --python 3.12 pytest -n auto --profile fabric --config table_format_iceberg
+        run: uv run --python 3.12 pytest -n 8 --profile fabric --config table_format_iceberg
 
       - name: Pause capacity
         if: always()

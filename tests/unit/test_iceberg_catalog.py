@@ -1,5 +1,6 @@
 import polars as pl
 import pytest
+from dbt_common.exceptions import DbtRuntimeError
 
 from dbt.adapters.polars.catalogs import (
     PolarsRelation,
@@ -60,3 +61,20 @@ class TestIcebergCatalog(CatalogTests):
             "id": "Identifier.",
             "name": "Full name.",
         }
+
+    @pytest.mark.parametrize(
+        "write",
+        [
+            lambda catalog, rel: catalog.write_relation(rel, pl.DataFrame(), []),
+            lambda catalog, rel: catalog.validate_incremental_relation(rel, {}),
+            lambda catalog, rel: catalog.apply_snapshot_delta(
+                rel, pl.DataFrame(), pl.DataFrame()
+            ),
+        ],
+    )
+    def test_writes_reject_file_format(self, catalog, write):
+        relation = PolarsRelation.create(
+            schema="docs", identifier="customers", file_format="parquet"
+        )
+        with pytest.raises(DbtRuntimeError, match="not supported for the iceberg"):
+            write(catalog, relation)
