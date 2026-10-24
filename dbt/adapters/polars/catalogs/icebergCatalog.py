@@ -3,6 +3,8 @@ from __future__ import annotations
 import itertools
 import re
 import threading
+import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, overload
 
 from dbt.adapters.contracts.relation import RelationType
@@ -20,6 +22,7 @@ from dbt.adapters.polars.catalogs.iceberg_write_utils import (
     delete_rows_by_keys,
     overwrite_keys_and_append,
 )
+from dbt.adapters.polars.compute_slots import compute_slots, releases_compute_slot
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.utils import resolve_relative_path
 
@@ -27,6 +30,8 @@ if TYPE_CHECKING:
     from pyiceberg.table import Table
 
 logger = AdapterLogger("polars")
+
+COMMIT_ATTEMPTS = 4
 
 _UNSIGNED_TO_SIGNED: dict[type, type[pl.DataType]] = {
     pl.UInt8: pl.Int8,
@@ -66,6 +71,10 @@ _ICEBERG_TO_POLARS_STORAGE_OPTIONS: dict[str, str] = {
     "adls.client-id": "client_id",
     "adls.client-secret": "client_secret",
     "adls.tenant-id": "tenant_id",
+    "s3.access-key-id": "aws_access_key_id",
+    "s3.secret-access-key": "aws_secret_access_key",
+    "s3.session-token": "aws_session_token",
+    "s3.region": "aws_region",
 }
 
 # Matches adls.sas-token.<account>.dfs.core.windows.net (not the -expires-at-ms variant)
@@ -83,7 +92,13 @@ def _extract_vended_sas(io_props: dict, opts: dict) -> None:
             break
 
 
-_SPECIAL_EXTRACTORS = [_extract_vended_sas]
+def _extract_vended_s3_region(io_props: dict, opts: dict) -> None:
+    # pyiceberg's generic client.region only applies when the credentials are S3
+    if "aws_access_key_id" in opts and "client.region" in io_props:
+        opts.setdefault("aws_region", io_props["client.region"])
+
+
+_SPECIAL_EXTRACTORS = [_extract_vended_sas, _extract_vended_s3_region]
 
 
 def _storage_options(tbl: Table) -> dict[str, str] | None:
@@ -184,6 +199,9 @@ def _resolve_relative_uri(uri: str, prefix: str, project_root: str) -> str:
 
 class IcebergCatalog(BaseCatalog):
     config: IcebergCatalogConfig
+    # Seconds to wait between commits to the same table, for catalogs that
+    # reject a commit right after the previous one
+    min_commit_interval: float = 0
 
     def __init__(self, config: IcebergCatalogConfig, project_root: str) -> None:
         super().__init__(config)
@@ -197,6 +215,7 @@ class IcebergCatalog(BaseCatalog):
                     break
         self._catalog_properties = properties
         self._table_cache: dict[tuple[str, str], Any] = {}
+        self.last_commit_times: dict[tuple[str, str], float] = {}
         self._known_namespaces: set[str] = set()
         self._catalog_lock = threading.Lock()
 
@@ -207,10 +226,13 @@ class IcebergCatalog(BaseCatalog):
                 if not hasattr(self, "_catalog_instance"):
                     from pyiceberg.catalog import load_catalog
 
-                    self._catalog_instance = load_catalog(
+                    catalog = load_catalog(
                         self.config.name,
                         **self._catalog_properties,
                     )
+                    # Table commits go through the catalog's commit_table
+                    catalog.commit_table = releases_compute_slot(catalog.commit_table)
+                    self._catalog_instance = catalog
         return self._catalog_instance
 
     def _load_table(self, identifier: tuple[str, str]) -> Table:
@@ -222,6 +244,57 @@ class IcebergCatalog(BaseCatalog):
     def _invalidate_table_cache(self, identifier: tuple[str, str]) -> None:
         self._table_cache.pop(identifier, None)
 
+    def _commit(
+        self,
+        identifier: tuple[str, str],
+        write: Callable[[Table], None],
+        data: pl.DataFrame | pl.LazyFrame | None = None,
+    ) -> None:
+        """Run `write`, which commits one change to the table.
+
+        The model's compute slot is released while it waits on the commit when
+        `data` is lazy: a collected DataFrame stays in memory until the model is
+        done, so the slot is kept.
+        """
+        with compute_slots.releasable(isinstance(data, pl.LazyFrame)):
+            since_last_commit = time.monotonic() - self.last_commit_times.get(
+                identifier, float("-inf")
+            )
+            if since_last_commit < self.min_commit_interval:
+                compute_slots.release()
+                time.sleep(self.min_commit_interval - since_last_commit)
+            # `write` computes and writes the data files before it commits
+            compute_slots.ensure_held()
+            try:
+                write(self._load_table(identifier))
+            except Exception:
+                self._invalidate_table_cache(identifier)
+                raise
+            self.last_commit_times[identifier] = time.monotonic()
+
+    def _commit_metadata(
+        self, identifier: tuple[str, str], write: Callable[[Table], None]
+    ) -> None:
+        """Like `_commit`, but retried when rejected or when the result is unknown.
+
+        Some REST catalogs (e.g. Snowflake Horizon) do this for a metadata commit
+        right after a data commit. Applying a metadata change twice is harmless.
+        """
+        from pyiceberg.exceptions import (
+            CommitFailedException,
+            CommitStateUnknownException,
+        )
+
+        for attempt in range(1, COMMIT_ATTEMPTS + 1):
+            try:
+                self._commit(identifier, write)
+                return
+            except (CommitFailedException, CommitStateUnknownException):
+                if attempt == COMMIT_ATTEMPTS:
+                    raise
+            logger.debug(f"Retrying commit to {identifier} (attempt {attempt + 1})")
+            time.sleep(2**attempt)
+
     def _id(self, relation: PolarsRelation) -> tuple[str, str]:
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
@@ -232,32 +305,33 @@ class IcebergCatalog(BaseCatalog):
     def create_schema(self, relation: PolarsRelation) -> None:
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
-        if relation.schema in self._known_namespaces:
+        namespace = relation.schema
+        if namespace in self._known_namespaces:
             return
         from pyiceberg.exceptions import NamespaceAlreadyExistsError
 
-        logger.debug(f"Creating schema {relation.catalog}/{relation.schema}")
+        logger.debug(f"Creating schema {relation.catalog}/{namespace}")
         try:
-            self._catalog.create_namespace((relation.schema,))
+            self._catalog.create_namespace((namespace,))
         except NamespaceAlreadyExistsError:
             pass
-        self._known_namespaces.add(relation.schema)
+        self._known_namespaces.add(namespace)
 
     def drop_schema(self, relation: PolarsRelation) -> None:
         from pyiceberg.exceptions import NoSuchNamespaceError
 
         if relation.schema is None:
             raise DbtRuntimeError(f"Relation {relation} is missing a schema")
-        logger.debug(f"Dropping schema {relation.catalog}/{relation.schema}")
-        namespace = (relation.schema,)
+        namespace = relation.schema
+        logger.debug(f"Dropping schema {relation.catalog}/{namespace}")
         try:
-            for table_id in self._catalog.list_tables(namespace):
+            for table_id in self._catalog.list_tables((namespace,)):
                 self._catalog.purge_table(table_id)
                 self._invalidate_table_cache(table_id)
-            self._catalog.drop_namespace(namespace)
+            self._catalog.drop_namespace((namespace,))
         except NoSuchNamespaceError:
             pass
-        self._known_namespaces.discard(relation.schema)
+        self._known_namespaces.discard(namespace)
 
     def list_schemas(self) -> list[str]:
         return [ns[0] for ns in self._catalog.list_namespaces()]
@@ -292,6 +366,8 @@ class IcebergCatalog(BaseCatalog):
         partition_by: list[str],
         model_config: dict | None = None,
     ) -> None:
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
         model_config = model_config or {}
         logger.debug(
             f"Writing table {relation.catalog}/{relation.schema}/{relation.identifier}"
@@ -316,23 +392,30 @@ class IcebergCatalog(BaseCatalog):
         self.create_schema(relation)
 
         if self._catalog.table_exists(target_id):
-            tbl = self._load_table(target_id)
             # Single commit: old snapshots remain until snapshot expiry,
             # unlike the previous purge-and-rename.
-            with tbl.transaction() as transaction:
-                _sync_schema(transaction, tbl.schema(), arrow_schema)
-                _sync_partition_spec(transaction, partition_by)
-                _replace_in_single_snapshot(transaction, tbl.io, data, model_config)
+            def replace(tbl: Table) -> None:
+                with tbl.transaction() as transaction:
+                    _sync_schema(transaction, tbl.schema(), arrow_schema)
+                    _sync_partition_spec(transaction, partition_by)
+                    _replace_in_single_snapshot(transaction, tbl.io, data, model_config)
+
+            self._commit(target_id, replace, data)
         else:
             # Not create_table_transaction: Databricks Unity Catalog does not vend
             # storage credentials on a stage-create response, so writes to the
             # staged table fail. Create first (creates an empty, visible table),
             # then write all data in one commit.
-            tbl = self._catalog.create_table(target_id, schema=arrow_schema)
-            self._table_cache[target_id] = tbl
-            with tbl.transaction() as transaction:
-                _sync_partition_spec(transaction, partition_by)
-                _append_in_single_snapshot(transaction, tbl.io, data, model_config)
+            self._table_cache[target_id] = self._catalog.create_table(
+                target_id, schema=arrow_schema
+            )
+
+            def append(tbl: Table) -> None:
+                with tbl.transaction() as transaction:
+                    _sync_partition_spec(transaction, partition_by)
+                    _append_in_single_snapshot(transaction, tbl.io, data, model_config)
+
+            self._commit(target_id, append, data)
 
     def list_relations_without_caching(
         self, schema_relation: PolarsRelation
@@ -357,6 +440,12 @@ class IcebergCatalog(BaseCatalog):
             for table_id in tables
         ]
 
+    def validate_incremental_relation(
+        self, relation: PolarsRelation, model_config: dict
+    ) -> None:
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
+
     def truncate_relation(
         self, relation: PolarsRelation, model_config: dict | None = None
     ) -> None:
@@ -365,7 +454,7 @@ class IcebergCatalog(BaseCatalog):
             f"Truncating table {relation.catalog}/"
             f"{relation.schema}/{relation.identifier}"
         )
-        self._load_table(self._id(relation)).delete()
+        self._commit(self._id(relation), lambda tbl: tbl.delete())
 
     def append_relation(
         self,
@@ -376,17 +465,20 @@ class IcebergCatalog(BaseCatalog):
     ) -> None:
         model_config = model_config or {}
         data = _cast_unsigned_to_signed(data)
-        tbl = self._load_table(self._id(relation))
-        with tbl.transaction() as transaction:
-            if allow_schema_evolution:
-                arrow_schema = (
-                    data.collect_schema().to_arrow()
-                    if isinstance(data, pl.LazyFrame)
-                    else data.to_arrow().schema
-                )
-                with transaction.update_schema() as update:
-                    update.union_by_name(arrow_schema)
-            _append_in_single_snapshot(transaction, tbl.io, data, model_config)
+
+        def append(tbl: Table) -> None:
+            with tbl.transaction() as transaction:
+                if allow_schema_evolution:
+                    arrow_schema = (
+                        data.collect_schema().to_arrow()
+                        if isinstance(data, pl.LazyFrame)
+                        else data.to_arrow().schema
+                    )
+                    with transaction.update_schema() as update:
+                        update.union_by_name(arrow_schema)
+                _append_in_single_snapshot(transaction, tbl.io, data, model_config)
+
+        self._commit(self._id(relation), append, data)
 
     def merge_relation(
         self,
@@ -410,44 +502,55 @@ class IcebergCatalog(BaseCatalog):
                 "IcebergCatalog does not support incremental_predicates for merge"
             )
         keys = list(dict.fromkeys(keys))  # deduplicate, preserve order
-        tbl = self._load_table(self._id(relation))
+        identifier = self._id(relation)
         if allow_schema_evolution:
-            with tbl.update_schema() as update:
-                update.union_by_name(df.to_arrow().schema)
+
+            def evolve_schema(tbl: Table) -> None:
+                with tbl.update_schema() as update:
+                    update.union_by_name(df.to_arrow().schema)
+
+            self._commit_metadata(identifier, evolve_schema)
         if df.is_empty():
             return
         if except_cols is None:
-            with tbl.transaction() as transaction:
-                overwrite_keys_and_append(tbl, transaction, tbl.io, keys, df, df)
-            self._invalidate_table_cache(self._id(relation))
+
+            def merge(tbl: Table) -> None:
+                with tbl.transaction() as transaction:
+                    overwrite_keys_and_append(tbl, transaction, tbl.io, keys, df, df)
+
+            self._commit(identifier, merge)
+            self._invalidate_table_cache(identifier)
             return
 
         except_set = set(except_cols)
         update_cols = [c for c in df.columns if c not in keys and c not in except_set]
 
-        counter = itertools.count(0)
-        with tbl.transaction() as transaction:
-            with transaction.update_snapshot().overwrite() as snapshot_writer:
-                matched_existing = delete_rows_by_keys(
-                    tbl, transaction, snapshot_writer, tbl.io, keys, df, counter
-                )
-                matched_keys = matched_existing.select(keys)
-                updated_rows = _apply_partial_update(
-                    matched_existing,
-                    df.join(matched_keys, on=keys, how="semi"),
-                    keys,
-                    update_cols,
-                )
-                incoming_new_rows = df.join(matched_keys, on=keys, how="anti")
-                _write_data_files(
-                    snapshot_writer,
-                    transaction,
-                    tbl.io,
-                    pl.concat([updated_rows, incoming_new_rows]),
-                    {},
-                    counter=counter,
-                )
-        self._invalidate_table_cache(self._id(relation))
+        def merge_partially(tbl: Table) -> None:
+            counter = itertools.count(0)
+            with tbl.transaction() as transaction:
+                with transaction.update_snapshot().overwrite() as snapshot_writer:
+                    matched_existing = delete_rows_by_keys(
+                        tbl, transaction, snapshot_writer, tbl.io, keys, df, counter
+                    )
+                    matched_keys = matched_existing.select(keys)
+                    updated_rows = _apply_partial_update(
+                        matched_existing,
+                        df.join(matched_keys, on=keys, how="semi"),
+                        keys,
+                        update_cols,
+                    )
+                    incoming_new_rows = df.join(matched_keys, on=keys, how="anti")
+                    _write_data_files(
+                        snapshot_writer,
+                        transaction,
+                        tbl.io,
+                        pl.concat([updated_rows, incoming_new_rows]),
+                        {},
+                        counter=counter,
+                    )
+
+        self._commit(identifier, merge_partially)
+        self._invalidate_table_cache(identifier)
 
     def delete_matched_relation(
         self,
@@ -464,9 +567,13 @@ class IcebergCatalog(BaseCatalog):
         if df.is_empty():
             return
 
-        tbl = self._load_table(self._id(relation))
-        with tbl.transaction() as transaction:
-            overwrite_keys_and_append(tbl, transaction, tbl.io, keys, df, df.clear())
+        def delete_matched(tbl: Table) -> None:
+            with tbl.transaction() as transaction:
+                overwrite_keys_and_append(
+                    tbl, transaction, tbl.io, keys, df, df.clear()
+                )
+
+        self._commit(self._id(relation), delete_matched)
         self._invalidate_table_cache(self._id(relation))
 
     def apply_snapshot_delta(
@@ -477,27 +584,58 @@ class IcebergCatalog(BaseCatalog):
         scd_id_col: str = "dbt_scd_id",
         model_config: dict | None = None,
     ) -> None:
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
         if rows_to_close.is_empty() and rows_to_insert.is_empty():
             return
 
-        tbl = self._load_table(self._id(relation))
-        if rows_to_close.is_empty():
+        def apply_delta(tbl: Table) -> None:
             with tbl.transaction() as transaction:
-                _append_in_single_snapshot(transaction, tbl.io, rows_to_insert, {})
-        else:
-            all_new = _cast_unsigned_to_signed(
-                pl.concat([rows_to_close, rows_to_insert])
-            )
-            with tbl.transaction() as transaction:
-                overwrite_keys_and_append(
-                    tbl, transaction, tbl.io, [scd_id_col], rows_to_close, all_new
-                )
+                if rows_to_close.is_empty():
+                    _append_in_single_snapshot(transaction, tbl.io, rows_to_insert, {})
+                else:
+                    all_new = _cast_unsigned_to_signed(
+                        pl.concat([rows_to_close, rows_to_insert])
+                    )
+                    overwrite_keys_and_append(
+                        tbl, transaction, tbl.io, [scd_id_col], rows_to_close, all_new
+                    )
+
+        self._commit(self._id(relation), apply_delta)
         self._invalidate_table_cache(self._id(relation))
 
-    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
+    def set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        column_comments: dict[str, str],
+    ) -> None:
         tbl = self._load_table(self._id(relation))
-        with tbl.transaction() as tx:
-            tx.set_properties(comment=comment)
+        # Skipped when unchanged, e.g. after a table was replaced in place
+        if tbl.properties.get("comment") == relation_comment:
+            relation_comment = None
+        current = {field.name: field.doc for field in tbl.schema().fields}
+        changed = {
+            column: comment
+            for column, comment in column_comments.items()
+            if current.get(column) != comment
+        }
+        if relation_comment is None and not changed:
+            return
+
+        def set_all(tbl: Table) -> None:
+            with tbl.transaction() as tx:
+                if relation_comment is not None:
+                    tx.set_properties(comment=relation_comment)
+                if changed:
+                    with tx.update_schema() as update:
+                        for column, comment in changed.items():
+                            update.update_column(column, doc=comment)
+
+        self._commit_metadata(self._id(relation), set_all)
+
+    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
+        self.set_comments(relation, comment, {})
 
     def get_relation_comment(self, relation: PolarsRelation) -> str | None:
         tbl = self._load_table(self._id(relation))
@@ -506,10 +644,7 @@ class IcebergCatalog(BaseCatalog):
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None:
-        tbl = self._load_table(self._id(relation))
-        with tbl.update_schema() as update:
-            for column, comment in comments.items():
-                update.update_column(column, doc=comment)
+        self.set_comments(relation, None, comments)
 
     def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
         tbl = self._load_table(self._id(relation))

@@ -1,4 +1,6 @@
+import json
 import os
+import urllib.request
 
 
 def azure_blob_catalog(name: str, prefix: str, schema: str) -> dict:
@@ -142,4 +144,43 @@ def fabric_target(schema: str) -> dict:
     return {
         "type": "polars",
         "catalogs": [fabric_catalog("primary", schema)],
+    }
+
+
+def github_oidc_token(audience: str) -> str:
+    # GitHub ID tokens expire after about 10 minutes, so each profile requests a new one
+    request_token = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+    request = urllib.request.Request(
+        f"{os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']}&audience={audience}",
+        headers={"Authorization": f"Bearer {request_token}"},
+    )
+    with urllib.request.urlopen(request) as response:
+        return json.load(response)["value"]
+
+
+def snowflake_credentials() -> dict:
+    if "ACTIONS_ID_TOKEN_REQUEST_URL" in os.environ:
+        return {
+            "credential": github_oidc_token("snowflakecomputing.com"),
+            "header.X-Snowflake-Workload-Identity-Provider": "OIDC",
+        }
+    return {"credential": os.environ.get("SNOWFLAKE_PAT", "")}
+
+
+def snowflake_catalog(name: str, schema: str) -> dict:
+    return {
+        "type": "snowflake",
+        "name": name,
+        "account": os.environ.get("SNOWFLAKE_ACCOUNT", ""),
+        "database_name": os.environ.get("SNOWFLAKE_DATABASE", ""),
+        "role": os.environ.get("SNOWFLAKE_ROLE"),
+        **snowflake_credentials(),
+        "schema": schema,
+    }
+
+
+def snowflake_target(schema: str) -> dict:
+    return {
+        "type": "polars",
+        "catalogs": [snowflake_catalog("primary", schema)],
     }

@@ -1,8 +1,13 @@
-# Azure catalog
+# Azure Blob Storage
 
-The Azure catalog stores tables as files on Azure Blob Storage or Azure Data Lake Storage Gen2 (ADLS Gen2).
+Store tables as files on Azure Blob Storage or Azure Data Lake Storage Gen2 (ADLS Gen2).
 
-**Status:** Experimental
+## Supported features
+
+| Feature | Status | Remarks |
+|---|---|---|
+| Read/write Delta tables | ✅ | Default `file_format` |
+| Read/write Parquet, CSV and NDJSON files | ✅ | Set `file_format` on the model |
 
 ## Installation
 
@@ -12,78 +17,51 @@ pip install 'dbt-polars[azure]'
 
 ## Profile configuration
 
+### Example
+
 ```yaml
 my_project:
   target: dev
   outputs:
     dev:
       type: polars
+      catalog_type: azure
       schema: dev
-      catalogs:
-        - name: my_catalog
-          type: azure
-          account_name: mystorageaccount
-          container: mycontainer
-          prefix: optional/path/prefix   # optional; prepended to all paths
-          credentials:
-            # see Authentication section below
+      account_name: mystorageaccount
+      container: mycontainer
+      prefix: optional/path/prefix
 ```
 
-### Configuration options
+To combine this catalog with others, put the same parameters in an entry of
+`catalogs`, with `type: azure` and a `name`, see
+[Catalog overview](../catalog-overview.md).
 
-| Key | Required | Description |
-|---|---|---|
-| `name` | Yes | Catalog name. Used as the `database` identifier in dbt. |
-| `type` | Yes | Must be `azure`. |
-| `account_name` | Yes | Azure Storage account name. |
-| `container` | Yes | Blob container / file system name. |
-| `prefix` | No | Path prefix prepended to all schema and table paths. |
-| `credentials` | No | Authentication options (see below). Omit to use `DefaultAzureCredential`. |
+### Parameter Reference
 
-## Authentication
+The following parameters are supported, in addition to the
+[common profile parameters](../catalog-overview.md#common-profile-parameters):
 
-The `credentials` dict accepts three options. If `credentials` is omitted entirely, `DefaultAzureCredential` from the `azure-identity` package is used, which tries environment variables, workload identity, the Azure CLI, and managed identity in order.
+* `catalog_type` - (Required) Must be `azure`.
 
-### DefaultAzureCredential (default)
+* `schema` - (Required) Default schema for models. dbt-polars creates missing
+  schemas.
 
-Omit `credentials` or pass keyword arguments forwarded to `DefaultAzureCredential`:
+* `account_name` - (Required) Azure Storage account name.
 
-```yaml
-credentials:
-  exclude_managed_identity_credential: true   # any DefaultAzureCredential kwarg
-```
+* `container` - (Required) Blob container / file system name.
 
-### Bearer token
+* `prefix` - (Optional) Path prefix prepended to all schema and table paths.
 
-```yaml
-credentials:
-  bearer_token: "<token>"
-```
-
-### Account key
-
-```yaml
-credentials:
-  account_key: "<key>"
-```
-
-### SAS token
-
-```yaml
-credentials:
-  sas_token: "<sas-query-string>"
-```
-
-### Custom storage_options
-
-For advanced use cases, pass `storage_options` to bypass the built-in credential resolution and supply options directly to the underlying object store library:
-
-```yaml
-credentials:
-  storage_options:
-    account_name: mystorageaccount
-    bearer_token: "<token>"
-```
+* `credentials` - (Optional) Authentication options. By default, dbt-polars
+  authenticates with
+  [`DefaultAzureCredential`](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential),
+  which gets the other keys in `credentials` as keyword arguments. To
+  authenticate otherwise, set one of:
+  * `bearer_token` - OAuth access token.
+  * `account_key` - Storage account key.
+  * `sas_token` - SAS token.
+  * `storage_options` - Options passed directly to the object store, see
+    [object_store's Azure options](https://docs.rs/object_store/latest/object_store/azure/enum.AzureConfigKey.html).
 
 ## Directory layout
 

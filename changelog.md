@@ -6,11 +6,15 @@
 
 - [Databricks Catalog]: Add support for iceberg tables in the Databricks catalog.
 - [Fabric Catalog]: New catalog for Delta and Iceberg tables in a Microsoft Fabric Lakehouse.
+- [Snowflake Catalog]: New catalog for Snowflake-managed Iceberg tables through Snowflake Horizon Catalog.
+- `compute_threads` in the profile limits how many of the `threads` models run Polars at the same time; models waiting for an Iceberg commit let others compute.
+- Enable lazy evaluation of incremental models with `sync_all_columns` for delta and iceberg tables.
 
 ### Fixes
 
 - [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/incubator-dbt-polars/issues/45)).
 - [Iceberg Catalog] Merge and delete+insert no longer fail when a `unique_key` column contains NULL values.
+- [Databricks Catalog] Dropping a Delta table on Azure now deletes its storage folder. Requires installing `dbt-polars-catalog-databricks[azure]`.
 
 ## v0.4.0
 

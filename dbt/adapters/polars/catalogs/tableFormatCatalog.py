@@ -112,18 +112,11 @@ class TableFormatCatalog(BaseCatalog):
     def catalog_for_existing(self, relation: PolarsRelation) -> BaseCatalog:
         return self.catalog_for_format(self.existing_format(relation))
 
-    def reject_file_format(self, relation: PolarsRelation) -> None:
-        if relation.file_format is not None:
-            raise DbtRuntimeError(
-                f"file_format is not supported by the {self.config.type} catalog "
-                f"(got {relation.file_format!r} for {relation}). Remove it and use "
-                "table_format to choose between delta and iceberg."
-            )
-
     def validate_incremental_relation(
         self, relation: PolarsRelation, model_config: dict
     ) -> None:
-        self.reject_file_format(relation)
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
         table_format = self.existing_format(relation)
         requested = self.requested_format(model_config)
         if requested != table_format:
@@ -150,7 +143,8 @@ class TableFormatCatalog(BaseCatalog):
         partition_by: list[str],
         model_config: dict | None = None,
     ) -> None:
-        self.reject_file_format(relation)
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
         model_config = model_config or {}
         table_format = self.requested_format(model_config)
         existing_format = self.existing_table_format(relation)
@@ -227,22 +221,35 @@ class TableFormatCatalog(BaseCatalog):
         scd_id_col: str = "dbt_scd_id",
         model_config: dict | None = None,
     ) -> None:
-        self.reject_file_format(relation)
+        if relation.file_format is not None:
+            raise self.file_format_not_supported()
         self.catalog_for_existing(relation).apply_snapshot_delta(
             relation, rows_to_close, rows_to_insert, scd_id_col, model_config
         )
 
     # ── comments ───────────────────────────────────────────────────────────────
 
+    def set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        column_comments: dict[str, str],
+    ) -> None:
+        self.catalog_for_existing(relation).set_comments(
+            relation, relation_comment, column_comments
+        )
+        if relation_comment is not None:
+            self.push_relation_comment(relation, relation_comment)
+        if column_comments:
+            self.push_column_comments(relation, column_comments)
+
     def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
-        self.catalog_for_existing(relation).set_relation_comment(relation, comment)
-        self.push_relation_comment(relation, comment)
+        self.set_comments(relation, comment, {})
 
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None:
-        self.catalog_for_existing(relation).set_column_comments(relation, comments)
-        self.push_column_comments(relation, comments)
+        self.set_comments(relation, None, comments)
 
     def get_relation_comment(self, relation: PolarsRelation) -> str | None:
         return self.catalog_for_existing(relation).get_relation_comment(relation)

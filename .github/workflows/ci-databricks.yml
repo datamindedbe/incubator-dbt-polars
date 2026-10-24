@@ -10,7 +10,9 @@ concurrency:
 jobs:
   test-databricks:
     name: "Test databricks / ${{ matrix.table_format }}"
-    environment: databricks
+    environment:
+      name: databricks
+      deployment: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -47,4 +49,4 @@ jobs:
         env:
           DATABRICKS_WORKSPACE_URL: ${{ vars.DATABRICKS_WORKSPACE_URL }}
           DATABRICKS_UC_CATALOG: ${{ vars.DATABRICKS_UC_CATALOG }}
-        run: uv run --python 3.12 pytest -n auto --profile databricks --config ${{ matrix.config }}
+        run: uv run --python 3.12 pytest -n 8 --profile databricks --config ${{ matrix.config }}

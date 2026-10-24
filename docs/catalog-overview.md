@@ -19,7 +19,7 @@ my_project:
     dev:
       type: polars
       schema: my_schema      # required
-      catalog_type: local    # local | azure | s3 | iceberg | databricks | fabric
+      catalog_type: local    # local | azure | s3 | iceberg | databricks | fabric | snowflake
       root: ./data           # local's own option(s)
 ```
 
@@ -56,6 +56,48 @@ override), look it up from `target.catalogs` instead:
 schema: "{{ (target.catalogs | selectattr('name', 'equalto', 'archive') | first)['schema'] }}"
 ```
 
+### Common profile parameters
+
+These parameters apply to every catalog type. Each catalog page lists the
+parameters of that catalog on top of these.
+
+* `type` - (Required) Must be `polars`.
+
+* `catalog` - (Optional) Name of the default catalog. Defaults to
+  the first entry of `catalogs`, or `default` when `catalogs` isn't set.
+
+* `catalogs` - (Optional) List of catalogs, each with a `name`, a `type`, a
+  `schema` and the parameters of its catalog type.
+
+* `threads` - (Optional) Number of models dbt runs at the same time. Defaults
+  to 1.
+
+* `compute_threads` - (Optional) Number of those models that run Polars at the
+  same time, see [Running models in parallel](#running-models-in-parallel).
+  Unlimited by default.
+
+### Running models in parallel
+
+Polars already uses all CPU cores for a single model, so `threads: 1` is usually
+fastest. With a remote catalog, such as Snowflake, much of a model's time is spent
+waiting for the catalog to commit. To use that time, run more models with `threads`
+and limit how many of them run Polars at the same time with `compute_threads`:
+
+```yaml
+    dev:
+      type: polars
+      threads: 4           # models dbt runs at the same time
+      compute_threads: 1   # of which run Polars at the same time
+      catalog_type: snowflake
+      ...
+```
+
+A model that waits for an Iceberg commit lets another model compute in the meantime.
+Models that hold a collected DataFrame, such as merge, delete+insert and snapshots,
+or Python models returning a DataFrame, keep running Polars until they finish, so
+memory stays bounded by `compute_threads` models. Without `compute_threads`, all
+`threads` models can run Polars at the same time.
+
 ### Supported file formats
 
 All storage-backed catalogs (local, azure) write files on disk. The `file_format` config on a model controls which format is used:
@@ -75,7 +117,7 @@ models:
     +file_format: delta
 ```
 
-Iceberg catalogs always use the Iceberg format — the `file_format` config has no effect there.
+Iceberg catalogs always use the Iceberg format, so a model that sets `file_format` fails there.
 
 ### Reading files as sources
 
@@ -123,4 +165,5 @@ sources:
 - [Iceberg](catalogs/iceberg.md) — Apache Iceberg tables via pyiceberg
 - [Databricks](catalogs/databricks.md) — Unity Catalog tables via REST, compute-free (an optional SQL warehouse can persist docs into Unity Catalog's native comments)
 - [Fabric](catalogs/fabric.md) — Delta and Iceberg tables in a Microsoft Fabric Lakehouse via OneLake, compute-free
+- [Snowflake](catalogs/snowflake.md) — Snowflake-managed Iceberg tables via Horizon Catalog, compute-free
 - [Custom catalogs](catalogs/custom.md) — add your own storage backend as a separate package

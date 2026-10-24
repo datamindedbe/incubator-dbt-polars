@@ -49,5 +49,13 @@ prompts:
       default_table_format:
         hint: "format of new tables: delta or iceberg"
         default: "delta"
+    snowflake:
+      _fixed_catalog_type: snowflake
+      account:
+        hint: "account identifier: <organization>-<account>"
+      database_name:
+        hint: "Snowflake database for the Iceberg tables"
+      role:
+        hint: "role to act as"
     iceberg:
       _fixed_catalog_type: iceberg

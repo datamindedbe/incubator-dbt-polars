@@ -49,7 +49,9 @@ __all__ = [
 
 EXTENSION_MODULE_PREFIX = "dbt_polars_catalog_"
 CATALOG_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-CATALOG_TYPES_INSTALLED_VIA_EXTRA = frozenset({"s3", "azure", "databricks", "fabric"})
+CATALOG_TYPES_INSTALLED_VIA_EXTRA = frozenset(
+    {"s3", "azure", "databricks", "fabric", "snowflake"}
+)
 
 
 @dataclass(frozen=True)

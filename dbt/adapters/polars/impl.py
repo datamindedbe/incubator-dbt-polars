@@ -28,6 +28,7 @@ from dbt_common.exceptions import CompilationError, DbtRuntimeError
 
 import polars as pl
 from dbt.adapters.polars.catalogs import BaseCatalog, create_catalog
+from dbt.adapters.polars.compute_slots import compute_slots, holds_compute_slot
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
@@ -153,6 +154,7 @@ class PolarsAdapter(BaseAdapter):
         self._node_configs: dict[tuple, RelationConfig] = {}
         self._source_configs: dict[tuple, dict] = {}
         self.configs_loaded_from_manifest = False
+        compute_slots.configure(config.credentials.compute_threads)
 
     def set_macro_resolver(self, macro_resolver: Any) -> None:
         # Called when a new manifest is used
@@ -351,25 +353,20 @@ class PolarsAdapter(BaseAdapter):
 
     # --- persist_docs ---
     @available
-    def polars_set_relation_comment(
-        self, relation: PolarsRelation, comment: str
+    def polars_set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        columns: dict[str, Any],
     ) -> None:
-        self.get_storage_catalog(relation.catalog).set_relation_comment(
-            relation, comment
-        )
-
-    @available
-    def polars_set_column_comments(
-        self, relation: PolarsRelation, columns: dict[str, Any]
-    ) -> None:
-        comments = {
+        column_comments = {
             name: info["description"]
             for name, info in columns.items()
             if info.get("description")
         }
-        if comments:
-            self.get_storage_catalog(relation.catalog).set_column_comments(
-                relation, comments
+        if relation_comment or column_comments:
+            self.get_storage_catalog(relation.catalog).set_comments(
+                relation, relation_comment or None, column_comments
             )
 
     # --- docs generate / catalog.json ---
@@ -518,6 +515,7 @@ class PolarsAdapter(BaseAdapter):
         return "Duration"
 
     @available
+    @holds_compute_slot
     def polars_load_csv_rows(
         self,
         relation: PolarsRelation,
@@ -830,18 +828,21 @@ class PolarsAdapter(BaseAdapter):
         if on_schema_change == "sync_all_columns":
             if not removed:
                 return new_data, bool(added)
-            existing_df = catalog.get_relation(relation).collect()
+            existing_data = catalog.get_relation(relation)
             if added:
-                existing_df = existing_df.with_columns(
+                existing_data = existing_data.with_columns(
                     [pl.lit(None).cast(new_schema[col]).alias(col) for col in added]
                 )
-            existing_df = existing_df.select(new_cols)
-            catalog.write_relation(
-                relation,
-                pl.concat([existing_df.lazy(), new_data.lazy()]),
-                partition_by,
-                model_config,
-            )
+            synced_data = pl.concat([existing_data.select(new_cols), new_data.lazy()])
+            # A file format is overwritten in place, so it can't be read while written
+            if relation.file_format not in (None, "delta"):
+                logger.warning(
+                    f"Removing columns from {relation} with "
+                    f"file_format='{relation.file_format}' reads the whole table "
+                    "into memory. Use file_format='delta' to avoid this."
+                )
+                synced_data = synced_data.collect()
+            catalog.write_relation(relation, synced_data, partition_by, model_config)
             return None, False
 
         return new_data, False
@@ -985,6 +986,7 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(f"Unknown incremental strategy: {strategy!r}")
 
     @available
+    @holds_compute_slot
     def polars_execute_incremental_model(
         self,
         relation: PolarsRelation,
@@ -1020,6 +1022,7 @@ class PolarsAdapter(BaseAdapter):
         )
 
     @available
+    @holds_compute_slot
     def polars_execute_model(
         self,
         relation: PolarsRelation,
@@ -1038,6 +1041,7 @@ class PolarsAdapter(BaseAdapter):
             relation, result, _normalize_partition_by(partition_by), model_config
         )
 
+    @holds_compute_slot
     def submit_python_job(
         self, parsed_model: dict, compiled_code: str
     ) -> AdapterResponse:
@@ -1100,6 +1104,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK")
 
     @available
+    @holds_compute_slot
     def polars_execute_sql_test(
         self,
         sql: str,
@@ -1136,6 +1141,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table
 
     @available
+    @holds_compute_slot
     def execute_python_test(
         self,
         parsed_model: dict,
@@ -1191,6 +1197,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table
 
     @available
+    @holds_compute_slot
     def polars_execute_snapshot(
         self,
         relation: PolarsRelation,
@@ -1417,6 +1424,7 @@ class PolarsAdapter(BaseAdapter):
             relation, rows_to_close, rows_to_insert, scd_id_col
         )
 
+    @holds_compute_slot
     def execute(
         self,
         sql: str,

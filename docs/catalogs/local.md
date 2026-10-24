@@ -1,8 +1,13 @@
-# Local catalog
+# Local storage
 
-The local catalog stores tables as files on your local filesystem. It is the simplest catalog to set up and requires no extra dependencies.
+Store tables as files on the local filesystem.
 
-**Status:** Usable
+## Supported features
+
+| Feature | Status | Remarks |
+|---|---|---|
+| Read/write Delta tables | ✅ | Default `file_format` |
+| Read/write Parquet, CSV and NDJSON files | ✅ | Set `file_format` on the model |
 
 ## Installation
 
@@ -14,26 +19,36 @@ pip install dbt-polars
 
 ## Profile configuration
 
+### Example
+
 ```yaml
 my_project:
   target: dev
   outputs:
     dev:
       type: polars
+      catalog_type: local
       schema: dev
-      catalogs:
-        - name: my_catalog
-          type: local
-          root: ./data          # path to the root directory; relative paths resolve from the dbt project root
+      root: ./data
 ```
 
-### Configuration options
+To combine this catalog with others, put the same parameters in an entry of
+`catalogs`, with `type: local` and a `name`, see
+[Catalog overview](../catalog-overview.md).
 
-| Key | Required | Description |
-|---|---|---|
-| `name` | Yes | Catalog name. Used as the `database` identifier in dbt. |
-| `type` | Yes | Must be `local`. |
-| `root` | Yes | Root directory where schemas and tables are stored. Relative paths resolve from the dbt project root. Paths with spaces are not supported (Polars limitation). |
+### Parameter Reference
+
+The following parameters are supported, in addition to the
+[common profile parameters](../catalog-overview.md#common-profile-parameters):
+
+* `catalog_type` - (Required) Must be `local`.
+
+* `schema` - (Required) Default schema for models. dbt-polars creates missing
+  schemas.
+
+* `root` - (Required) Directory where schemas and tables are stored. Relative
+  paths resolve from the dbt project root. Paths with spaces are not supported
+  (Polars limitation).
 
 ## Directory layout
 

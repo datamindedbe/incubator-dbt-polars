@@ -2,6 +2,8 @@ import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
+from dbt_common.exceptions import DbtRuntimeError
+
 import polars as pl
 from dbt.adapters.polars.relation import PolarsRelation
 
@@ -65,6 +67,12 @@ class BaseCatalog(ABC):
     def __init__(self, config: CatalogConfig, project_root: str = ""):
         self.schema = config.schema
         self.config = config
+
+    def file_format_not_supported(self) -> DbtRuntimeError:
+        """For catalogs whose table format doesn't come from `file_format`."""
+        return DbtRuntimeError(
+            f"file_format is not supported for the {self.config.type} catalog."
+        )
 
     @abstractmethod
     def create_schema(self, relation: PolarsRelation) -> None: ...
@@ -144,6 +152,17 @@ class BaseCatalog(ABC):
     def set_column_comments(
         self, relation: PolarsRelation, comments: dict[str, str]
     ) -> None: ...
+
+    def set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        column_comments: dict[str, str],
+    ) -> None:
+        if relation_comment is not None:
+            self.set_relation_comment(relation, relation_comment)
+        if column_comments:
+            self.set_column_comments(relation, column_comments)
 
     @abstractmethod
     def get_relation_comment(self, relation: PolarsRelation) -> str | None: ...

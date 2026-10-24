@@ -1,8 +1,19 @@
-# Iceberg catalog
+# Iceberg (generic)
 
-The Iceberg catalog stores tables in Apache Iceberg format using [pyiceberg](https://py.iceberg.apache.org/). Any backend that pyiceberg supports — SQLite, REST, Hive, Glue, Databricks Unity Catalog — can be used by passing the appropriate pyiceberg properties in the profile.
+Store tables in Apache Iceberg format using [pyiceberg](https://py.iceberg.apache.org/).
 
-**Status:** Usable (SQLite), Experimental (REST / Databricks / other backends)
+:::info
+For Iceberg tables in Databricks, Snowflake or Microsoft Fabric, use the
+dedicated [Databricks](databricks.md), [Snowflake](snowflake.md) or
+[Fabric](fabric.md) catalog instead.
+:::
+
+## Supported features
+
+| Feature | Status | Remarks |
+|---|---|---|
+| Read/write Iceberg tables | ✅ | Unsigned integer columns are written as signed, since Iceberg has no unsigned types |
+| All catalogs supported by pyiceberg | ✅ | E.g. REST, SQL, Hive and Glue, see [pyiceberg's catalogs](https://py.iceberg.apache.org/configuration/) |
 
 ## Installation
 
@@ -12,9 +23,7 @@ pip install 'dbt-polars[iceberg]'
 
 ## Profile configuration
 
-All keys beyond `name` and `type` are forwarded to pyiceberg's `load_catalog`. Use `pyiceberg_type` to set the pyiceberg `type` property without conflicting with the dbt-polars `type` key.
-
-### SQLite metastore (local development)
+### Example
 
 A fully local Iceberg setup with a SQLite catalog and a local warehouse:
 
@@ -24,51 +33,43 @@ my_project:
   outputs:
     dev:
       type: polars
+      catalog_type: iceberg
       schema: dev
-      catalogs:
-        - name: my_catalog
-          type: iceberg
-          uri: sqlite:///./catalog.db       # SQLite database for the Iceberg metastore
-          warehouse: file:///./warehouse    # directory where table data is written
+      uri: sqlite:///./catalog.db       # SQLite database for the Iceberg metastore
+      warehouse: file:///./warehouse    # directory where table data is written
 ```
 
-### Databricks Unity Catalog (REST)
+A REST catalog, such as Databricks Unity Catalog:
 
 ```yaml
-catalogs:
-  - name: my_uc_catalog
-    type: iceberg
-    pyiceberg_type: rest               # sets pyiceberg type=rest without overriding dbt-polars type
-    uri: https://<workspace>.azuredatabricks.net/api/2.1/unity-catalog/iceberg-rest/
-    token: <databricks-pat-or-token>
-    warehouse: <unity-catalog-name>    # the Unity Catalog catalog name (e.g. "main")
+    dev:
+      type: polars
+      catalog_type: iceberg
+      schema: dev
+      pyiceberg_type: rest
+      uri: https://<workspace>.azuredatabricks.net/api/2.1/unity-catalog/iceberg-rest/
+      token: <databricks-pat-or-token>
+      warehouse: <unity-catalog-name>    # the Unity Catalog catalog name (e.g. "main")
 ```
 
-### Other REST catalogs
+To combine this catalog with others, put the same parameters in an entry of
+`catalogs`, with `type: iceberg` and a `name`, see
+[Catalog overview](../catalog-overview.md).
 
-Any pyiceberg REST-compatible catalog can be configured the same way:
+### Parameter Reference
 
-```yaml
-catalogs:
-  - name: my_catalog
-    type: iceberg
-    pyiceberg_type: rest
-    uri: https://my-iceberg-rest-catalog/
-    warehouse: my_warehouse
-    # additional pyiceberg properties as needed
-```
+The following parameters are supported, in addition to the
+[common profile parameters](../catalog-overview.md#common-profile-parameters):
 
-### Configuration options
+* `catalog_type` - (Required) Must be `iceberg`.
 
-| Key | Required | Description |
-|---|---|---|
-| `name` | Yes | Catalog name. Used as the `database` identifier in dbt. |
-| `type` | Yes | Must be `iceberg`. |
-| `pyiceberg_type` | No | Sets the pyiceberg `type` property (e.g. `rest`, `hive`, `glue`). Use instead of `type` for backends that require a pyiceberg type. |
-| All other keys | No | Passed through to `pyiceberg.catalog.load_catalog`. See the [pyiceberg docs](https://py.iceberg.apache.org/configuration/) for backend-specific options. |
+* `schema` - (Required) Default schema for models. dbt-polars creates missing
+  schemas.
 
-## Notes
+* `pyiceberg_type` - (Optional) Sets the pyiceberg `type` property, e.g. `rest`,
+  `hive` or `glue`. It is a separate key because `type` is already used by
+  dbt-polars.
 
-Iceberg tables have no `file_format` setting — the format is always Iceberg. The `file_format` model config is ignored for Iceberg catalogs.
-
-Unsigned integer types (`UInt8`, `UInt16`, `UInt32`, `UInt64`) are automatically cast to their signed equivalents before writing, because Iceberg has no unsigned integer types.
+* All other parameters - (Optional) Passed to `pyiceberg.catalog.load_catalog`,
+  see the [pyiceberg docs](https://py.iceberg.apache.org/configuration/) for
+  the options of each backend.

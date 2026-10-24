@@ -323,7 +323,7 @@ def test_write_rejects_any_file_format(file_format):
         catalog="fabric",
         file_format=file_format,
     )
-    with pytest.raises(DbtRuntimeError, match="use table_format"):
+    with pytest.raises(DbtRuntimeError, match="file_format is not supported"):
         make_catalog().write_relation(file_format_relation, DATA, [])
 
 
@@ -331,9 +331,9 @@ def test_incremental_and_snapshot_writes_reject_file_format():
     catalog, calls = routing_catalog("delta")
     file_format_relation = relation().incorporate(file_format="iceberg")
 
-    with pytest.raises(DbtRuntimeError, match="use table_format"):
+    with pytest.raises(DbtRuntimeError, match="file_format is not supported"):
         catalog.validate_incremental_relation(file_format_relation, {})
-    with pytest.raises(DbtRuntimeError, match="use table_format"):
+    with pytest.raises(DbtRuntimeError, match="file_format is not supported"):
         catalog.apply_snapshot_delta(file_format_relation, DATA, DATA)
     assert calls == []
 

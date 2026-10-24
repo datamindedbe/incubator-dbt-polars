@@ -1,4 +1,4 @@
-# Databricks catalog
+# Databricks Unity Catalog
 
 Register Delta or Iceberg tables in Databricks Unity Catalog via the Databricks REST API.
 
@@ -28,6 +28,13 @@ pip install 'dbt-polars[databricks]'          # Delta tables
 pip install 'dbt-polars[databricks,iceberg]'  # Delta and Iceberg tables
 ```
 
+On Azure, also install the `azure` extra of the catalog. dbt-polars uses it to
+delete the storage of Delta tables it drops:
+
+```bash
+pip install 'dbt-polars-catalog-databricks[azure]'
+```
+
 ## Profile configuration
 
 ### Example
@@ -55,7 +62,8 @@ To combine this catalog with others, put the same parameters in an entry of
 
 ### Parameter Reference
 
-The following parameters are supported:
+The following parameters are supported, in addition to the
+[common profile parameters](../catalog-overview.md#common-profile-parameters):
 
 * `catalog_type` - (Required) Must be `databricks`.
 

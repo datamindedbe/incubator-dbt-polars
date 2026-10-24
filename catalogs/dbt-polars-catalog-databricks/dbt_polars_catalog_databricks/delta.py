@@ -1,3 +1,4 @@
+import re
 import time
 
 import polars as pl
@@ -21,6 +22,11 @@ CREDENTIAL_RESPONSE_FIELDS = (
     "azure_aad",
     "gcp_oauth_token",
     "r2_temp_credentials",
+)
+
+AZURE_URI = re.compile(
+    r"abfss://(?P<container>[^@/]+)@(?P<account>[^.]+)\.dfs\.core\.windows\.net"
+    r"/(?P<path>.+?)/?"
 )
 
 
@@ -49,6 +55,48 @@ def map_vended_credentials(response: dict) -> dict[str, str]:
         "Unity Catalog returned a temporary credential response with none of "
         f"the expected fields ({', '.join(CREDENTIAL_RESPONSE_FIELDS)})."
     )
+
+
+class StaticTokenCredential:
+    """An Azure credential for a vended Microsoft Entra ID token."""
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def get_token(self, *args, **kwargs):
+        from azure.core.credentials import AccessToken
+
+        return AccessToken(self.token, int(time.time()) + 3600)
+
+
+def delete_azure_directory(uri: str, opts: dict[str, str]) -> None:
+    """Delete an ADLS Gen2 directory with everything in it, with vended credentials."""
+    try:
+        from azure.core.exceptions import ResourceNotFoundError
+        from azure.storage.filedatalake import DataLakeServiceClient
+    except ImportError as exc:
+        raise DbtRuntimeError(
+            "Deleting storage on Azure needs the azure extra: "
+            "pip install 'dbt-polars-catalog-databricks[azure]'"
+        ) from exc
+
+    match = AZURE_URI.fullmatch(uri)
+    if match is None:
+        raise DbtRuntimeError(f"Not an ADLS Gen2 location: {uri}")
+    url = f"https://{match['account']}.dfs.core.windows.net"
+    if "sas_token" in opts:
+        service = DataLakeServiceClient(f"{url}?{opts['sas_token'].lstrip('?')}")
+    else:
+        service = DataLakeServiceClient(
+            url, credential=StaticTokenCredential(opts["bearer_token"])
+        )
+    directory = service.get_file_system_client(match["container"]).get_directory_client(
+        match["path"]
+    )
+    try:
+        directory.delete_directory()
+    except ResourceNotFoundError:
+        pass
 
 
 class DatabricksDeltaCatalog(StorageCatalog):
@@ -222,18 +270,23 @@ class DatabricksDeltaCatalog(StorageCatalog):
         from deltalake import DeltaTable
 
         try:
+            if uri.startswith("abfss://"):
+                # vacuum's batch delete is refused for the table-scoped SAS
+                delete_azure_directory(uri, opts)
+                return
             if not DeltaTable.is_deltatable(uri, storage_options=opts):
                 return
             dt = DeltaTable(uri, storage_options=opts)
             dt.delete()
-            # Physically remove the now-tombstoned data files. This still
-            # leaves the (tiny) _delta_log commit history behind - Delta has
-            # no operation that removes that.
+            # Leaves the _delta_log behind: vacuum never removes it
             dt.vacuum(
-                retention_hours=0, enforce_retention_duration=False, dry_run=False
+                retention_hours=0,
+                enforce_retention_duration=False,
+                dry_run=False,
+                full=True,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.debug(f"Could not clean up storage at {uri}: {exc}")
+            logger.warning(f"Could not clean up storage at {uri}: {exc}")
 
     # ── write / register ─────────────────────────────────────────────────────────
 

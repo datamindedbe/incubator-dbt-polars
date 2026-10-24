@@ -1,7 +1,10 @@
 import pytest
 
 from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
-from dbt_polars_catalog_databricks.delta import DatabricksDeltaCatalog
+from dbt_polars_catalog_databricks.delta import (
+    DatabricksDeltaCatalog,
+    delete_azure_directory,
+)
 from dbt_polars_catalog_databricks.unity_catalog import (
     UnityCatalogClient,
     alter_column_comments_sql,
@@ -94,6 +97,72 @@ def test_dropping_managed_delta_table_only_unregisters_it():
     catalog.drop_table(table)
 
     assert requests == [("DELETE", "/api/2.1/unity-catalog/tables/main.schema.table")]
+
+
+def record_azure_deletes(monkeypatch, error: Exception | None = None) -> list:
+    """Replace the Data Lake client with one recording which directory it deletes."""
+    filedatalake = pytest.importorskip("azure.storage.filedatalake")
+    calls: list = []
+
+    class FakeServiceClient:
+        def __init__(self, url, credential=None):
+            self.url = url
+            self.credential = credential
+
+        def get_file_system_client(self, file_system):
+            service = self
+
+            class Directories:
+                def get_directory_client(self, path):
+                    class Directory:
+                        def delete_directory(self):
+                            calls.append((service.url, file_system, path))
+                            calls.append(service.credential)
+                            if error is not None:
+                                raise error
+
+                    return Directory()
+
+            return Directories()
+
+    monkeypatch.setattr(filedatalake, "DataLakeServiceClient", FakeServiceClient)
+    return calls
+
+
+def test_azure_storage_is_deleted_as_one_directory_with_the_vended_sas(monkeypatch):
+    calls = record_azure_deletes(monkeypatch)
+
+    delete_azure_directory(f"{TABLE_URI}/", {"sas_token": "?sv=1&sig=x"})
+
+    assert calls == [
+        (
+            "https://account.dfs.core.windows.net?sv=1&sig=x",
+            "container",
+            "schema/table",
+        ),
+        None,
+    ]
+
+
+def test_azure_storage_is_deleted_with_a_vended_entra_id_token(monkeypatch):
+    calls = record_azure_deletes(monkeypatch)
+
+    delete_azure_directory(TABLE_URI, {"bearer_token": "aad"})
+
+    assert calls[0] == (
+        "https://account.dfs.core.windows.net",
+        "container",
+        "schema/table",
+    )
+    assert calls[1].get_token().token == "aad"
+
+
+def test_already_deleted_azure_directory_is_not_an_error(monkeypatch):
+    from azure.core.exceptions import ResourceNotFoundError
+
+    record_azure_deletes(monkeypatch, ResourceNotFoundError("gone"))
+
+    delete_azure_directory(TABLE_URI, {"sas_token": "sv=1"})
 
 
 def test_quote_identifier_wraps_in_backticks():
