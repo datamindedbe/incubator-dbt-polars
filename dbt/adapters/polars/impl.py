@@ -30,6 +30,7 @@ import polars as pl
 from dbt.adapters.polars.catalogs import BaseCatalog, create_catalog
 from dbt.adapters.polars.compute_slots import compute_slots, holds_compute_slot
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
+from dbt.adapters.polars.fixtures import fixture_frame
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
 from dbt.adapters.polars.utils import resolve_polars_type
@@ -1139,6 +1140,85 @@ class PolarsAdapter(BaseAdapter):
         )
         table = table_from_data(summary.to_dicts(), summary.columns)
         return AdapterResponse(_message="OK"), table
+
+    @available
+    def polars_resolve_relation(self, relation: PolarsRelation) -> PolarsRelation:
+        """`relation` with the config of the model or source it names. A unit test
+        fixture's `this` only carries the name of its input."""
+        database, schema, identifier = (
+            relation.database,
+            relation.schema,
+            relation.identifier,
+        )
+        if database is None or schema is None or identifier is None:
+            return relation
+        try:
+            return self._resolve_relation(database, schema, identifier)
+        except DbtRuntimeError:
+            # e.g. a deferred relation, which isn't in this project's manifest
+            return relation
+
+    def unit_test_actual(self, code: str, extra_ctes: list | None) -> pl.LazyFrame:
+        extra_ctes = extra_ctes or []
+        cte_frames = self._evaluate_ctes(extra_ctes)
+        stripped_code = self._strip_all_ctes(code, extra_ctes)
+        if "def model(" in stripped_code:
+            return self._run_python_model(stripped_code, cte_frames or None)
+        return self._run_sql(
+            stripped_code, eager=False, extra_frames=cte_frames or None
+        )
+
+    @available
+    @holds_compute_slot
+    def polars_get_columns_in_unit_test(
+        self, sql: str, extra_ctes: list | None
+    ) -> list[Column]:
+        schema = self.unit_test_actual(sql, extra_ctes).collect_schema()
+        return [Column(name, str(dtype)) for name, dtype in schema.items()]
+
+    @available
+    @holds_compute_slot
+    def polars_execute_unit_test(
+        self,
+        sql: str,
+        extra_ctes: list | None,
+        expected_rows: list[dict],
+        expected_sql: str | None,
+    ) -> tuple[AdapterResponse, agate.Table]:
+        """The actual and expected rows, labeled in an `actual_or_expected` column
+        as dbt-core's unit test runner expects."""
+        actual = self.unit_test_actual(sql, extra_ctes)
+        schema = actual.collect_schema()
+        column_by_lower_name = {name.lower(): name for name in schema}
+        if expected_rows:
+            column_names = [
+                column_by_lower_name[key.lower()] for key in expected_rows[0]
+            ]
+        else:
+            column_names = schema.names()
+        actual = actual.select(column_names)
+
+        if expected_sql:
+            expected = self._run_sql(
+                expected_sql,
+                eager=False,
+                extra_frames={"dbt_internal_unit_test_actual": actual},
+            ).select(column_names)
+        else:
+            expected = fixture_frame(
+                expected_rows, {name: schema[name] for name in column_names}
+            ).lazy()
+
+        result = pl.concat(
+            [
+                actual.with_columns(actual_or_expected=pl.lit("actual")),
+                expected.with_columns(actual_or_expected=pl.lit("expected")),
+            ],
+            how="vertical_relaxed",
+        ).collect()
+        return AdapterResponse(_message="OK"), table_from_data(
+            result.to_dicts(), result.columns
+        )
 
     @available
     @holds_compute_slot
