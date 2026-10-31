@@ -77,6 +77,53 @@ except (ImportError, AttributeError):
         "Python singular tests are not supported with this version of dbt-core."
     )
 
+# dbt-core monkeypatch to support unit tests on Python models:
+#
+# UnitTestManifestLoader.parse_unit_test_case builds the unit test node from the tested
+# model's code as if it were SQL: refs are captured by rendering it with Jinja and
+# no Python postfix is added. For a Python model, the node gets the model's refs,
+# sources and config, and code that renders to the model plus a Python postfix
+# for unit tests. Compiling the postfix calls ref() for each input, which injects
+# the fixtures.
+try:
+    from dbt.contracts.graph.model_config import UnitTestNodeConfig
+    from dbt.node_types import ModelLanguage
+    from dbt.parser.unit_tests import UnitTestManifestLoader
+
+    original_parse_unit_test_case = UnitTestManifestLoader.parse_unit_test_case
+
+    def parse_unit_test_case_for_python_models(self, test_case):
+        original_parse_unit_test_case(self, test_case)
+        tested_node = self.manifest.nodes[test_case.depends_on.nodes[0]]
+        if tested_node.language != ModelLanguage.python:
+            return
+        unit_test_node = self.unit_test_manifest.nodes[test_case.unique_id]
+        unit_test_node.refs = tested_node.refs
+        unit_test_node.sources = tested_node.sources
+        unit_test_node.config = UnitTestNodeConfig.from_dict(
+            {
+                **tested_node.config.to_dict(),
+                "materialized": "unit",
+                "expected_rows": unit_test_node.config.expected_rows,
+                "expected_sql": unit_test_node.config.expected_sql,
+            }
+        )
+        # Python model code has no Jinja (verify_python_model_code), so rendering
+        # it leaves it unchanged
+        unit_test_node.raw_code = (
+            tested_node.raw_code + "\n\n{{ polars_unit_test_python_postfix(model) }}"
+        )
+
+    UnitTestManifestLoader.parse_unit_test_case = (  # type: ignore[method-assign]
+        parse_unit_test_case_for_python_models
+    )
+except (ImportError, AttributeError):
+    from dbt.adapters.events.logging import AdapterLogger
+
+    AdapterLogger("polars").warning(
+        "Unit tests on Python models are not supported with this version of dbt-core."
+    )
+
 Plugin = AdapterPlugin(
     adapter=PolarsAdapter,  # type: ignore[arg-type]
     credentials=PolarsCredentials,

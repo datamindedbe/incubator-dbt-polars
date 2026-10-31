@@ -1,0 +1,74 @@
+from dataclasses import dataclass
+
+from dbt.adapters.polars.catalogs import CatalogConfig, PolarsRelation, StorageCatalog
+
+
+@dataclass
+class {{ class_prefix }}CatalogConfig(CatalogConfig):
+    """
+    The fields of a catalog entry in profiles.yml. Add a field for each option
+    your catalog needs; name, type and schema are always present.
+    """
+
+    name: str
+    type: str
+    schema: str
+
+    def unique_field(self) -> str:
+        """Identifies the storage location; hashed in dbt's anonymous usage stats."""
+        return self.name
+
+    def connection_keys(self) -> tuple[str, ...]:
+        """Non-secret options shown by `dbt debug` and in `target`."""
+        return ("name",)
+
+
+class {{ class_prefix }}Catalog(StorageCatalog):
+    config: {{ class_prefix }}CatalogConfig
+
+    def __init__(
+        self,
+        config: {{ class_prefix }}CatalogConfig,
+        project_root: str,
+    ) -> None:
+        """Created once per catalog in the profile; project_root resolves paths."""
+        super().__init__(config)
+
+    def get_uri(self, relation: PolarsRelation) -> str:
+        """Location of the relation: a Delta directory, or a file for other formats."""
+        raise NotImplementedError
+
+    def get_storage_options(
+        self, uri: str, read_only: bool = False
+    ) -> dict[str, str] | None:
+        """
+        storage_options passed to Polars for every read and write of this URI.
+        read_only is True for reads, so narrower credentials can be returned.
+        """
+        raise NotImplementedError
+
+    def create_schema(self, relation: PolarsRelation) -> None:
+        """Create the schema; do nothing if it already exists."""
+        raise NotImplementedError
+
+    def drop_schema(self, relation: PolarsRelation) -> None:
+        """Drop the schema and all its tables; do nothing if it doesn't exist."""
+        raise NotImplementedError
+
+    def list_schemas(self) -> list[str]:
+        """Names of all schemas in the catalog."""
+        raise NotImplementedError
+
+    def table_exists(self, relation: PolarsRelation) -> bool:
+        """Whether the relation exists."""
+        raise NotImplementedError
+
+    def drop_relation(self, relation: PolarsRelation) -> None:
+        """Drop the relation; do nothing if it doesn't exist."""
+        raise NotImplementedError
+
+    def list_relations_without_caching(
+        self, schema_relation: PolarsRelation
+    ) -> list[PolarsRelation]:
+        """All relations in the schema, or an empty list if the schema doesn't exist."""
+        raise NotImplementedError

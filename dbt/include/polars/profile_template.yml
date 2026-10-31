@@ -4,10 +4,6 @@ prompts:
   schema:
     hint: "default schema name"
     default: "main"
-  threads:
-    hint: "1 or more"
-    type: "int"
-    default: 1
   _choose_catalog_type:
     local:
       _fixed_catalog_type: local
@@ -18,37 +14,24 @@ prompts:
       _fixed_catalog_type: s3
       bucket:
         hint: "S3 bucket name"
-      prefix:
-        hint: "key prefix inside the bucket (optional)"
-        default: ""
     azure:
       _fixed_catalog_type: azure
       account_name:
         hint: "Azure storage account name"
       container:
-        hint: "container name (optional)"
-        default: ""
-      prefix:
-        hint: "path prefix inside the container (optional)"
-        default: ""
+        hint: "container name"
     databricks:
       _fixed_catalog_type: databricks
       catalog_name:
         hint: "Unity Catalog catalog name"
       host:
         hint: "workspace URL"
-      default_table_format:
-        hint: "format of new tables: delta or iceberg"
-        default: "delta"
     fabric:
       _fixed_catalog_type: fabric
       workspace:
         hint: "Fabric workspace name or ID"
       lakehouse:
         hint: "Lakehouse name or ID"
-      default_table_format:
-        hint: "format of new tables: delta or iceberg"
-        default: "delta"
     snowflake:
       _fixed_catalog_type: snowflake
       account:

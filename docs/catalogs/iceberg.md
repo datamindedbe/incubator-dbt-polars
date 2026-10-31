@@ -1,3 +1,11 @@
+---
+mdx:
+  format: mdx
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Iceberg (generic)
 
 Store tables in Apache Iceberg format using [pyiceberg](https://py.iceberg.apache.org/).
@@ -27,6 +35,9 @@ pip install 'dbt-polars[iceberg]'
 
 A fully local Iceberg setup with a SQLite catalog and a local warehouse:
 
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
+
 ```yaml
 my_project:
   target: dev
@@ -35,9 +46,34 @@ my_project:
       type: polars
       catalog_type: iceberg
       schema: dev
-      uri: sqlite:///./catalog.db       # SQLite database for the Iceberg metastore
-      warehouse: file:///./warehouse    # directory where table data is written
+      uri: sqlite:///catalog.db         # SQLite database for the Iceberg metastore
+      warehouse: file://warehouse       # directory where table data is written
 ```
+
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_iceberg
+      catalogs:
+        - name: my_iceberg
+          type: iceberg
+          schema: dev
+          uri: sqlite:///catalog.db     # SQLite database for the Iceberg metastore
+          warehouse: file://warehouse   # directory where table data is written
+        - name: other_catalog
+          ...
+```
+
+See [Combining catalogs](../guides/combining-catalogs.md).
+
+</TabItem>
+</Tabs>
 
 A REST catalog, such as Databricks Unity Catalog:
 
@@ -52,14 +88,9 @@ A REST catalog, such as Databricks Unity Catalog:
       warehouse: <unity-catalog-name>    # the Unity Catalog catalog name (e.g. "main")
 ```
 
-To combine this catalog with others, put the same parameters in an entry of
-`catalogs`, with `type: iceberg` and a `name`, see
-[Catalog overview](../catalog-overview.md).
-
 ### Parameter Reference
 
-The following parameters are supported, in addition to the
-[common profile parameters](../catalog-overview.md#common-profile-parameters):
+The following parameters are supported:
 
 * `catalog_type` - (Required) Must be `iceberg`.
 

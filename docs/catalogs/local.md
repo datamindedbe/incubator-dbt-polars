@@ -1,3 +1,11 @@
+---
+mdx:
+  format: mdx
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Local storage
 
 Store tables as files on the local filesystem.
@@ -21,6 +29,9 @@ pip install dbt-polars
 
 ### Example
 
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
+
 ```yaml
 my_project:
   target: dev
@@ -32,14 +43,33 @@ my_project:
       root: ./data
 ```
 
-To combine this catalog with others, put the same parameters in an entry of
-`catalogs`, with `type: local` and a `name`, see
-[Catalog overview](../catalog-overview.md).
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_local
+      catalogs:
+        - name: my_local
+          type: local
+          schema: dev
+          root: ./data
+        - name: other_catalog
+          ...
+```
+
+See [Combining catalogs](../guides/combining-catalogs.md).
+
+</TabItem>
+</Tabs>
 
 ### Parameter Reference
 
-The following parameters are supported, in addition to the
-[common profile parameters](../catalog-overview.md#common-profile-parameters):
+The following parameters are supported:
 
 * `catalog_type` - (Required) Must be `local`.
 

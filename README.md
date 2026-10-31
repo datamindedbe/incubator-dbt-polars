@@ -2,38 +2,33 @@
 
 dbt-polars integrates the flexibility and performance of Polars with the data governance and lineage capabilities of dbt.
 
-## Why dbt-polars
+**[Try the quick start](https://datamindedbe.github.io/incubator-dbt-polars/quickstart)** and run your first dbt-polars project in a few minutes, on your own laptop.
 
-<details>
-<summary><b>Bring dbt to your Polars code</b>
-<ul>
-<li>Organize Polars code in a familiar dbt project structure.</li>
-<li>Get lineage and documentation for every model out of the box.</li>
-<li>Test your models with dbt tests, written in SQL or Python.</li>
-</ul>
-</summary>
+## Python and SQL, side by side
 
-See [dbt compatibility](https://datamindedbe.github.io/incubator-dbt-polars/dbt-compatibility) for the full list of supported features.
-
-</details>
-
-<details>
-<summary><b>Combine SQL and Python models</b>
-<ul>
-<li>Freely mix SQL and Python models, even when they are ephemeral.</li>
-<li>Minimize data transfer by delaying model execution until write.</li>
-<li>Python models provide an escape hatch for complex SQL logic.</li>
-</ul>
-</summary>
-
-SQL and Python models both compile to a Polars LazyFrame, so they can `ref()` each other freely. The same model, written both ways:
+Choose Python or SQL per model, whichever fits the transformation best. Both run on the same Polars engine and can freely reference each other. Unlike in dbt-core, Python models are first class and can do anything a SQL model can, even be ephemeral.
 
 <table>
 <tr>
-<th>SQL: <code>models/revenue_per_country.sql</code></th>
-<th>Python: <code>models/revenue_per_country.py</code></th>
+<th>Python: <code>models/revenue.py</code></th>
+<th>SQL: <code>models/revenue.sql</code></th>
 </tr>
 <tr>
+<td valign="top">
+
+```python
+import polars as pl
+
+
+def model(dbt, session):
+    return (
+        dbt.ref("orders")
+        .group_by("country")
+        .agg(revenue=pl.sum("amount"))
+    )
+```
+
+</td>
 <td valign="top">
 
 ```sql
@@ -41,119 +36,57 @@ select
     country,
     sum(amount) as revenue
 from {{ ref('orders') }}
-where status = 'paid'
 group by country
-```
-
-</td>
-<td valign="top">
-
-```python
-import polars as pl
-
-def model(dbt, session):
-    orders = dbt.ref("orders")
-    paid = orders.filter(
-        pl.col("status") == "paid"
-    )
-    return paid.group_by("country").agg(
-        revenue=pl.col("amount").sum()
-    )
 ```
 
 </td>
 </tr>
 </table>
 
-#### Python ephemeral models
+## The flexibility of Python and Polars
 
-Unlike most dbt adapters, dbt-polars supports ephemeral Python models thanks to Polars' lazy frames. This is how it works:
+<img src="https://raw.githubusercontent.com/datamindedbe/incubator-dbt-polars/main/docs/images/catalogs.svg" alt="dbt-polars runs on any compute and writes to any of its catalogs" width="720">
 
-<img src="https://raw.githubusercontent.com/datamindedbe/incubator-dbt-polars/main/docs/images/lazy-execution.svg" alt="An ephemeral Python model inlined into a SQL model" width="640">
+**Run anywhere.** Polars executes your models in the same process as dbt. You don't need an expensive data warehouse to run your transformations. dbt-polars runs anywhere you can run Python.
 
-1. Polars runs inside the dbt process, so Python models need no separate compute.
-2. `ref()` returns a LazyFrame: a reference to storage. No data is read yet.
-3. The ephemeral Python model returns a LazyFrame, which the downstream SQL or Python model uses like any other table. Both add to one query plan.
-4. On write, Polars optimizes the full plan, reads only the data it needs, and streams the result to storage.
+**Store data where you want.** dbt-polars connects to popular platforms through catalogs. Setting one up only takes a few lines in your profile.
 
-</details>
+| Platform | Catalog |
+|---|---|
+| Local filesystem | [local](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/local) |
+| Azure Blob Storage / ADLS Gen2 | [azure](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/azure) |
+| Databricks Unity Catalog | [databricks](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/databricks) (Delta, Iceberg) |
+| Microsoft Fabric OneLake | [fabric](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/fabric) (Delta, Iceberg) |
+| Snowflake Horizon Catalog | [snowflake](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/snowflake) (Iceberg) |
+| Other Iceberg catalogs, such as REST or Glue | [iceberg](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/iceberg) |
 
-<details>
-<summary><b>Adaptable to your platform</b>
-<ul>
-<li>Run Polars on any compute, avoiding lock-in to a costly warehouse.</li>
-<li>Write to Databricks, Snowflake, Azure Blob Storage, Fabric, ...</li>
-<li>Or write a <a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/custom">custom catalog extension</a> to perfectly fit your platform.</li>
-</ul>
-</summary>
+**Extensible to any platform.** Implement a [custom catalog](https://datamindedbe.github.io/incubator-dbt-polars/guides/custom-catalog) to tailor dbt-polars to your platform. A custom catalog controls authentication, where data is written and how metadata is registered. The dbt-polars engine still performs the writes.
 
-dbt-polars uses **catalogs** to define where data is stored. Each catalog maps to a storage backend. You can configure multiple catalogs in a single profile and reference them from your models. See the [Catalog overview](https://datamindedbe.github.io/incubator-dbt-polars/catalog-overview).
+## The familiarity of dbt
 
-</details>
+If you know dbt, you already know how to use dbt-polars. Introduce dbt-polars to your Python projects to benefit from key dbt features, such as lineage, documentation and tests. See [dbt compatibility](https://datamindedbe.github.io/incubator-dbt-polars/dbt-compatibility) for the full list of supported dbt features.
 
-## Supported catalogs
+<img src="https://raw.githubusercontent.com/datamindedbe/incubator-dbt-polars/main/docs/demos/images/getting-started-lineage.png" alt="Lineage graph of a dbt-polars project" width="720">
 
-Catalog extensions define where dbt-polars reads and stores data.
+## Built for efficiency
 
-<table>
-<tr><th>Target</th><th>Catalog</th></tr>
-<tr><td>Local filesystem</td><td><a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/local">local</a></td></tr>
-<tr><td>Azure Blob Storage / ADLS Gen2</td><td><a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/azure">azure</a></td></tr>
-<tr><td>Databricks Unity Catalog</td><td><a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/databricks">databricks</a> (Delta, Iceberg)</td></tr>
-<tr><td>Microsoft Fabric OneLake</td><td><a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/fabric">fabric</a> (Delta, Iceberg)</td></tr>
-<tr><td>Snowflake Horizon Catalog</td><td><a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/snowflake">snowflake</a> (Iceberg)</td></tr>
-<tr><td>Other Iceberg catalogs</td><td><a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/iceberg">iceberg</a> (any pyiceberg backend, e.g. SQLite, REST, Glue)</td></tr>
-<tr><td>Other platforms</td><td><a href="https://datamindedbe.github.io/incubator-dbt-polars/catalogs/custom">Write your own catalog extension</a></td></tr>
-</table>
+dbt-polars builds on the full power of the Polars engine. Models run lazily, so Polars optimizes the whole query before running it. Execution and writes are streamed in batches to keep memory use low.
 
-To support another platform, you can write your own catalog. See [Custom catalogs](https://datamindedbe.github.io/incubator-dbt-polars/catalogs/custom).
+## Get started
 
-## Limitations
-
-- Views are not supported, as there is no database to hold them. Use `table` or `ephemeral` instead.
-- The `hash` macro is not supported. Use a Python model for hashing instead.
-
-See [dbt compatibility](https://datamindedbe.github.io/incubator-dbt-polars/dbt-compatibility) for the full overview, including supported macros.
-
-## Getting started
-
-The first steps are below. For the full walkthrough, see the [Getting started](https://datamindedbe.github.io/incubator-dbt-polars/demos/getting_started) guide.
-
-Install dbt-polars and create a new dbt project:
+Install dbt-polars and create a new project:
 
 ```bash
 pip install dbt-polars
 dbt init
 ```
 
-When prompted, choose `polars` as the database and `local` as the catalog type. This creates a profile that writes tables to your local disk:
+The [quick start](https://datamindedbe.github.io/incubator-dbt-polars/quickstart) walks you through the rest. It runs locally and writes tables to your disk, so you don't need a cloud account. Afterwards, the [demo project](https://datamindedbe.github.io/incubator-dbt-polars/tutorial/loading-data) builds a weather data pipeline that uses many of dbt-polars' features along the way.
 
-```yaml
-my_project:
-  target: dev
-  outputs:
-    dev:
-      type: polars
-      schema: main
-      catalog_type: local
-      root: ./data
-```
+## Limitations
 
-dbt-polars does not support views, so replace the `models:` block in `dbt_project.yml` with:
-
-```yaml
-models:
-  my_project:
-    +materialized: table
-```
-
-Then build the example models:
-
-```bash
-dbt run
-```
-
-The [Getting started](https://datamindedbe.github.io/incubator-dbt-polars/demos/getting_started) guide continues from here with other catalogs, seeds, ephemeral models, docs, tests and incremental ingestion.
+- Views are not supported, as there is no database to hold them. Use `table` or `ephemeral` instead.
+- The `hash` macro is not supported. Use a Python model for hashing instead.
 
 ## Documentation
 

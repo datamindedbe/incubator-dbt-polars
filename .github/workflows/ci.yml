@@ -82,6 +82,68 @@ jobs:
       - name: Run tests (iceberg catalog)
         run: uv run --no-sync --python ${{ matrix.python-version }} pytest -n auto --profile iceberg
 
+  catalog-template:
+    name: "Catalog template / ${{ matrix.base_class }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        base_class: ["StorageCatalog", "BaseCatalog"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Generate project
+        run: |
+          uvx copier copy --defaults --vcs-ref HEAD \
+            --data catalog_name=sample \
+            --data base_class=${{ matrix.base_class }} \
+            --data author_name=CI \
+            --data author_email=ci@example.com \
+            . "$RUNNER_TEMP/project"
+
+      # Wheels, not editable installs: dbt.adapters is a namespace package
+      - name: Install dbt-polars from this checkout
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheels" .
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheels" catalogs/dbt-polars-catalog-local
+          cd "$RUNNER_TEMP/project"
+          uv sync --python 3.12
+          uv pip install --reinstall "$RUNNER_TEMP"/wheels/*.whl
+
+      - name: Lint and type check the generated project
+        working-directory: ${{ runner.temp }}/project
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+          uv run --no-sync mypy
+
+      # Fails when a stub for an abstract method is missing
+      - name: Load the generated catalog
+        working-directory: ${{ runner.temp }}/project
+        run: |
+          uv run --no-sync python -c "
+          from dbt.adapters.polars.catalogs import create_catalog, resolve_catalog_plugin
+          config = resolve_catalog_plugin('sample').config_class(
+              name='sample', type='sample', schema='unused'
+          )
+          print(type(create_catalog(config, '')).__name__)
+          "
+
+      # Replace the stubs with a local-directory reference implementation
+      - name: Test with the reference implementation
+        run: |
+          cp catalog-template/ci/catalog.py "$RUNNER_TEMP/project/dbt_polars_catalog_sample/catalog.py"
+          cat catalog-template/ci/conftest_options.py >> "$RUNNER_TEMP/project/tests/conftest.py"
+          cd "$RUNNER_TEMP/project"
+          uv run --no-sync pytest -n auto
+          uv build
+
   ruff:
     name: "Ruff"
     runs-on: ubuntu-latest

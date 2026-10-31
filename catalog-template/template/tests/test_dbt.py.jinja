@@ -1,0 +1,41 @@
+{%- set catalog_tests = [
+    "AdapterMethod", "BasicSeedTests", "Concurrency", "DocsGenerate",
+    "DocsGenReferences", "Empty", "EmptySeed", "Incremental",
+    "IncrementalNotSchemaChange", "SeedCustomSchema", "SeedParsing",
+    "SeedWithExplicitCatalog", "SeedWithExplicitCatalogParsing",
+    "SimpleMaterializations", "SimpleSeedEnabledViaConfig", "SimpleSeedWithBOM",
+    "SnapshotCheckCols", "SnapshotTimestamp", "TableMaterialization",
+] -%}
+{%- set data_operations_tests = [
+    "IncrementalAppend", "IncrementalDeleteInsert", "IncrementalFailOnTypeChange",
+    "IncrementalFullRefresh", "IncrementalMerge", "IncrementalOnSchemaChange",
+    "IncrementalOnSchemaChangeAppend", "IncrementalUniqueKey",
+    "MergeColumnsMutuallyExclusive", "MergeExcludeColumns", "MergeUpdateColumns",
+    "PartitionByIncremental", "PartitionByIncrementalGuard", "PartitionBySeed",
+    "PartitionByTable", "PartitionByTableRepartition", "PersistDocs",
+    "PersistDocsColumnMissing", "PersistDocsCommentOnQuotedColumn", "Snapshot",
+    "SnapshotCheck", "SnapshotColumnNames", "SnapshotColumnNamesFromDbtProject",
+    "SnapshotDbtValidToCurrent", "SnapshotInvalidColumnNames",
+    "SnapshotIsDeletedColumnName", "SnapshotMultiUniqueKey",
+] -%}
+"""dbt-level tests from dbt-polars. Remove a class, or override a test with
+@pytest.mark.skip, when it doesn't apply to your catalog."""
+
+from dbt.adapters.polars.testing.catalog import (
+{%- for name in catalog_tests %}
+    Base{{ name }},
+{%- endfor %}
+)
+{%- if implements_data_operations %}
+from dbt.adapters.polars.testing.data_operations import (
+{%- for name in data_operations_tests %}
+    Base{{ name }},
+{%- endfor %}
+)
+{%- endif %}
+{%- for name in catalog_tests + (data_operations_tests if implements_data_operations else []) %}
+
+
+class Test{{ name }}(Base{{ name }}):
+    pass
+{%- endfor %}

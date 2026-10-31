@@ -1,0 +1,60 @@
+_min_copier_version: "9.4.0"
+# Template for custom catalog packages, see catalog-template/README.md
+_subdirectory: catalog-template/template
+_skip_if_exists:
+  - "dbt_polars_catalog_*/__init__.py"
+  - "dbt_polars_catalog_*/catalog.py"
+  - tests/conftest.py
+  - README.md
+
+catalog_name:
+  type: str
+  help: "catalog_name (Allowed characters: a-z, 0-9, _)"
+  validator: >-
+    {% if not (catalog_name | regex_search('^[a-z][a-z0-9_]*$')) %}
+    Start with a letter and use only a-z, 0-9, _
+    {% elif catalog_name in ['local', 'iceberg', 's3', 'azure', 'databricks', 'fabric', 'snowflake'] %}
+    '{{ catalog_name }}' is reserved for an official dbt-polars catalog
+    {% endif %}
+
+base_class:
+  type: str
+  help: Catalog to extend
+  choices:
+    "StorageCatalog (recommended)": StorageCatalog
+    BaseCatalog: BaseCatalog
+  default: StorageCatalog
+
+author_name:
+  type: str
+  help: Author name
+
+author_email:
+  type: str
+  help: Author email
+
+# Derived, not asked
+distribution_name:
+  type: str
+  default: "dbt-polars-catalog-{{ catalog_name | replace('_', '-') }}"
+  when: false
+
+package_name:
+  type: str
+  default: "dbt_polars_catalog_{{ catalog_name }}"
+  when: false
+
+class_prefix:
+  type: str
+  default: "{{ catalog_name.split('_') | map('capitalize') | join('') }}"
+  when: false
+
+catalog_test_suite:
+  type: str
+  default: "{{ 'StorageCatalogTests' if base_class == 'StorageCatalog' else 'CatalogTests' }}"
+  when: false
+
+implements_data_operations:
+  type: bool
+  default: "{{ base_class == 'BaseCatalog' }}"
+  when: false

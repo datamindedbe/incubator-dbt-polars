@@ -1,0 +1,31 @@
+# Publishes to PyPI with trusted publishing: register this repository, this workflow
+# and the `pypi` environment as a trusted publisher on the PyPI project first.
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Check version matches tag
+        run: |
+          TOML_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$TOML_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: pyproject.toml has $TOML_VERSION but tag is $TAG_VERSION"
+            exit 1
+          fi
+
+      - run: uv build
+      - run: uv publish

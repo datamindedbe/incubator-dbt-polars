@@ -1,0 +1,49 @@
+# {{ distribution_name }}
+
+{{ class_prefix }} catalog for [dbt-polars](https://github.com/datamindedbe/incubator-dbt-polars).
+
+## Usage
+
+```bash
+pip install {{ distribution_name }}
+```
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalogs:
+        - name: my_catalog
+          type: {{ catalog_name }}
+          schema: dev
+```
+
+## Development
+
+1. Implement the methods in `{{ package_name }}/catalog.py` and add your profile options to `{{ class_prefix }}CatalogConfig`.
+2. Fill in `PRIMARY_CATALOG_OPTIONS` and `SECONDARY_CATALOG_OPTIONS` in `tests/conftest.py`: two test instances of your backend that don't share storage.
+3. Run the tests:
+
+   ```bash
+   uv run pytest -n auto
+   ```
+
+   `tests/test_catalog.py` calls the catalog directly, `tests/test_dbt.py` runs dbt projects against it.
+
+Test schemas are removed by the `cleanup_test_schemas` fixture in `tests/conftest.py`: at the end of a run, and for leftovers of earlier runs older than 24 hours. Check that it works for your backend.
+
+See [Custom catalogs](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/guides/custom-catalog.md) for the catalog API.
+
+## Release
+
+Set `version` in `pyproject.toml`, then push a matching tag (`v0.1.0`). `.github/workflows/publish.yml` publishes to PyPI with trusted publishing.
+
+## Template updates
+
+This project was generated from the [dbt-polars catalog template](https://github.com/datamindedbe/incubator-dbt-polars/tree/main/catalog-template). To pull in template updates:
+
+```bash
+uvx copier update
+```
