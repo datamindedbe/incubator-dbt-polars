@@ -8,6 +8,10 @@
 - The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/incubator-dbt-polars <dir>`.
 - Full rewrite of the documentation for consistency and clarity
 
+### Fixes
+
+- Incremental merge models on Delta tables no longer drop new columns with `on_schema_change` set to `append_new_columns` or `sync_all_columns`.
+
 ## v0.5.0
 
 ### Implements

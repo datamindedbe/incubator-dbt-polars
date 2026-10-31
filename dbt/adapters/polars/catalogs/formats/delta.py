@@ -107,6 +107,7 @@ class DeltaFormat:
                 predicate,
                 source_alias="DBT_INTERNAL_SOURCE",
                 target_alias="DBT_INTERNAL_DEST",
+                merge_schema=allow_schema_evolution,
             )
             .when_matched_update_all(except_cols=except_cols)
             .when_not_matched_insert_all()
