@@ -10,8 +10,8 @@ Choose Python or SQL per model, whichever fits the transformation best. Both run
 
 <table>
 <tr>
-<th>Python: <code>models/daily_weather.py</code></th>
-<th>SQL: <code>models/daily_weather.sql</code></th>
+<th>Python: <code>models/revenue.py</code></th>
+<th>SQL: <code>models/revenue.sql</code></th>
 </tr>
 <tr>
 <td valign="top">
@@ -20,11 +20,11 @@ Choose Python or SQL per model, whichever fits the transformation best. Both run
 import polars as pl
 
 
-def model(dbt, session) -> pl.LazyFrame:
-    hourly = dbt.ref("open_meteo_raw")
-    return hourly.group_by("date").agg(
-        pl.col("temperature_2m").min().alias("min_temperature"),
-        pl.col("temperature_2m").max().alias("max_temperature"),
+def model(dbt, session):
+    return (
+        dbt.ref("orders")
+        .group_by("country")
+        .agg(revenue=pl.sum("amount"))
     )
 ```
 
@@ -33,11 +33,10 @@ def model(dbt, session) -> pl.LazyFrame:
 
 ```sql
 select
-    date,
-    min(temperature_2m) as min_temperature,
-    max(temperature_2m) as max_temperature
-from {{ ref('open_meteo_raw') }}
-group by date
+    country,
+    sum(amount) as revenue
+from {{ ref('orders') }}
+group by country
 ```
 
 </td>
