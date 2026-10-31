@@ -3,6 +3,7 @@ from dbt.tests.adapter.incremental import fixtures
 from dbt.tests.adapter.incremental.test_incremental_on_schema_change import (
     BaseIncrementalOnSchemaChange as DbtBaseIncrementalOnSchemaChange,
 )
+from dbt.tests.util import check_relations_equal, run_dbt
 
 from dbt.adapters.polars.testing.data_operations.incremental import (
     fixtures as fixture_overrides,
@@ -10,7 +11,19 @@ from dbt.adapters.polars.testing.data_operations.incremental import (
 from dbt.adapters.polars.testing.mixin import PolarsTestMixin
 
 
-class BaseIncrementalOnSchemaChange(DbtBaseIncrementalOnSchemaChange, PolarsTestMixin):
+class CompareTargetColumnsMixin:
+    def run_twice_and_assert(self, include, compare_source, compare_target, project):
+        run_args = ["run", "--select", include]
+        assert len(run_dbt(run_args)) == 3  # creates the table
+        assert len(run_dbt(run_args)) == 3  # incremental run with the schema change
+        # check_relations_equal only compares the first relation's columns
+        check_relations_equal(project.adapter, [compare_source, compare_target])
+        check_relations_equal(project.adapter, [compare_target, compare_source])
+
+
+class BaseIncrementalOnSchemaChange(
+    CompareTargetColumnsMixin, DbtBaseIncrementalOnSchemaChange, PolarsTestMixin
+):
     @pytest.fixture(scope="class")
     def models(self):
         return {
@@ -43,7 +56,7 @@ class BaseIncrementalOnSchemaChange(DbtBaseIncrementalOnSchemaChange, PolarsTest
 
 
 class BaseIncrementalOnSchemaChangeAppend(
-    DbtBaseIncrementalOnSchemaChange, PolarsTestMixin
+    CompareTargetColumnsMixin, DbtBaseIncrementalOnSchemaChange, PolarsTestMixin
 ):
     @pytest.fixture(scope="class")
     def project_config_update(self):
