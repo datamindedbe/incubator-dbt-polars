@@ -151,6 +151,7 @@ unit_tests:
 """
 
 
+@pytest.mark.skip_configs("csv")  # CSV can't store the list column of upstream_python
 class TestUnitTestFixtures(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
