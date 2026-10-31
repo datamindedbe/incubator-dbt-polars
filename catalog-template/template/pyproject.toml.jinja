@@ -1,0 +1,62 @@
+[project]
+name = "{{ distribution_name }}"
+version = "0.1.0"
+description = "{{ class_prefix }} catalog for dbt-polars"
+readme = "README.md"
+requires-python = ">=3.10, <3.14"
+license = "Apache-2.0"
+keywords = ["dbt", "polars", "catalog", "{{ catalog_name }}"]
+authors = [
+  {name = "{{ author_name }}", email = "{{ author_email }}"}
+]
+maintainers = [
+  {name = "{{ author_name }}", email = "{{ author_email }}"}
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
+dependencies = [
+    "dbt-polars>=0.3",
+]
+
+[dependency-groups]
+dev = [
+    "dbt-tests-adapter~=1.20.0",
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "ruff>=0.15",
+    # mypy>=1.20 requires pathspec>=1.0.0, but dbt-core 1.11.x caps pathspec<0.13
+    "mypy==1.19.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "TID251"]
+
+# The supported API is dbt.adapters.polars.catalogs (and .testing for tests)
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"dbt.adapters.polars.catalogs.baseCatalog".msg = "Use dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.catalogs.storageCatalog".msg = "Use dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.catalogs.formats".msg = "Use dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.relation".msg = "Use dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.utils".msg = "Use dbt.adapters.polars.catalogs"
+
+[tool.mypy]
+ignore_missing_imports = true
+files = ["{{ package_name }}"]

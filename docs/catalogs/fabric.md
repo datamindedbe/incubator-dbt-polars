@@ -1,3 +1,11 @@
+---
+mdx:
+  format: mdx
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Fabric OneLake
 
 Write Delta or Iceberg tables to a Microsoft Fabric Lakehouse via OneLake.
@@ -30,6 +38,9 @@ pip install 'dbt-polars[fabric,iceberg]'  # Delta and Iceberg tables
 
 ### Example
 
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
+
 ```yaml
 my_project:
   target: dev
@@ -43,14 +54,35 @@ my_project:
       default_table_format: delta
 ```
 
-To combine this catalog with others, put the same parameters in an entry of
-`catalogs`, with `type: fabric` and a `name`, see
-[Catalog overview](../catalog-overview.md).
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_fabric
+      catalogs:
+        - name: my_fabric
+          type: fabric
+          schema: dev
+          workspace: my_workspace
+          lakehouse: my_lakehouse
+          default_table_format: delta
+        - name: other_catalog
+          ...
+```
+
+See [Combining catalogs](../guides/combining-catalogs.md).
+
+</TabItem>
+</Tabs>
 
 ### Parameter Reference
 
-The following parameters are supported, in addition to the
-[common profile parameters](../catalog-overview.md#common-profile-parameters):
+The following parameters are supported:
 
 * `catalog_type` - (Required) Must be `fabric`.
 

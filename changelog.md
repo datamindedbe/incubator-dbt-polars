@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Implements
+
+- Unit tests defined in YAML, on SQL and Python models.
+- The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/incubator-dbt-polars <dir>`.
+- Full rewrite of the documentation for consistency and clarity
+
 ## v0.5.0
 
 ### Implements

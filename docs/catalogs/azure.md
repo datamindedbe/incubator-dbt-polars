@@ -1,3 +1,11 @@
+---
+mdx:
+  format: mdx
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Azure Blob Storage
 
 Store tables as files on Azure Blob Storage or Azure Data Lake Storage Gen2 (ADLS Gen2).
@@ -19,6 +27,9 @@ pip install 'dbt-polars[azure]'
 
 ### Example
 
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
+
 ```yaml
 my_project:
   target: dev
@@ -32,14 +43,35 @@ my_project:
       prefix: optional/path/prefix
 ```
 
-To combine this catalog with others, put the same parameters in an entry of
-`catalogs`, with `type: azure` and a `name`, see
-[Catalog overview](../catalog-overview.md).
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_azure
+      catalogs:
+        - name: my_azure
+          type: azure
+          schema: dev
+          account_name: mystorageaccount
+          container: mycontainer
+          prefix: optional/path/prefix
+        - name: other_catalog
+          ...
+```
+
+See [Combining catalogs](../guides/combining-catalogs.md).
+
+</TabItem>
+</Tabs>
 
 ### Parameter Reference
 
-The following parameters are supported, in addition to the
-[common profile parameters](../catalog-overview.md#common-profile-parameters):
+The following parameters are supported:
 
 * `catalog_type` - (Required) Must be `azure`.
 

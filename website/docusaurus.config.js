@@ -12,6 +12,8 @@ const config = {
 
   onBrokenLinks: 'throw',
 
+  clientModules: [require.resolve('./src/prism-python-annotations.js')],
+
   markdown: {
     // Parse .md as plain CommonMark rather than MDX, so `{` and `<` in prose need no escaping
     format: 'detect',
@@ -35,12 +37,28 @@ const config = {
     ],
   ],
 
+  themes: [
+    [
+      require.resolve('@easyops-cn/docusaurus-search-local'),
+      {
+        hashed: true,
+        docsRouteBasePath: '/',
+        indexBlog: false,
+        highlightSearchTermsOnTargetPage: true,
+      },
+    ],
+  ],
+
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
+      prism: {
+        theme: require('prism-react-renderer').themes.github,
+        darkTheme: require('prism-react-renderer').themes.dracula,
+        additionalLanguages: ['hcl'],
+      },
       navbar: {
         title: 'dbt-polars',
-        style: 'dark',
         items: [
           {
             href: 'https://github.com/datamindedbe/incubator-dbt-polars',

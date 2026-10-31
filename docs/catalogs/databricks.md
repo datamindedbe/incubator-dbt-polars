@@ -1,3 +1,11 @@
+---
+mdx:
+  format: mdx
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Databricks Unity Catalog
 
 Register Delta or Iceberg tables in Databricks Unity Catalog via the Databricks REST API.
@@ -39,6 +47,9 @@ pip install 'dbt-polars-catalog-databricks[azure]'
 
 ### Example
 
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
+
 ```yaml
 my_project:
   target: dev
@@ -56,14 +67,39 @@ my_project:
       auth_type: oauth-m2m
 ```
 
-To combine this catalog with others, put the same parameters in an entry of
-`catalogs`, with `type: databricks` and a `name`, see
-[Catalog overview](../catalog-overview.md).
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_databricks
+      catalogs:
+        - name: my_databricks
+          type: databricks
+          schema: dev
+          catalog_name: my_uc_catalog
+          host: https://my-workspace.cloud.databricks.com
+          default_table_format: delta
+          # persist_docs_http_path: /sql/1.0/warehouses/<warehouse_id>
+          client_id: "{{ env_var('DATABRICKS_CLIENT_ID') }}"
+          client_secret: "{{ env_var('DATABRICKS_CLIENT_SECRET') }}"
+          auth_type: oauth-m2m
+        - name: other_catalog
+          ...
+```
+
+See [Combining catalogs](../guides/combining-catalogs.md).
+
+</TabItem>
+</Tabs>
 
 ### Parameter Reference
 
-The following parameters are supported, in addition to the
-[common profile parameters](../catalog-overview.md#common-profile-parameters):
+The following parameters are supported:
 
 * `catalog_type` - (Required) Must be `databricks`.
 

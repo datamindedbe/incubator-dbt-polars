@@ -35,6 +35,9 @@ pip install 'dbt-polars[snowflake]'
 
 ### Example
 
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
+
 ```yaml
 my_project:
   target: dev
@@ -49,14 +52,36 @@ my_project:
       credential: "{{ env_var('SNOWFLAKE_PAT') }}"
 ```
 
-To combine this catalog with others, put the same parameters in an entry of
-`catalogs`, with `type: snowflake` and a `name`, see
-[Catalog overview](../catalog-overview.md).
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_snowflake
+      catalogs:
+        - name: my_snowflake
+          type: snowflake
+          schema: dev
+          account: myorg-myaccount
+          database_name: analytics
+          role: transformer
+          credential: "{{ env_var('SNOWFLAKE_PAT') }}"
+        - name: other_catalog
+          ...
+```
+
+See [Combining catalogs](../guides/combining-catalogs.md).
+
+</TabItem>
+</Tabs>
 
 ### Parameter Reference
 
-The following parameters are supported, in addition to the
-[common profile parameters](../catalog-overview.md#common-profile-parameters):
+The following parameters are supported:
 
 * `catalog_type` - (Required) Must be `snowflake`.
 
@@ -78,6 +103,10 @@ The following parameters are supported, in addition to the
   * `token` - OAuth access token, e.g. from your identity provider.
   * `scope` - Overrides the `session:role:<ROLE>` scope derived from `role`.
 
+  For workload identity federation, e.g. from GitHub Actions, set `credential`
+  to the OIDC ID token of the workload and add
+  `header.X-Snowflake-Workload-Identity-Provider: OIDC`.
+
 ## Recommendations
 
 ### Run models in parallel
@@ -85,7 +114,7 @@ The following parameters are supported, in addition to the
 For small models, most of the run time is spent waiting for Snowflake's REST
 API. We recommend `threads: 4` with `compute_threads: 1`, so these calls run in
 parallel while one model at a time runs Polars. See
-[Running models in parallel](../catalog-overview.md#running-models-in-parallel).
+[Running models in parallel](../guides/performance.md#running-models-in-parallel).
 
 ### Make Iceberg the default table format
 
