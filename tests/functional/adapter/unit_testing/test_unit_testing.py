@@ -188,8 +188,6 @@ sources:
     schema: "{{ target.schema }}"
     tables:
       - name: people
-        config:
-          file_format: csv
 
 unit_tests:
   - name: test_from_source
@@ -259,7 +257,7 @@ import polars as pl
 
 
 def model(dbt, session):
-    multiplier = dbt.config.meta_get("multiplier")
+    multiplier = dbt.config.get("meta")["multiplier"]
     return dbt.ref("from_source").select(pl.col("id") * multiplier, "name")
 """
 
@@ -295,7 +293,6 @@ class TestUnitTestSourcesAndPythonModels(PolarsTestMixin):
             identifier="people",
             type=RelationType.Table,
             catalog="primary",
-            file_format="csv",
         )
         with get_connection(project.adapter):
             catalog = project.adapter.get_storage_catalog("primary")
