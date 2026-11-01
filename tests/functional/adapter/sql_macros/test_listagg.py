@@ -1,5 +1,4 @@
 import pytest
-from dbt.exceptions import CompilationError
 
 from tests.functional.adapter.sql_macros.base_utils import BaseUtils
 from tests.functional.adapter.sql_macros.fixture_listagg import (
@@ -30,7 +29,7 @@ class BaseListagg(BaseUtils):
 
 @pytest.mark.xfail(
     strict=True,
-    raises=CompilationError,
+    raises=AssertionError,
     reason=(
         "dbt-polars only supports listagg() without an explicit order or limit — "
         "Polars' SQL engine has no WITHIN GROUP clause or array-slicing function. "

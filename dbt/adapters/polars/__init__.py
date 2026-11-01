@@ -7,7 +7,7 @@ from dbt.adapters.polars.connections import PolarsCredentials
 from dbt.adapters.polars.impl import PolarsAdapter
 from dbt.include.polars import PACKAGE_PATH
 
-# Two dbt-core monkeypatches to support Python singular tests (dbt-core 1.11.x):
+# Three dbt-core monkeypatches to support Python singular tests (dbt-core 1.11.x):
 #
 # 1. get_file_types_for_project: adds ".py" to ParseFileType.SingularTest extensions
 #    so Python test files are discovered by the parser.
@@ -16,6 +16,9 @@ from dbt.include.polars import PACKAGE_PATH
 #    dbt.ref() calls are statically scanned and added to depends_on. Without this, dbt's
 #    runtime ref() validation rejects any dbt.ref() call in a .py test. Requires a
 #    "def model" entry point (satisfied by _TEST_ENTRYPOINT_WRAPPER below).
+#
+# 3. SingularTestParser.parse_file: skips .py files in installed packages, which can
+#    ship unrelated Python files (e.g. tests/__init__.py in dbt_utils 1.1.1).
 _TEST_ENTRYPOINT_WRAPPER = "\n\n\ndef model(dbt, pl):\n    return test(dbt, pl)\n"
 
 try:
@@ -70,6 +73,17 @@ try:
         )
 
     SingularTestParser.render_update = _singular_test_render_update  # type: ignore[method-assign]
+
+    original_singular_test_parse_file = SingularTestParser.parse_file
+
+    def parse_file_skipping_package_python_tests(self, file_block):
+        is_python_file = file_block.path.relative_path.endswith(".py")
+        is_package_file = self.project.project_name != self.root_project.project_name
+        if is_python_file and is_package_file:
+            return
+        return original_singular_test_parse_file(self, file_block)
+
+    SingularTestParser.parse_file = parse_file_skipping_package_python_tests  # type: ignore[method-assign]
 except (ImportError, AttributeError):
     from dbt.adapters.events.logging import AdapterLogger
 
