@@ -23,13 +23,14 @@ class TestIncrementalOnSchemaChangeAppend(BaseIncrementalOnSchemaChangeAppend):
     pass
 
 
+@pytest.mark.skip_configs("csv")  # CSV doesn't store column types
 class TestIncrementalOnSchemaChangeFailWithTimestamp(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):
         return {
             "incremental_timestamp.sql": (
                 "{{ config(materialized='incremental', on_schema_change='fail') }}\n"
-                "select 1 as id, cast('2024-01-01 00:00:00' as timestamp) as loaded_at"
+                "select 1 as id, cast('2024-01-01T00:00:00' as timestamp) as loaded_at"
             )
         }
 

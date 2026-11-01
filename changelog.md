@@ -6,7 +6,8 @@
 
 - Unit tests defined in YAML, on SQL and Python models.
 - The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/incubator-dbt-polars <dir>`.
-- Full rewrite of the documentation for consistency and clarity
+- Full rewrite of the documentation for consistency and clarity.
+- `dbt.position()` macro adapted to Polars SQL.
 
 ### Fixes
 
@@ -14,6 +15,7 @@
 - Unsupported macros such as `hash()` now fail at execution time instead of at compilation time.
 - dbt-polars did not recognize CTEs when they started with a comment.
 - Change Polars dtype names to use double quotes instead of single quotes to generate valid SQL.
+- Type checks (`is_float`, `is_string`, ...) did not recognize Polars type like Float64.
 
 ## v0.5.0
 

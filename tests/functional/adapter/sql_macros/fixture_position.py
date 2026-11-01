@@ -24,6 +24,15 @@ from data
 """
 
 
+models__test_position_literals_sql = """
+{% set searches = [("'.'", 2), ("'?'", 4), ("'+'", 6), ("'it''s'", 8), ("'z'", 0)] %}
+{% for search, expected in searches %}
+select {{ position(search, "'a.b?c+dit''s'") }} as actual, {{ expected }} as expected
+{% if not loop.last %}union all{% endif %}
+{% endfor %}
+"""
+
+
 models__test_position_yml = """
 version: 2
 models:
