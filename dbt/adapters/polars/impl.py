@@ -34,7 +34,7 @@ from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCrede
 from dbt.adapters.polars.fixtures import fixture_frame
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
-from dbt.adapters.polars.utils import resolve_polars_type
+from dbt.adapters.polars.utils import polars_type_name, resolve_polars_type
 
 if TYPE_CHECKING:
     import agate
@@ -310,7 +310,7 @@ class PolarsAdapter(BaseAdapter):
         if not relation.external_location and not catalog.table_exists(relation):
             return []
         schema = catalog.get_relation(relation).collect_schema()
-        return [Column(col, str(type)) for col, type in schema.items()]
+        return [Column(col, polars_type_name(type)) for col, type in schema.items()]
 
     def list_relations_without_caching(
         self,
@@ -821,10 +821,11 @@ class PolarsAdapter(BaseAdapter):
         removed = set(existing.keys()) - set(new_cols)
 
         if on_schema_change == "fail":
+            new_types = {col: polars_type_name(new_schema[col]) for col in new_cols}
             type_changes = {
-                col: (existing[col], str(new_schema[col]))
+                col: (existing[col], new_types[col])
                 for col in new_cols
-                if col in existing and existing[col] != str(new_schema[col])
+                if col in existing and existing[col] != new_types[col]
             }
             if added or removed or type_changes:
                 raise CompilationError(
@@ -1188,7 +1189,7 @@ class PolarsAdapter(BaseAdapter):
         self, sql: str, extra_ctes: list | None
     ) -> list[Column]:
         schema = self.unit_test_actual(sql, extra_ctes).collect_schema()
-        return [Column(name, str(dtype)) for name, dtype in schema.items()]
+        return [Column(name, polars_type_name(dtype)) for name, dtype in schema.items()]
 
     @available
     @holds_compute_slot
