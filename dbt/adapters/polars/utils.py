@@ -88,6 +88,12 @@ def resolve_polars_type(type_str: str) -> type[pl.DataType]:
     return dtype
 
 
+def polars_type_name(dtype: pl.DataType) -> str:
+    """Polars repr of `dtype` with double quotes, so it can sit inside a SQL string
+    literal and still evaluates to `dtype` in Python."""
+    return str(dtype).replace("'", '"')
+
+
 def resolve_dtype_names(read_options: dict) -> dict:
     """read_options with dtype names in schema options resolved to Polars types."""
 
