@@ -12,6 +12,7 @@
 
 - Incremental merge models on Delta tables no longer drop new columns with `on_schema_change` set to `append_new_columns` or `sync_all_columns`.
 - Unsupported macros such as `hash()` now fail at execution time instead of at compilation time.
+- dbt-polars did not recognize CTEs when they started with a comment.
 
 ## v0.5.0
 
