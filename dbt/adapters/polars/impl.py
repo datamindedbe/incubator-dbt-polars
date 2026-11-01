@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import sqlparse
-from dbt.adapters.base.column import Column
 from dbt.adapters.base.impl import BaseAdapter
 from dbt.adapters.base.meta import available
 from dbt.adapters.base.relation import BaseRelation
@@ -29,6 +28,7 @@ from dbt_common.exceptions import CompilationError, DbtRuntimeError
 
 import polars as pl
 from dbt.adapters.polars.catalogs import BaseCatalog, create_catalog
+from dbt.adapters.polars.column import PolarsColumn
 from dbt.adapters.polars.compute_slots import compute_slots, holds_compute_slot
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
 from dbt.adapters.polars.fixtures import fixture_frame
@@ -148,6 +148,7 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
+    Column = PolarsColumn
 
     def __init__(self, config, mp_context):
         super().__init__(config, mp_context)
@@ -305,12 +306,12 @@ class PolarsAdapter(BaseAdapter):
             polars_goal, polars_current
         )
 
-    def get_columns_in_relation(self, relation: PolarsRelation) -> list[Column]:
+    def get_columns_in_relation(self, relation: PolarsRelation) -> list[PolarsColumn]:
         catalog = self.catalog_for_relation(relation)
         if not relation.external_location and not catalog.table_exists(relation):
             return []
         schema = catalog.get_relation(relation).collect_schema()
-        return [Column(col, str(type)) for col, type in schema.items()]
+        return [PolarsColumn(col, str(type)) for col, type in schema.items()]
 
     def list_relations_without_caching(
         self,
@@ -1186,9 +1187,9 @@ class PolarsAdapter(BaseAdapter):
     @holds_compute_slot
     def polars_get_columns_in_unit_test(
         self, sql: str, extra_ctes: list | None
-    ) -> list[Column]:
+    ) -> list[PolarsColumn]:
         schema = self.unit_test_actual(sql, extra_ctes).collect_schema()
-        return [Column(name, str(dtype)) for name, dtype in schema.items()]
+        return [PolarsColumn(name, str(dtype)) for name, dtype in schema.items()]
 
     @available
     @holds_compute_slot
