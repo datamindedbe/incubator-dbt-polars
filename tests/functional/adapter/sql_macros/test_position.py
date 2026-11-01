@@ -2,6 +2,7 @@ import pytest
 
 from tests.functional.adapter.sql_macros.base_utils import BaseUtils
 from tests.functional.adapter.sql_macros.fixture_position import (
+    models__test_position_literals_sql,
     models__test_position_sql,
     models__test_position_yml,
     seeds__data_position_csv,
@@ -25,3 +26,14 @@ class BasePosition(BaseUtils):
 
 class TestPosition(BasePosition):
     pass
+
+
+class TestPositionOfRegexCharacters(BaseUtils):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "test_position_literals.yml": models__test_position_yml.replace(
+                "test_position", "test_position_literals"
+            ),
+            "test_position_literals.sql": models__test_position_literals_sql,
+        }

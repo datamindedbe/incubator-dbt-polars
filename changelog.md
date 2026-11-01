@@ -6,13 +6,15 @@
 
 - Unit tests defined in YAML, on SQL and Python models.
 - The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/incubator-dbt-polars <dir>`.
-- Full rewrite of the documentation for consistency and clarity
+- Full rewrite of the documentation for consistency and clarity.
+- `dbt.position()` macro adapted to Polars SQL.
 
 ### Fixes
 
 - Incremental merge models on Delta tables no longer drop new columns with `on_schema_change` set to `append_new_columns` or `sync_all_columns`.
 - Unsupported macros such as `hash()` now fail at execution time instead of at compilation time.
 - dbt-polars did not recognize CTEs when they started with a comment.
+- Type checks (`is_float`, `is_string`, ...) did not recognize Polars type like Float64.
 
 ## v0.5.0
 
