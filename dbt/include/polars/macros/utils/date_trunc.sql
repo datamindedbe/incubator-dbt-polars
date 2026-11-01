@@ -12,6 +12,8 @@ cast(try_cast(concat(strftime({{ local_date }}, '%Y'), '-', lpad(cast(cast(floor
 cast(cast(strftime({{ local_date }}, '{{ "%Y-%m-01" if part == "month" else "%Y-01-01" }}') as date) as timestamp)
     {%- elif part in ('hour', 'minute') -%}
 cast(strftime(cast({{ date }} as timestamp), '{{ "%Y-%m-%dT%H:00:00" if part == "hour" else "%Y-%m-%dT%H:%M:00" }}') as timestamp)
+    {%- elif not execute -%}
+null
     {%- else -%}
 {{ exceptions.raise_compiler_error(
     "date_trunc('" ~ datepart ~ "', ...) is not supported by dbt-polars: only "

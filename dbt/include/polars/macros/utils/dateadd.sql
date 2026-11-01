@@ -4,7 +4,7 @@
     {%- set interval_text = interval | string | trim -%}
     {%- set sub_day_units = ['microsecond', 'millisecond', 'second', 'minute', 'hour'] -%}
     {%- set months_per_unit = {'month': 1, 'quarter': 3, 'year': 12} -%}
-    {%- if unit not in sub_day_units and unit not in ['day', 'week'] and unit not in months_per_unit -%}
+    {%- if execute and unit not in sub_day_units and unit not in ['day', 'week'] and unit not in months_per_unit -%}
         {{ exceptions.raise_compiler_error("dateadd() does not support datepart '" ~ datepart ~ "' on dbt-polars.") }}
     {%- endif -%}
     {#- Adding hours to a date would silently stay a date, so sub-day units work on timestamps. -#}
