@@ -30,6 +30,7 @@ dependencies = [
     "dbt-polars-catalog-local",
     "polars[deltalake,pyarrow]>=1.44.1",
     "sqlglot>=27.0.0",
+    "sqlparse>=0.5.5",
 ]
 
 [project.urls]

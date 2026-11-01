@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
+import sqlparse
 from dbt.adapters.base.column import Column
 from dbt.adapters.base.impl import BaseAdapter
 from dbt.adapters.base.meta import available
@@ -763,7 +764,7 @@ class PolarsAdapter(BaseAdapter):
         tokens = [re.escape(t) for t in re.split(r"\s+", prefix) if t]
         prefix_pattern = r"\s+".join(tokens)
 
-        stripped = code.lstrip()
+        stripped = self.skip_leading_comments(code)
         m = re.match(prefix_pattern, stripped, re.DOTALL | re.IGNORECASE)
 
         if not m:
@@ -778,6 +779,19 @@ class PolarsAdapter(BaseAdapter):
             return "with " + remainder[1:]
         else:
             return remainder
+
+    @staticmethod
+    def skip_leading_comments(code: str) -> str:
+        # dbt-core injects CTEs using sqlparse, which also skips leading comments.
+        statements = sqlparse.parse(code)
+        if not statements:
+            return code
+        statement = statements[0]
+        first_token = statement.token_first(skip_ws=True, skip_cm=True)
+        if first_token is None:
+            return code.lstrip()
+        leading_tokens = statement.tokens[: statement.token_index(first_token)]
+        return code[len("".join(str(token) for token in leading_tokens)) :]
 
     def _apply_schema_change(
         self,

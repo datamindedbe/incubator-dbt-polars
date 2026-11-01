@@ -55,6 +55,28 @@ class TestEphemeralNested(BaseEphemeral, PolarsTestMixin):
         assert sql_file == expected_sql
 
 
+class TestEphemeralRefAfterLeadingComment(PolarsTestMixin):
+    @pytest.fixture(scope="class")
+    def models(self):
+        return {
+            "ephemeral_model.sql": (
+                "{{ config(materialized='ephemeral') }}\nselect 1 as id"
+            ),
+            "commented_model.sql": (
+                "-- leading comment\n"
+                "with renamed as (select id from {{ ref('ephemeral_model') }})\n"
+                "select * from renamed"
+            ),
+        }
+
+    def test_model_with_leading_comment_runs(self, project):
+        util.run_dbt(["run"])
+        result = util.run_dbt(
+            ["show", "--inline", "select * from {{ ref('commented_model') }}"]
+        )
+        assert [row["id"] for row in result.results[0].agate_table] == [1]
+
+
 class TestEphemeralModelIsInlinedNotExecuted(PolarsTestMixin):
     """An ephemeral model is never materialized on its own; dbt inlines its
     compiled body as a CTE into whatever model references it. _run_sql
