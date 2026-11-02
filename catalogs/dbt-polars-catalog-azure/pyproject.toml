@@ -23,10 +23,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
-Documentation = "https://datamindedbe.github.io/incubator-dbt-polars/catalogs/azure"
-Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
-Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
+Homepage = "https://github.com/datamindedbe/dbt-polars"
+Documentation = "https://datamindedbe.github.io/dbt-polars/catalogs/azure"
+Repository = "https://github.com/datamindedbe/dbt-polars"
+Changelog = "https://github.com/datamindedbe/dbt-polars/releases"
 
 [build-system]
 requires = ["hatchling", "tomli; python_version < '3.11'"]

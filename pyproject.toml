@@ -1,6 +1,6 @@
 [project]
 name = "dbt-polars"
-version = "0.5.0"
+version = "0.5.1"
 description = "A dbt adapter for running models with Polars"
 readme = "README.md"
 # Python 3.14 excluded: dbt-core 1.11.x caps mashumaro<3.15; mashumaro 3.14 has no Python 3.14 support
@@ -34,10 +34,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
-Documentation = "https://datamindedbe.github.io/incubator-dbt-polars/"
-Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
-Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
+Homepage = "https://github.com/datamindedbe/dbt-polars"
+Documentation = "https://datamindedbe.github.io/dbt-polars/"
+Repository = "https://github.com/datamindedbe/dbt-polars"
+Changelog = "https://github.com/datamindedbe/dbt-polars/releases"
 
 [dependency-groups]
 dev = [

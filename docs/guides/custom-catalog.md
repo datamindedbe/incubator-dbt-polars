@@ -10,14 +10,14 @@ import TabItem from '@theme/TabItem';
 
 A custom catalog is the intended way to tailor dbt-polars to an existing setup. Organizations often have their own storage layout, authentication or governance tooling that none of the official catalogs match. Instead of forking dbt-polars, you write a catalog as a separate Python package. Once it is installed, a profile selects it with `type`, like any official catalog.
 
-The official local, S3, Azure, Databricks, Fabric and Snowflake catalogs are built exactly this way. You can find their source code [here](https://github.com/datamindedbe/incubator-dbt-polars/tree/main/catalogs) as a reference.
+The official local, S3, Azure, Databricks, Fabric and Snowflake catalogs are built exactly this way. You can find their source code [here](https://github.com/datamindedbe/dbt-polars/tree/main/catalogs) as a reference.
 
 ## Creating the package
 
-The [catalog template](https://github.com/datamindedbe/incubator-dbt-polars/tree/main/catalog-template) helps you to create a new catalog for dbt-polars. Clone it with [Copier](https://copier.readthedocs.io):
+The [catalog template](https://github.com/datamindedbe/dbt-polars/tree/main/catalog-template) helps you to create a new catalog for dbt-polars. Clone it with [Copier](https://copier.readthedocs.io):
 
 ```bash
-uvx copier copy gh:datamindedbe/incubator-dbt-polars dbt-polars-catalog-my-custom
+uvx copier copy gh:datamindedbe/dbt-polars dbt-polars-catalog-my-custom
 ```
 
 Copier asks for:
@@ -72,7 +72,7 @@ For backends that don't store Delta tables or files, extend `BaseCatalog` instea
 
 Most methods receive a `PolarsRelation` with a `schema` and `identifier`. Read its format with `file_format_of(relation)`, which defaults to `delta`. All methods must agree on one storage layout, such as `<root>/<schema>/<identifier>`. Threads share the catalog, so methods can run concurrently.
 
-The examples are simplified from the [local](https://github.com/datamindedbe/incubator-dbt-polars/tree/main/catalogs/dbt-polars-catalog-local) and [Azure](https://github.com/datamindedbe/incubator-dbt-polars/tree/main/catalogs/dbt-polars-catalog-azure) catalogs.
+The examples are simplified from the [local](https://github.com/datamindedbe/dbt-polars/tree/main/catalogs/dbt-polars-catalog-local) and [Azure](https://github.com/datamindedbe/dbt-polars/tree/main/catalogs/dbt-polars-catalog-azure) catalogs.
 
 :::info
 A relation is dbt-core's terminology for a model. When implementing these methods, relation most often means table.
