@@ -1,10 +1,6 @@
 import polars as pl
-import pytest
 
-from dbt.adapters.polars.catalogs.icebergCatalog import (
-    _apply_partial_update,
-    _build_key_delete_filter,
-)
+from dbt.adapters.polars.catalogs.icebergCatalog import _apply_partial_update
 
 
 def test_update_cols_are_replaced_from_incoming():
@@ -73,33 +69,3 @@ def test_apply_partial_update_output_columns_match_existing():
     result = _apply_partial_update(existing, incoming, keys=["id"], update_cols=["x"])
 
     assert result.columns == existing.columns
-
-
-def test_single_key_produces_in_expression():
-    pytest.importorskip("pyiceberg")
-    from pyiceberg.expressions import In
-
-    df = pl.DataFrame({"id": [1, 2, 3]})
-    result = _build_key_delete_filter(["id"], df)
-
-    assert isinstance(result, In)
-
-
-def test_composite_key_single_row_produces_and():
-    pytest.importorskip("pyiceberg")
-    from pyiceberg.expressions import And as IcebergAnd
-
-    df = pl.DataFrame({"k1": [1], "k2": ["a"]})
-    result = _build_key_delete_filter(["k1", "k2"], df)
-
-    assert isinstance(result, IcebergAnd)
-
-
-def test_composite_key_multiple_rows_produces_or_of_ands():
-    pytest.importorskip("pyiceberg")
-    from pyiceberg.expressions import Or
-
-    df = pl.DataFrame({"k1": [1, 2], "k2": ["a", "b"]})
-    result = _build_key_delete_filter(["k1", "k2"], df)
-
-    assert isinstance(result, Or)

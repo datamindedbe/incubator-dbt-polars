@@ -1,8 +1,21 @@
-# Azure catalog
+---
+mdx:
+  format: mdx
+---
 
-The Azure catalog stores tables as files on Azure Blob Storage or Azure Data Lake Storage Gen2 (ADLS Gen2).
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 
-**Status:** Experimental
+# Azure Blob Storage
+
+Store tables as files on Azure Blob Storage or Azure Data Lake Storage Gen2 (ADLS Gen2).
+
+## Supported features
+
+| Feature | Status | Remarks |
+|---|---|---|
+| Read/write Delta tables | ✅ | Default `file_format` |
+| Read/write Parquet, CSV and NDJSON files | ✅ | Set `file_format` on the model |
 
 ## Installation
 
@@ -12,78 +25,75 @@ pip install 'dbt-polars[azure]'
 
 ## Profile configuration
 
+### Example
+
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
+
 ```yaml
 my_project:
   target: dev
   outputs:
     dev:
       type: polars
+      catalog_type: azure
       schema: dev
+      account_name: mystorageaccount
+      container: mycontainer
+      prefix: optional/path/prefix
+```
+
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
+
+```yaml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_azure
       catalogs:
-        - name: my_catalog
+        - name: my_azure
           type: azure
+          schema: dev
           account_name: mystorageaccount
           container: mycontainer
-          prefix: optional/path/prefix   # optional; prepended to all paths
-          credentials:
-            # see Authentication section below
+          prefix: optional/path/prefix
+        - name: other_catalog
+          ...
 ```
 
-### Configuration options
+See [Combining catalogs](../guides/combining-catalogs.md).
 
-| Key | Required | Description |
-|---|---|---|
-| `name` | Yes | Catalog name. Used as the `database` identifier in dbt. |
-| `type` | Yes | Must be `azure`. |
-| `account_name` | Yes | Azure Storage account name. |
-| `container` | Yes | Blob container / file system name. |
-| `prefix` | No | Path prefix prepended to all schema and table paths. |
-| `credentials` | No | Authentication options (see below). Omit to use `DefaultAzureCredential`. |
+</TabItem>
+</Tabs>
 
-## Authentication
+### Parameter Reference
 
-The `credentials` dict accepts three options. If `credentials` is omitted entirely, `DefaultAzureCredential` from the `azure-identity` package is used, which tries environment variables, workload identity, the Azure CLI, and managed identity in order.
+The following parameters are supported:
 
-### DefaultAzureCredential (default)
+* `catalog_type` - (Required) Must be `azure`.
 
-Omit `credentials` or pass keyword arguments forwarded to `DefaultAzureCredential`:
+* `schema` - (Required) Default schema for models. dbt-polars creates missing
+  schemas.
 
-```yaml
-credentials:
-  exclude_managed_identity_credential: true   # any DefaultAzureCredential kwarg
-```
+* `account_name` - (Required) Azure Storage account name.
 
-### Bearer token
+* `container` - (Required) Blob container / file system name.
 
-```yaml
-credentials:
-  bearer_token: "<token>"
-```
+* `prefix` - (Optional) Path prefix prepended to all schema and table paths.
 
-### Account key
-
-```yaml
-credentials:
-  account_key: "<key>"
-```
-
-### SAS token
-
-```yaml
-credentials:
-  sas_token: "<sas-query-string>"
-```
-
-### Custom storage_options
-
-For advanced use cases, pass `storage_options` to bypass the built-in credential resolution and supply options directly to the underlying object store library:
-
-```yaml
-credentials:
-  storage_options:
-    account_name: mystorageaccount
-    bearer_token: "<token>"
-```
+* `credentials` - (Optional) Authentication options. By default, dbt-polars
+  authenticates with
+  [`DefaultAzureCredential`](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential),
+  which gets the other keys in `credentials` as keyword arguments. To
+  authenticate otherwise, set one of:
+  * `bearer_token` - OAuth access token.
+  * `account_key` - Storage account key.
+  * `sas_token` - SAS token.
+  * `storage_options` - Options passed directly to the object store, see
+    [object_store's Azure options](https://docs.rs/object_store/latest/object_store/azure/enum.AzureConfigKey.html).
 
 ## Directory layout
 

@@ -1,6 +1,6 @@
 [project]
 name = "dbt-polars"
-version = "0.4.0"
+version = "0.5.0"
 description = "A dbt adapter for running models with Polars"
 readme = "README.md"
 # Python 3.14 excluded: dbt-core 1.11.x caps mashumaro<3.15; mashumaro 3.14 has no Python 3.14 support
@@ -30,10 +30,12 @@ dependencies = [
     "dbt-polars-catalog-local",
     "polars[deltalake,pyarrow]>=1.44.1",
     "sqlglot>=27.0.0",
+    "sqlparse>=0.5.5",
 ]
 
 [project.urls]
 Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
+Documentation = "https://datamindedbe.github.io/incubator-dbt-polars/"
 Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
 Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
 
@@ -41,7 +43,9 @@ Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
 dev = [
     "dbt-polars-catalog-s3",
     "dbt-polars-catalog-azure",
-    "dbt-polars-catalog-databricks",
+    "dbt-polars-catalog-databricks[azure]",
+    "dbt-polars-catalog-fabric",
+    "dbt-polars-catalog-snowflake",
     "dbt-tests-adapter~=1.20.0",
     "pytest~=9.1.1",
     "pytest-timeout~=2.3",
@@ -57,10 +61,12 @@ dev = [
 [project.optional-dependencies]
 # Pinned: iceberg_write_utils.py uses private pyiceberg APIs
 # Test with each new adapter version to see if pyiceberg can be upgraded
-iceberg = ["pyiceberg[sql-sqlite, adlfs]>=0.11.0,<=0.11.1"]
+iceberg = ["pyiceberg[sql-sqlite, adlfs]==0.12.0"]
 s3 = ["dbt-polars-catalog-s3"]
 azure = ["dbt-polars-catalog-azure"]
 databricks = ["dbt-polars-catalog-databricks"]
+fabric = ["dbt-polars-catalog-fabric"]
+snowflake = ["dbt-polars-catalog-snowflake", "dbt-polars[iceberg]"]
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -84,6 +90,8 @@ dbt-polars-catalog-local = { workspace = true }
 dbt-polars-catalog-s3 = { workspace = true }
 dbt-polars-catalog-azure = { workspace = true }
 dbt-polars-catalog-databricks = { workspace = true }
+dbt-polars-catalog-fabric = { workspace = true }
+dbt-polars-catalog-snowflake = { workspace = true }
 
 [tool.ruff]
 line-length = 88

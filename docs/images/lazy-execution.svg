@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" width="640" height="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    .line { stroke: #1f2328; fill: none; }
+    .ink { fill: #1f2328; }
+    .bg { fill: #ffffff; }
+    .accent { stroke: #6639ba; fill: none; }
+    .accent-fill { fill: #6639ba; }
+    .badge-text { fill: #ffffff; }
+  </style>
+  <rect width="640" height="320" rx="12" class="bg"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="accent-fill"/>
+    </marker>
+  </defs>
+
+  <!-- storage -->
+  <path d="M40,190 h110 a30,30 0 0 0 0,-60 a45,45 0 0 0 -85,-15 a40,40 0 0 0 -25,75 z" class="line" stroke-width="6" stroke-linejoin="round"/>
+  <text x="95" y="222" text-anchor="middle" font-size="14" class="ink">Storage</text>
+
+  <!-- dbt-polars process -->
+  <rect x="330" y="30" width="230" height="250" rx="28" class="line" stroke-width="1.5"/>
+  <text x="445" y="306" text-anchor="middle" font-size="14" class="ink">Your compute (dbt + Polars)</text>
+  <g transform="translate(528,64)" class="ink">
+    <circle r="11"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1" transform="rotate(45)"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1" transform="rotate(90)"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1" transform="rotate(135)"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1" transform="rotate(180)"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1" transform="rotate(225)"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1" transform="rotate(270)"/>
+    <rect x="-3.5" y="-16" width="7" height="7" rx="1" transform="rotate(315)"/>
+    <circle r="4.5" class="bg"/>
+  </g>
+
+  <!-- lazy frame -->
+  <rect x="405" y="58" width="80" height="50" rx="5" class="ink"/>
+  <g class="bg">
+    <rect x="411" y="72" width="20" height="8"/>
+    <rect x="435" y="72" width="20" height="8"/>
+    <rect x="459" y="72" width="20" height="8"/>
+    <rect x="411" y="84" width="20" height="8"/>
+    <rect x="435" y="84" width="20" height="8"/>
+    <rect x="459" y="84" width="20" height="8"/>
+    <rect x="411" y="96" width="20" height="6"/>
+    <rect x="435" y="96" width="20" height="6"/>
+    <rect x="459" y="96" width="20" height="6"/>
+  </g>
+
+  <!-- models -->
+  <rect x="370" y="140" width="150" height="46" rx="8" class="line" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="445" y="159" text-anchor="middle" font-size="14" class="ink">Python model</text>
+  <text x="445" y="177" text-anchor="middle" font-size="12" class="ink">ephemeral</text>
+  <rect x="370" y="215" width="150" height="38" rx="8" class="line" stroke-width="1.5"/>
+  <text x="445" y="239" text-anchor="middle" font-size="14" class="ink">SQL or Python model</text>
+
+  <!-- arrows -->
+  <path d="M158,128 C 230,70 320,70 400,80" class="accent" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M445,112 L445,136" class="accent" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M445,189 L445,211" class="accent" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M366,236 C 295,262 220,250 158,196" class="accent" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- step badges -->
+  <g font-size="13" font-weight="bold" text-anchor="middle">
+    <circle cx="445" cy="30" r="12" class="accent-fill"/>
+    <text x="445" y="35" class="badge-text">1</text>
+    <circle cx="265" cy="80" r="12" class="accent-fill"/>
+    <text x="265" y="85" class="badge-text">2</text>
+    <circle cx="540" cy="200" r="12" class="accent-fill"/>
+    <text x="540" y="205" class="badge-text">3</text>
+    <circle cx="265" cy="256" r="12" class="accent-fill"/>
+    <text x="265" y="261" class="badge-text">4</text>
+  </g>
+</svg>

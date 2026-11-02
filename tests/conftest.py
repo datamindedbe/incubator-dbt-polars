@@ -10,11 +10,11 @@ from tests.profiles import (
     azure_target,
     databricks_target,
     default_target,
-    get_databricks_pyiceberg_catalog,
+    fabric_target,
     get_databricks_token,
-    iceberg_databricks_target,
     iceberg_target,
     s3_target,
+    snowflake_target,
 )
 
 pytest_plugins = ["dbt.adapters.polars.testing.plugin"]
@@ -27,10 +27,11 @@ def pytest_addoption(parser):
         choices=[
             "local",
             "iceberg",
-            "iceberg-databricks",
             "azure",
             "s3",
             "databricks",
+            "fabric",
+            "snowflake",
         ],
         default="local",
         help=(
@@ -80,7 +81,7 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(scope="session")
 def databricks_token(request):
-    if request.config.option.profile not in ("iceberg-databricks", "databricks"):
+    if request.config.option.profile != "databricks":
         return None
     return get_databricks_token()
 
@@ -91,14 +92,16 @@ def dbt_profile_target(request, tmp_path_factory, databricks_token, unique_schem
     if profile == "iceberg":
         base = str(tmp_path_factory.mktemp("iceberg"))
         return iceberg_target(base, unique_schema)
-    if profile == "iceberg-databricks":
-        return iceberg_databricks_target(databricks_token, unique_schema)
     if profile == "azure":
         return azure_target(unique_schema)
     if profile == "s3":
         return s3_target(unique_schema)
     if profile == "databricks":
         return databricks_target(databricks_token, unique_schema)
+    if profile == "fabric":
+        return fabric_target(unique_schema)
+    if profile == "snowflake":
+        return snowflake_target(unique_schema)
     return default_target(unique_schema)
 
 
@@ -196,23 +199,6 @@ def cleanup_s3_test_schemas(request):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def cleanup_databricks_test_schemas(request, databricks_token):
-    yield
-    if request.config.option.profile != "iceberg-databricks":
-        return
-    catalog = get_databricks_pyiceberg_catalog(databricks_token)
-    for namespace in catalog.list_namespaces():
-        if not is_removable_test_schema(namespace[0]):
-            continue
-        try:
-            for table_id in catalog.list_tables(namespace):
-                catalog.purge_table(table_id)
-            catalog.drop_namespace(namespace)
-        except Exception:
-            pass
-
-
-@pytest.fixture(scope="session", autouse=True)
 def cleanup_databricks_catalog_test_schemas(request, databricks_token):
     """Session-wide sweep of leftover `databricks` catalog test schemas.
 
@@ -251,6 +237,60 @@ def cleanup_databricks_catalog_test_schemas(request, databricks_token):
         if not is_removable_test_schema(schema_name):
             continue
         relation = PolarsRelation.create(database=catalog_name, schema=schema_name)
+        try:
+            catalog.drop_schema(relation)
+        except Exception:
+            pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_fabric_test_schemas(request):
+    """Session-wide sweep of leftover `fabric` catalog test schemas, for the same
+    reasons as cleanup_databricks_catalog_test_schemas."""
+    yield
+    if request.config.option.profile != "fabric":
+        return
+    from dbt.adapters.polars.catalogs import create_catalog, resolve_catalog_plugin
+    from dbt.adapters.polars.relation import PolarsRelation
+    from tests.profiles import fabric_catalog
+
+    profile_config = fabric_catalog("cleanup", "cleanup")
+    if not profile_config["workspace"] or not profile_config["lakehouse"]:
+        return
+    catalog = create_catalog(
+        resolve_catalog_plugin("fabric").config_class(**profile_config), ""
+    )
+    for schema_name in catalog.list_schemas():
+        if not is_removable_test_schema(schema_name):
+            continue
+        relation = PolarsRelation.create(database="cleanup", schema=schema_name)
+        try:
+            catalog.drop_schema(relation)
+        except Exception:
+            pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_snowflake_test_schemas(request):
+    """Session-wide sweep of leftover `snowflake` catalog test schemas, for the
+    same reasons as cleanup_databricks_catalog_test_schemas."""
+    yield
+    if request.config.option.profile != "snowflake":
+        return
+    from dbt.adapters.polars.catalogs import create_catalog, resolve_catalog_plugin
+    from dbt.adapters.polars.relation import PolarsRelation
+    from tests.profiles import snowflake_catalog
+
+    profile_config = snowflake_catalog("cleanup", "cleanup")
+    if not profile_config["account"] or not profile_config["database_name"]:
+        return
+    catalog = create_catalog(
+        resolve_catalog_plugin("snowflake").config_class(**profile_config), ""
+    )
+    for schema_name in catalog.list_schemas():
+        if not is_removable_test_schema(schema_name):
+            continue
+        relation = PolarsRelation.create(database="cleanup", schema=schema_name)
         try:
             catalog.drop_schema(relation)
         except Exception:

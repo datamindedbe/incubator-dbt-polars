@@ -44,7 +44,7 @@ class TestPartitionBySeed(BasePartitionBySeed):
     pass
 
 
-@pytest.mark.skip_configs("default")
+@pytest.mark.require_configs("csv", "parquet", "ndjson")
 class TestPartitionByFileFormatError(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def models(self):

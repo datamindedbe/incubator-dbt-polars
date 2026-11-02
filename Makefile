@@ -1,8 +1,5 @@
 .PHONY: test-generic test xtest lint
 
-test-iceberg-databricks:
-	uv run --extra iceberg pytest --profile iceberg-databricks -n 0
-
 test-iceberg:
 	uv run --extra iceberg pytest --profile iceberg -n 0
 
@@ -23,6 +20,12 @@ test-azure:
 
 test-s3:
 	uv run --extra s3 pytest --profile s3 -n 0
+
+test-fabric:
+	uv run --extra fabric pytest --profile fabric -n 0
+
+test-snowflake:
+	uv run --extra snowflake pytest --profile snowflake -n 0
 
 
 xtest:

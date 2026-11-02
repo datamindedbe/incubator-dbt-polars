@@ -21,16 +21,24 @@ from dbt.adapters.polars.catalogs.storageCatalog import (
     external_location_of,
     file_format_of,
 )
+from dbt.adapters.polars.catalogs.tableFormatCatalog import (
+    SUPPORTED_TABLE_FORMATS,
+    TableFormatCatalog,
+)
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.utils import resolve_relative_path
 
 __all__ = [
     "FILE_FORMATS",
+    "SUPPORTED_TABLE_FORMATS",
     "BaseCatalog",
     "CatalogConfig",
     "CatalogPlugin",
+    "IcebergCatalog",
+    "IcebergCatalogConfig",
     "PolarsRelation",
     "StorageCatalog",
+    "TableFormatCatalog",
     "create_catalog",
     "external_location_of",
     "file_format_of",
@@ -41,7 +49,9 @@ __all__ = [
 
 EXTENSION_MODULE_PREFIX = "dbt_polars_catalog_"
 CATALOG_TYPE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-CATALOG_TYPES_INSTALLED_VIA_EXTRA = frozenset({"s3", "azure", "databricks"})
+CATALOG_TYPES_INSTALLED_VIA_EXTRA = frozenset(
+    {"s3", "azure", "databricks", "fabric", "snowflake"}
+)
 
 
 @dataclass(frozen=True)

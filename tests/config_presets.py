@@ -14,4 +14,9 @@ CONFIG_PRESETS: dict[str, dict[str, Any]] = {
         "models": {"+file_format": "ndjson"},
         "seeds": {"+file_format": "ndjson"},
     },
+    # databricks profile only
+    "table_format_iceberg": {
+        "models": {"+table_format": "iceberg"},
+        "seeds": {"+table_format": "iceberg"},
+    },
 }

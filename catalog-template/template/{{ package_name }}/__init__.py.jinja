@@ -1,0 +1,14 @@
+from {{ package_name }}.catalog import (
+    {{ class_prefix }}Catalog,
+    {{ class_prefix }}CatalogConfig,
+)
+
+config_class = {{ class_prefix }}CatalogConfig
+create_catalog = {{ class_prefix }}Catalog
+
+__all__ = [
+    "{{ class_prefix }}Catalog",
+    "{{ class_prefix }}CatalogConfig",
+    "config_class",
+    "create_catalog",
+]

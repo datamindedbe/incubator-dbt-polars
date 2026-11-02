@@ -29,6 +29,8 @@ class PolarsCredentials(Credentials):
     database: str = ""
     schema: str = ""
     catalogs: list[dict[str, Any]] = field(default_factory=list)
+    # Number of models that run Polars at the same time; unlimited when unset
+    compute_threads: int | None = None
 
     _ALIASES: ClassVar[dict[str, str]] = {"catalog": "database"}
 
@@ -41,7 +43,7 @@ class PolarsCredentials(Credentials):
         return self.catalog_configs[self.database].unique_field()
 
     def _connection_keys(self) -> tuple:
-        return ("database", "schema", "catalogs")
+        return ("database", "schema", "compute_threads", "catalogs")
 
     def connection_info(
         self, *, with_aliases: bool = False
@@ -104,7 +106,7 @@ class PolarsCredentials(Credentials):
                 "shorthand)."
             )
         name = data.get("database") or "default"
-        reserved = {"database", "schema"}
+        reserved = {"database", "schema", "compute_threads"}
         entry = {"name": name, "type": catalog_type}
         for key in list(data):
             if key not in reserved:
@@ -113,6 +115,8 @@ class PolarsCredentials(Credentials):
         return data
 
     def __post_init__(self) -> None:
+        if self.compute_threads is not None and self.compute_threads < 1:
+            raise DbtRuntimeError("compute_threads must be 1 or more")
         for entry in self.catalogs:
             if not entry.get("schema"):
                 if not self.schema:

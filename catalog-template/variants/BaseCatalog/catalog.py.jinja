@@ -1,0 +1,149 @@
+from dataclasses import dataclass
+
+import polars as pl
+from dbt.adapters.polars.catalogs import BaseCatalog, CatalogConfig, PolarsRelation
+
+
+@dataclass
+class {{ class_prefix }}CatalogConfig(CatalogConfig):
+    """
+    The fields of a catalog entry in profiles.yml. Add a field for each option
+    your catalog needs; name, type and schema are always present.
+    """
+
+    name: str
+    type: str
+    schema: str
+
+    def unique_field(self) -> str:
+        """Identifies the storage location; hashed in dbt's anonymous usage stats."""
+        return self.name
+
+    def connection_keys(self) -> tuple[str, ...]:
+        """Non-secret options shown by `dbt debug` and in `target`."""
+        return ("name",)
+
+
+class {{ class_prefix }}Catalog(BaseCatalog):
+    config: {{ class_prefix }}CatalogConfig
+
+    def __init__(
+        self,
+        config: {{ class_prefix }}CatalogConfig,
+        project_root: str,
+    ) -> None:
+        """Created once per catalog in the profile; project_root resolves paths."""
+        super().__init__(config)
+
+    def create_schema(self, relation: PolarsRelation) -> None:
+        """Create the schema; do nothing if it already exists."""
+        raise NotImplementedError
+
+    def drop_schema(self, relation: PolarsRelation) -> None:
+        """Drop the schema and all its tables; do nothing if it doesn't exist."""
+        raise NotImplementedError
+
+    def list_schemas(self) -> list[str]:
+        """Names of all schemas in the catalog."""
+        raise NotImplementedError
+
+    def drop_relation(self, relation: PolarsRelation) -> None:
+        """Drop the relation; do nothing if it doesn't exist."""
+        raise NotImplementedError
+
+    def get_relation(self, relation: PolarsRelation) -> pl.LazyFrame:
+        """The relation's data as a LazyFrame."""
+        raise NotImplementedError
+
+    def table_exists(self, relation: PolarsRelation) -> bool:
+        """Whether the relation exists."""
+        raise NotImplementedError
+
+    def write_relation(
+        self,
+        relation: PolarsRelation,
+        data: pl.DataFrame | pl.LazyFrame,
+        partition_by: list[str],
+        model_config: dict | None = None,
+    ) -> None:
+        """Create or replace the relation with data, partitioned by partition_by."""
+        raise NotImplementedError
+
+    def get_partition_columns(self, relation: PolarsRelation) -> list[str]:
+        """Partition columns of the relation."""
+        raise NotImplementedError
+
+    def truncate_relation(
+        self, relation: PolarsRelation, model_config: dict | None = None
+    ) -> None:
+        """Remove all rows, keeping the relation and its schema."""
+        raise NotImplementedError
+
+    def list_relations_without_caching(
+        self, schema_relation: PolarsRelation
+    ) -> list[PolarsRelation]:
+        """All relations in the schema, or an empty list if the schema doesn't exist."""
+        raise NotImplementedError
+
+    def append_relation(
+        self,
+        relation: PolarsRelation,
+        data: pl.DataFrame | pl.LazyFrame,
+        allow_schema_evolution: bool = False,
+        model_config: dict | None = None,
+    ) -> None:
+        """Append data; add new columns if allow_schema_evolution is set."""
+        raise NotImplementedError
+
+    def merge_relation(
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        keys: list[str],
+        except_cols: list[str] | None = None,
+        incremental_predicates: list[str] | None = None,
+        allow_schema_evolution: bool = False,
+        model_config: dict | None = None,
+    ) -> None:
+        """Update rows matching on keys (except except_cols) and insert the others."""
+        raise NotImplementedError
+
+    def delete_matched_relation(
+        self,
+        relation: PolarsRelation,
+        df: pl.DataFrame,
+        keys: list[str],
+        incremental_predicates: list[str] | None = None,
+        model_config: dict | None = None,
+    ) -> None:
+        """Delete rows matching on keys with df."""
+        raise NotImplementedError
+
+    def set_relation_comment(self, relation: PolarsRelation, comment: str) -> None:
+        """Store the relation's description."""
+        raise NotImplementedError
+
+    def set_column_comments(
+        self, relation: PolarsRelation, comments: dict[str, str]
+    ) -> None:
+        """Store column descriptions, keyed by column name."""
+        raise NotImplementedError
+
+    def get_relation_comment(self, relation: PolarsRelation) -> str | None:
+        """The relation's description, or None."""
+        raise NotImplementedError
+
+    def get_column_comments(self, relation: PolarsRelation) -> dict[str, str]:
+        """Column descriptions, keyed by column name."""
+        raise NotImplementedError
+
+    def apply_snapshot_delta(
+        self,
+        relation: PolarsRelation,
+        rows_to_close: pl.DataFrame,
+        rows_to_insert: pl.DataFrame,
+        scd_id_col: str = "dbt_scd_id",
+        model_config: dict | None = None,
+    ) -> None:
+        """Update rows_to_close and insert rows_to_insert, matched on scd_id_col."""
+        raise NotImplementedError

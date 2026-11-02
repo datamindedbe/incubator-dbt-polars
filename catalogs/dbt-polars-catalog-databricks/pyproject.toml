@@ -22,8 +22,13 @@ classifiers = [
     "Topic :: Database",
 ]
 
+[project.optional-dependencies]
+# Deletes the storage of dropped Delta tables on Azure
+azure = ["azure-storage-file-datalake>=12.10.0"]
+
 [project.urls]
 Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
+Documentation = "https://datamindedbe.github.io/incubator-dbt-polars/catalogs/databricks"
 Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
 Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
 
@@ -59,6 +64,7 @@ extend-select = ["TID251"]
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "dbt.adapters.polars.catalogs.baseCatalog".msg = "Use the public API from dbt.adapters.polars.catalogs"
 "dbt.adapters.polars.catalogs.storageCatalog".msg = "Use the public API from dbt.adapters.polars.catalogs"
+"dbt.adapters.polars.catalogs.tableFormatCatalog".msg = "Use the public API from dbt.adapters.polars.catalogs"
 "dbt.adapters.polars.catalogs.formats".msg = "Use the public API from dbt.adapters.polars.catalogs"
 "dbt.adapters.polars.catalogs.icebergCatalog".msg = "Use the public API from dbt.adapters.polars.catalogs"
 "dbt.adapters.polars.catalogs.iceberg_write_utils".msg = "Use the public API from dbt.adapters.polars.catalogs"

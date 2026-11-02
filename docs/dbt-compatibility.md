@@ -23,7 +23,7 @@ Overview of features dbt-polars already supports and plans to support in the fut
 | Python models | ✅ | |
 | Data tests (generic and singular SQL) | ✅ | |
 | Python singular tests | ✅ | |
-| Unit tests (defined in YAML) | 🚧 |  |
+| Unit tests (defined in YAML) | ✅ |  |
 | persist_docs | ✅ | |
 | dbt docs generate | ✅ | |
 | dbt show | ✅ | |
@@ -34,10 +34,11 @@ Overview of features dbt-polars already supports and plans to support in the fut
 
 ## dbt core extensions
 
-dbt-polars adds two features that are not supported in dbt-core:
+dbt-polars adds three features that are not supported in dbt-core:
 
 - Ephemeral Python models
 - Python data tests
+- Unit tests on Python models
 
 ## Macros
 
@@ -54,4 +55,4 @@ dbt-core publishes a list of  [cross-database macros](https://docs.getdbt.com/re
 | Set operations | ✅ | |
 | Other | ✅ | |
 
-Unsupported macros raise a compilation error. Use a [Python model](python-models.md) for the same logic.
+Unsupported macros raise a compilation error. Use a [Python model](guides/python-models.md) for the same logic.

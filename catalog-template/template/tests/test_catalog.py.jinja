@@ -1,0 +1,8 @@
+import pytest
+from dbt.adapters.polars.testing import {{ catalog_test_suite }}
+
+
+class Test{{ class_prefix }}Catalog({{ catalog_test_suite }}):
+    @pytest.fixture
+    def catalog(self, catalog_under_test):
+        return catalog_under_test

@@ -1,35 +1,54 @@
-# Databricks catalog
+---
+mdx:
+  format: mdx
+---
 
-The Databricks catalog registers tables in Unity Catalog via the Unity Catalog
-REST API, using Unity Catalog credential vending to read/write table data
-directly with polars/deltalake. **No Databricks compute or SQL warehouse is
-used for reads/writes or table registration** - only REST calls to the
-workspace API. A SQL warehouse is only used, optionally, to persist docs into
-Unity Catalog's native comment fields (see Persisting docs below).
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 
-**Status:** Experimental
+# Databricks Unity Catalog
 
-> **Limitations (read before using):**
-> - **dbt-polars only ever creates/writes `EXTERNAL` Delta tables.** Reading a
->   pre-existing table (e.g. via a dbt `source()`) works regardless of whether
->   it's external or Unity-Catalog-managed, since table-based credential
->   vending supports both - this restriction only applies to tables
->   dbt-polars itself creates.
-> - **The target catalog must already have a managed storage location**
->   (e.g. created with `CREATE CATALOG ... MANAGED LOCATION '...'`). New
->   tables' paths are derived from the catalog's own storage root plus the
->   schema and table name, rather than taking a location in profile config.
-> - **`file_format` is not configurable for this catalog.** Tables are always
->   registered as Delta in Unity Catalog; setting `file_format` to anything
->   other than `delta` on a model raises an error.
+Register Delta or Iceberg tables in Databricks Unity Catalog via the Databricks REST API.
+
+## Supported features
+
+| Feature | Status | Remarks |
+|---|---|---|
+| Read/write Delta tables | ✅ | Creates external Databricks tables |
+| Read/write Iceberg tables | ✅ | Creates managed Databricks tables |
+| Push table and column descriptions to Unity Catalog | ✅ | Requires a SQL warehouse, see [`persist_docs_http_path`](#persist_docs_http_path) |
+| Read/write Databricks views | ❌️ | |
+
+## Prerequisites
+
+* A Databricks workspace with Unity Catalog, with
+  [external data access](https://docs.databricks.com/aws/external-access/admin)
+  enabled on its metastore.
+* A Unity Catalog catalog with a managed storage location (`CREATE CATALOG ...
+  MANAGED LOCATION '...'`). Delta tables are written to its storage root.
+* Optionally, a SQL warehouse to push descriptions to Unity Catalog. No other
+  Databricks compute is used.
 
 ## Installation
 
 ```bash
-pip install 'dbt-polars[databricks]'
+pip install 'dbt-polars[databricks]'          # Delta tables
+pip install 'dbt-polars[databricks,iceberg]'  # Delta and Iceberg tables
+```
+
+On Azure, also install the `azure` extra of the catalog. dbt-polars uses it to
+delete the storage of Delta tables it drops:
+
+```bash
+pip install 'dbt-polars-catalog-databricks[azure]'
 ```
 
 ## Profile configuration
+
+### Example
+
+<Tabs groupId="profile-shape">
+<TabItem value="single" label="Single catalog" default>
 
 ```yaml
 my_project:
@@ -37,124 +56,122 @@ my_project:
   outputs:
     dev:
       type: polars
+      catalog_type: databricks
       schema: dev
-      catalogs:
-        - name: my_catalog
-          type: databricks
-          catalog_name: my_uc_catalog
-          host: https://my-workspace.cloud.databricks.com
-          # auth options - see Authentication below
-          # persist_docs_http_path: /sql/1.0/warehouses/<warehouse_id>  # optional, see Persisting docs
+      catalog_name: my_uc_catalog
+      host: https://my-workspace.cloud.databricks.com
+      default_table_format: delta
+      # persist_docs_http_path: /sql/1.0/warehouses/<warehouse_id>
+      client_id: "{{ env_var('DATABRICKS_CLIENT_ID') }}"
+      client_secret: "{{ env_var('DATABRICKS_CLIENT_SECRET') }}"
+      auth_type: oauth-m2m
 ```
 
-### Configuration options
-
-| Key | Required | Description |
-|---|---|---|
-| `name` | Yes | Catalog name. Used as the `database` identifier in dbt. |
-| `type` | Yes | Must be `databricks`. |
-| `catalog_name` | Yes | Name of the Unity Catalog catalog to register tables in. |
-| `host` | No | Workspace URL. Omit to let `databricks-sdk` resolve it from the environment. |
-| `persist_docs_http_path` | No | A SQL warehouse's HTTP path (see Persisting docs below). |
-| `table_format` | No | Table format to write. Only `delta` (the default) is supported for now. |
-| *(anything else)* | No | Forwarded to `databricks.sdk.Config` - see Authentication below. |
-
-## Authentication
-
-Every keyword besides `name`, `type`, `catalog_name`, `host`, `schema`, and
-`persist_docs_http_path` is passed straight through to
-`databricks.sdk.Config(**kwargs)`, so any auth method it supports works,
-matching (and exceeding) what `dbt-databricks` itself supports:
+</TabItem>
+<TabItem value="multiple" label="Multiple catalogs">
 
 ```yaml
-# Personal access token
-token: "<pat>"
-
-# OAuth machine-to-machine
-client_id: "<client-id>"
-client_secret: "<client-secret>"
-auth_type: oauth-m2m
-
-# Azure service principal
-azure_client_id: "<client-id>"
-azure_client_secret: "<client-secret>"
-azure_tenant_id: "<tenant-id>"
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: polars
+      catalog: my_databricks
+      catalogs:
+        - name: my_databricks
+          type: databricks
+          schema: dev
+          catalog_name: my_uc_catalog
+          host: https://my-workspace.cloud.databricks.com
+          default_table_format: delta
+          # persist_docs_http_path: /sql/1.0/warehouses/<warehouse_id>
+          client_id: "{{ env_var('DATABRICKS_CLIENT_ID') }}"
+          client_secret: "{{ env_var('DATABRICKS_CLIENT_SECRET') }}"
+          auth_type: oauth-m2m
+        - name: other_catalog
+          ...
 ```
 
-`databricks-sdk` also auto-probes PAT/OAuth-M2M/Azure-CLI/`databricks` CLI
-profile/GitHub OIDC/etc. from environment variables when `auth_type` is
-omitted - see the
-[databricks-sdk auth types reference](https://github.com/databricks/databricks-sdk-py/blob/main/docs/auth-types-reference.md).
+See [Combining catalogs](../guides/combining-catalogs.md).
 
-## Required Unity Catalog grants
+</TabItem>
+</Tabs>
 
-- `EXTERNAL USE SCHEMA` on each schema this catalog reads or writes.
-- `EXTERNAL USE LOCATION` and `CREATE EXTERNAL TABLE` on the external location
-  backing the catalog's managed storage root (needed to bootstrap the first
-  write of each new table, before it has a Unity Catalog table id).
-- `external_access_enabled` on the metastore.
-- The usual `USE CATALOG` / `USE SCHEMA` / `CREATE SCHEMA` privileges.
+### Parameter Reference
 
-`EXTERNAL USE SCHEMA`, `EXTERNAL USE LOCATION`, and `CREATE EXTERNAL TABLE`
-must each be granted explicitly to the principal dbt-polars authenticates as -
-they are not satisfied by `ALL PRIVILEGES` or by catalog/owner status.
+The following parameters are supported:
 
-## Table layout
+* `catalog_type` - (Required) Must be `databricks`.
 
-A new table is written to `<catalog storage_root>/<schema>/<table_name>` and
-registered in Unity Catalog as `<catalog_name>.<schema>.<table_name>`.
+* `catalog_name` - (Required) The Unity Catalog catalog that holds the tables.
+  It must have a managed storage location (`CREATE CATALOG ... MANAGED
+  LOCATION '...'`).
 
-Dropping a table (or schema) unregisters it from Unity Catalog and vacuums its
-underlying storage with no retention, physically removing the data files.
-The small `_delta_log` transaction-log files are left behind - Delta has no
-operation that removes those.
+* `schema` - (Required) Default schema for models. dbt-polars creates missing
+  schemas.
 
-## Persisting docs
+* `host` - (Optional) Workspace URL, e.g.
+  `https://adb-<workspace-id>.<number>.azuredatabricks.net` on Azure or
+  `https://<deployment-name>.cloud.databricks.com` on AWS. When omitted, `databricks-sdk`
+  attempts to resolve it from the environment (`DATABRICKS_HOST`, a `databricks` CLI
+  profile, ...).
 
-Table/column descriptions from dbt's `persist_docs` are always written to the
-Delta table's own metadata - this is what dbt's `docs generate`/`catalog.json`
-reads back, and needs no configuration.
+* `default_table_format` - (Optional) Format of new tables: `delta` or
+  `iceberg`. Defaults to `delta`. Models can override it by setting `table_format`.
 
-Unity Catalog's own native comment fields are a separate thing: its REST API
-has no endpoint to set or update them at all, for either tables or columns -
-the only way is `COMMENT ON TABLE` / `ALTER TABLE ... ALTER COLUMN ...
-COMMENT` SQL, which needs compute. If you set `persist_docs_http_path` to a
-SQL warehouse's HTTP path (shown on the warehouse's Connection Details page,
-e.g. `/sql/1.0/warehouses/<warehouse_id>`), dbt-polars runs that SQL for you
-whenever a comment actually changes. It first checks the current value via
-REST and skips the SQL warehouse entirely when nothing changed, so a normal
-`dbt run` with unchanged docs never starts it up. Leave it unset to keep this
-catalog fully compute-free; Unity Catalog's own comment fields then simply
-never get populated.
+:::info
+Delta tables are created as `EXTERNAL` (unmanaged) tables in the catalog's
+storage root. Iceberg tables are created as `MANAGED` tables, whose storage
+Unity Catalog manages.
+:::
 
-## Orphaned storage
 
-dbt-polars only cleans up storage through its own `drop_relation`/`drop_schema`
-code path (see Table layout above). If a table gets removed some other way -
-deleted in the Databricks UI, dropped via SQL from a notebook, deleted by
-another tool entirely - its data files are left behind with no built-in
-detection, since dbt-polars has no record that it ever existed.
+* <a id="persist_docs_http_path"></a>`persist_docs_http_path` - (Optional) HTTP path of a SQL warehouse, e.g.
+    `/sql/1.0/warehouses/<warehouse_id>`. Used to update table and column
+    descriptions in Unity Catalog. When not set, descriptions are only stored
+    in the table's own metadata and don't show up in Unity Catalog.
 
-An automated cleanup/audit command (list a schema's storage, diff against
-what's registered in Unity Catalog, delete the orphans) was investigated but
-turned out not to be achievable through the REST-plus-credential-vending
-model this catalog is built on, for two independent reasons:
+* Authentication parameters - (Optional) Passed to
+  [`databricks.sdk.Config`](https://github.com/databricks/databricks-sdk-py/blob/main/docs/auth-types-reference.md),
+  so every authentication method of `databricks-sdk` is supported. When none
+  are set, `databricks-sdk` attempts to find credentials in the environment.
+  Delta and Iceberg tables use the same credentials. Commonly used:
+  * `token` - Personal access token.
+  * `client_id`, `client_secret` - OAuth credentials of a Databricks service
+    principal, with `auth_type: oauth-m2m`.
+  * `azure_client_id`, `azure_client_secret`, `azure_tenant_id` - Microsoft
+    Entra ID service principal, on Azure Databricks.
+  * `auth_type` - Forces one authentication method, e.g. `pat`, `oauth-m2m`,
+    `azure-client-secret`, `azure-cli` or `databricks-cli`.
+  * `profile` - Profile in `~/.databrickscfg` to read the host and credentials
+    from.
 
-- Unity Catalog's path-based credential vending refuses catalog-root and
-  schema-root paths for *any* operation, including plain `PATH_READ` - it
-  rejects them as overlapping with managed storage. Without read access at
-  that granularity there is no way to list a schema's actual storage
-  contents via REST, so orphans can't be discovered in the first place.
-- Even for a single, already-known table path, deleting its files with
-  path-vended credentials failed on Azure with a `403 Signed Directory Depth
-  Invalid` error during `vacuum`'s bulk delete - the vended SAS token's
-  fixed directory-depth signature doesn't cover the depth a batch delete
-  touches.
+## Model configuration
 
-A blind, time-based storage lifecycle policy (e.g. "delete anything untouched
-for 90 days") is not a safe substitute either: Delta's data files are never
-modified after they're written, so file age can't tell an abandoned table
-apart from a stable table that's simply being read, not rewritten.
+The following custom model parameters are available for Databricks:
 
-For now, cleaning up orphaned storage is a manual step - review and delete it
-directly through the Databricks UI or your cloud provider's console/CLI.
+* `table_format` - (Optional) `delta` or `iceberg`. Overrides the profile's
+  `default_table_format`. When the existing table has another format, a
+  `table` model recreates it and an incremental model requires
+  `--full-refresh`.
+
+  ```sql
+  {{ config(materialized='table', table_format='iceberg') }}
+  ```
+
+## Required grants
+
+The principal dbt-polars authenticates as needs these grants:
+
+| Privilege | On | Needed for |
+|---|---|---|
+| `USE CATALOG`, `CREATE SCHEMA` | the catalog | Creating schemas |
+| `EXTERNAL USE SCHEMA` | the catalog | Reading and writing table data |
+| `EXTERNAL USE LOCATION`, `CREATE EXTERNAL TABLE` | the external location of the catalog's storage root | Creating Delta tables |
+| `USE SCHEMA`, `CREATE TABLE` | schemas dbt-polars didn't create | Creating tables in them |
+| `SELECT` | tables dbt-polars doesn't own | Reading them, e.g. as a source |
+
+`EXTERNAL USE SCHEMA`, `EXTERNAL USE LOCATION` and `CREATE EXTERNAL TABLE` are
+not included in `ALL PRIVILEGES` or ownership, so grant them explicitly. Grant
+`EXTERNAL USE SCHEMA` on the catalog: dbt-polars creates its own schemas, and
+only the catalog owner can grant the privilege on them.

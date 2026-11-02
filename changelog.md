@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Implements
+
+- Unit tests defined in YAML, on SQL and Python models.
+- The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/incubator-dbt-polars <dir>`.
+- Full rewrite of the documentation for consistency and clarity.
+- `dbt.position()` macro adapted to Polars SQL.
+
+### Fixes
+
+- Incremental merge models on Delta tables no longer drop new columns with `on_schema_change` set to `append_new_columns` or `sync_all_columns`.
+- Unsupported macros such as `hash()` now fail at execution time instead of at compilation time.
+- dbt-polars did not recognize CTEs when they started with a comment.
+- Change Polars dtype names to use double quotes instead of single quotes to generate valid SQL.
+- Type checks (`is_float`, `is_string`, ...) did not recognize Polars type like Float64.
+
+## v0.5.0
+
+### Implements
+
+- [Databricks Catalog]: Add support for iceberg tables in the Databricks catalog.
+- [Fabric Catalog]: New catalog for Delta and Iceberg tables in a Microsoft Fabric Lakehouse.
+- [Snowflake Catalog]: New catalog for Snowflake-managed Iceberg tables through Snowflake Horizon Catalog.
+- `compute_threads` in the profile limits how many of the `threads` models run Polars at the same time; models waiting for an Iceberg commit let others compute.
+- Enable lazy evaluation of incremental models with `sync_all_columns` for delta and iceberg tables.
+
+### Fixes
+
+- [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/incubator-dbt-polars/issues/45)).
+- [Iceberg Catalog] Merge and delete+insert no longer fail when a `unique_key` column contains NULL values.
+- [Databricks Catalog] Dropping a Delta table on Azure now deletes its storage folder. Requires installing `dbt-polars-catalog-databricks[azure]`.
+
 ## v0.4.0
 
 ### Implements

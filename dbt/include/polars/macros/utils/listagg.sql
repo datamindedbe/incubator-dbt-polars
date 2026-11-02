@@ -1,5 +1,7 @@
 {% macro polars__listagg(measure, delimiter_text="','", order_by_clause=none, limit_num=none) -%}
-    {%- if order_by_clause or limit_num -%}
+    {%- if (order_by_clause or limit_num) and not execute -%}
+null
+    {%- elif order_by_clause or limit_num -%}
 {{ exceptions.raise_compiler_error(
     "listagg() with an explicit order or a limit is not supported by dbt-polars: "
     "Polars' SQL engine has no WITHIN GROUP clause (needed for ordering) and no "

@@ -26,7 +26,6 @@
 }
 
 .navbar {
-  --ifm-navbar-background-color: var(--polars-blue);
   border-bottom: 4px solid var(--dbt-orange);
 }
 
@@ -48,6 +47,53 @@
 
 .tabs-container [role='tabpanel'] > :last-child {
   margin-bottom: 0;
+}
+
+.markdown p > img:only-child {
+  display: block;
+  margin: 0 auto;
+}
+
+.markdown table img {
+  height: 20px;
+  width: 20px;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+
+.markdown :not(pre) > code {
+  background-color: rgba(0, 117, 255, 0.08);
+  border: 1px solid rgba(0, 117, 255, 0.2);
+  color: var(--ifm-color-primary-darkest);
+  font-weight: 500;
+}
+
+[data-theme='dark'] .markdown :not(pre) > code {
+  background-color: rgba(77, 158, 255, 0.12);
+  border-color: rgba(77, 158, 255, 0.3);
+  color: var(--ifm-color-primary-lightest);
+}
+
+.token.class-name {
+  color: #6f42c1;
+}
+
+[data-theme='dark'] .token.class-name {
+  color: #8be9fd;
+}
+
+.theme-doc-sidebar-menu {
+  font-size: 0.875rem;
+}
+
+.sidebar-section > .menu__list-item-collapsible {
+  background: none;
+}
+
+.sidebar-section > .menu__list-item-collapsible > .menu__link {
+  font-weight: 700;
+  color: var(--ifm-color-emphasis-900);
+  pointer-events: none;
 }
 
 .navbar-github-link {

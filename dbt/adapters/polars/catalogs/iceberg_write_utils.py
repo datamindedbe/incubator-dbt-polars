@@ -95,50 +95,137 @@ def _replace_in_single_snapshot(
         _write_data_files(snapshot_writer, transaction, io, data, model_config)
 
 
-def _overwrite_scd_ids_and_append(
+# Dtypes whose Polars ordering matches Iceberg's, so min/max bound every value.
+# Not Enum (ordered by category) or Categorical (ordering varies by version).
+RANGE_PRUNABLE_DTYPES = (
+    pl.Int8,
+    pl.Int16,
+    pl.Int32,
+    pl.Int64,
+    pl.Decimal,
+    pl.Date,
+    pl.Datetime,
+    pl.Time,
+    pl.String,
+    pl.Binary,
+)
+
+
+def key_prune_filter(keys: list[str], key_rows: pl.DataFrame):
+    """File-pruning predicate: a superset of the rows matching `key_rows`, never
+    used to decide which rows are deleted. Float keys are left out because Iceberg
+    pruning never matches NaN while the join does; nested keys have no literal.
+    Above IN_PREDICATE_LIMIT values pyiceberg ignores In() for pruning, so a
+    min/max range is used instead."""
+    from pyiceberg.expressions import (
+        AlwaysFalse,
+        AlwaysTrue,
+        And,
+        GreaterThanOrEqual,
+        In,
+        LessThanOrEqual,
+    )
+    from pyiceberg.expressions.visitors import IN_PREDICATE_LIMIT
+
+    filters = []
+    for key in keys:
+        column = key_rows[key].drop_nulls()
+        if column.is_empty():
+            return AlwaysFalse()
+        if column.dtype.is_float() or column.dtype.is_nested():
+            continue
+        values = column.unique()
+        if len(values) <= IN_PREDICATE_LIMIT:
+            # filter exact values
+            filters.append(In(key, values.to_list()))  # type: ignore[misc,call-arg,arg-type]
+        elif isinstance(column.dtype, RANGE_PRUNABLE_DTYPES):
+            # filter range
+            filters += [
+                GreaterThanOrEqual(key, values.min()),  # type: ignore[arg-type]
+                LessThanOrEqual(key, values.max()),  # type: ignore[arg-type]
+            ]
+    if not filters:
+        return AlwaysTrue()
+    return filters[0] if len(filters) == 1 else And(*filters)
+
+
+def delete_rows_by_keys(
+    tbl: Table,
+    transaction: Transaction,
+    snapshot_writer: _SnapshotProducer[Any],
+    io: FileIO,
+    keys: list[str],
+    key_rows: pl.DataFrame,
+    counter: itertools.count,
+) -> pl.DataFrame:
+    """Copy-on-write delete of the rows whose `keys` match a row of `key_rows`,
+    staged on `snapshot_writer`. Matching is a Polars join, so a NULL key never
+    matches. Returns the deleted rows."""
+    from pyiceberg.expressions import AlwaysTrue
+    from pyiceberg.io.pyarrow import (
+        ArrowScan,
+        _dataframe_to_data_files,
+        schema_to_pyarrow,
+    )
+
+    schema = transaction.table_metadata.schema()
+
+    def read_file(task, projected_schema: Schema) -> pl.DataFrame:
+        return pl.DataFrame(
+            ArrowScan(
+                table_metadata=transaction.table_metadata,
+                io=io,
+                projected_schema=projected_schema,
+                row_filter=AlwaysTrue(),
+            ).to_table(tasks=[task])
+        )
+
+    probe = key_rows.select(keys).unique()
+    deleted_rows = [pl.DataFrame(schema_to_pyarrow(schema).empty_table())]
+    for task in tbl.scan(row_filter=key_prune_filter(keys, probe)).plan_files():
+        file_keys = read_file(task, schema.select(*keys))
+        file_probe = probe.cast({key: file_keys.schema[key] for key in keys}).join(
+            file_keys, on=keys, how="semi"
+        )
+        if file_probe.is_empty():
+            continue
+        all_rows = read_file(task, schema)
+        kept_rows = all_rows.join(file_probe, on=keys, how="anti")
+        deleted_rows.append(all_rows.join(file_probe, on=keys, how="semi"))
+        snapshot_writer.delete_data_file(task.file)
+        if not kept_rows.is_empty():
+            for data_file in _dataframe_to_data_files(
+                table_metadata=transaction.table_metadata,
+                write_uuid=snapshot_writer.commit_uuid,
+                df=kept_rows.to_arrow(),
+                io=io,
+                counter=counter,
+            ):
+                snapshot_writer.append_data_file(data_file)
+    return pl.concat(deleted_rows)
+
+
+def overwrite_keys_and_append(
     tbl: Table,
     transaction: Transaction,
     io: FileIO,
-    scd_ids: list,
+    keys: list[str],
+    key_rows: pl.DataFrame,
     new_rows: pl.DataFrame,
-    scd_id_col: str = "dbt_scd_id",
 ) -> None:
-    """Single-snapshot alternative to Transaction.delete(In(...)) + append().
+    """Single-snapshot alternative to Transaction.delete() + append().
 
     Transaction.delete() + append() stages 2-3 Iceberg snapshots; Databricks
     Unity Catalog rejects commits with more than one snapshot. This function
     combines both operations into one update_snapshot().overwrite() context.
     """
-    from pyiceberg.expressions import AlwaysTrue, In
-    from pyiceberg.io.pyarrow import ArrowScan, _dataframe_to_data_files
-
-    schema = transaction.table_metadata.schema()
-    file_counter = itertools.count(0)
+    counter = itertools.count(0)
     with transaction.update_snapshot().overwrite() as snapshot_writer:
-        scd_id_filter = In(scd_id_col, scd_ids)  # type: ignore[misc,call-arg,arg-type]
-        for task in tbl.scan(row_filter=scd_id_filter).plan_files():
-            all_rows = pl.DataFrame(
-                ArrowScan(
-                    table_metadata=transaction.table_metadata,
-                    io=io,
-                    projected_schema=schema,
-                    row_filter=AlwaysTrue(),
-                ).to_table(tasks=[task])
-            )
-            kept_rows = all_rows.filter(~pl.col(scd_id_col).is_in(scd_ids))
-            if len(kept_rows) < len(all_rows):
-                snapshot_writer.delete_data_file(task.file)
-                if kept_rows.shape[0] > 0:
-                    for data_file in _dataframe_to_data_files(
-                        table_metadata=transaction.table_metadata,
-                        write_uuid=snapshot_writer.commit_uuid,
-                        df=kept_rows.to_arrow(),
-                        io=io,
-                        counter=file_counter,
-                    ):
-                        snapshot_writer.append_data_file(data_file)
+        delete_rows_by_keys(
+            tbl, transaction, snapshot_writer, io, keys, key_rows, counter
+        )
         _write_data_files(
-            snapshot_writer, transaction, io, new_rows, {}, counter=file_counter
+            snapshot_writer, transaction, io, new_rows, {}, counter=counter
         )
 
 

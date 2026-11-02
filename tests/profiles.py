@@ -1,4 +1,6 @@
+import json
 import os
+import urllib.request
 
 
 def azure_blob_catalog(name: str, prefix: str, schema: str) -> dict:
@@ -108,28 +110,6 @@ def get_databricks_token() -> str:
     return response.json()["token_value"]
 
 
-def iceberg_databricks_catalog(token: str, schema: str) -> dict:
-    DATABRICKS_UC_CATALOG = os.environ.get("DATABRICKS_UC_CATALOG")
-    DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
-
-    return {
-        "type": "iceberg",
-        "pyiceberg_type": "rest",
-        "name": DATABRICKS_UC_CATALOG,
-        "uri": f"{DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
-        "token": token,
-        "warehouse": DATABRICKS_UC_CATALOG,
-        "schema": schema,
-    }
-
-
-def iceberg_databricks_target(token: str, schema: str) -> dict:
-    return {
-        "type": "polars",
-        "catalogs": [iceberg_databricks_catalog(token, schema)],
-    }
-
-
 def databricks_catalog(token: str, name: str, schema: str) -> dict:
     return {
         "type": "databricks",
@@ -149,18 +129,58 @@ def databricks_target(token: str, schema: str) -> dict:
     }
 
 
-def get_databricks_pyiceberg_catalog(token: str):
-    from pyiceberg.catalog import load_catalog
+def fabric_catalog(name: str, schema: str) -> dict:
+    return {
+        "type": "fabric",
+        "name": name,
+        "workspace": os.environ.get("FABRIC_WORKSPACE", ""),
+        "lakehouse": os.environ.get("FABRIC_LAKEHOUSE", ""),
+        "exclude_managed_identity_credential": True,
+        "schema": schema,
+    }
 
-    DATABRICKS_UC_CATALOG = os.environ.get("DATABRICKS_UC_CATALOG")
-    DATABRICKS_WORKSPACE_URL = os.environ.get("DATABRICKS_WORKSPACE_URL")
 
-    return load_catalog(
-        DATABRICKS_UC_CATALOG,
-        **{
-            "type": "rest",
-            "uri": f"{DATABRICKS_WORKSPACE_URL}/api/2.1/unity-catalog/iceberg-rest/",
-            "token": token,
-            "warehouse": DATABRICKS_UC_CATALOG,
-        },
+def fabric_target(schema: str) -> dict:
+    return {
+        "type": "polars",
+        "catalogs": [fabric_catalog("primary", schema)],
+    }
+
+
+def github_oidc_token(audience: str) -> str:
+    # GitHub ID tokens expire after about 10 minutes, so each profile requests a new one
+    request_token = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+    request = urllib.request.Request(
+        f"{os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']}&audience={audience}",
+        headers={"Authorization": f"Bearer {request_token}"},
     )
+    with urllib.request.urlopen(request) as response:
+        return json.load(response)["value"]
+
+
+def snowflake_credentials() -> dict:
+    if "ACTIONS_ID_TOKEN_REQUEST_URL" in os.environ:
+        return {
+            "credential": github_oidc_token("snowflakecomputing.com"),
+            "header.X-Snowflake-Workload-Identity-Provider": "OIDC",
+        }
+    return {"credential": os.environ.get("SNOWFLAKE_PAT", "")}
+
+
+def snowflake_catalog(name: str, schema: str) -> dict:
+    return {
+        "type": "snowflake",
+        "name": name,
+        "account": os.environ.get("SNOWFLAKE_ACCOUNT", ""),
+        "database_name": os.environ.get("SNOWFLAKE_DATABASE", ""),
+        "role": os.environ.get("SNOWFLAKE_ROLE"),
+        **snowflake_credentials(),
+        "schema": schema,
+    }
+
+
+def snowflake_target(schema: str) -> dict:
+    return {
+        "type": "polars",
+        "catalogs": [snowflake_catalog("primary", schema)],
+    }

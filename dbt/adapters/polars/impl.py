@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
-from dbt.adapters.base.column import Column
+import sqlparse
 from dbt.adapters.base.impl import BaseAdapter
 from dbt.adapters.base.meta import available
 from dbt.adapters.base.relation import BaseRelation
@@ -28,10 +28,13 @@ from dbt_common.exceptions import CompilationError, DbtRuntimeError
 
 import polars as pl
 from dbt.adapters.polars.catalogs import BaseCatalog, create_catalog
+from dbt.adapters.polars.column import PolarsColumn
+from dbt.adapters.polars.compute_slots import compute_slots, holds_compute_slot
 from dbt.adapters.polars.connections import PolarsConnectionManager, PolarsCredentials
+from dbt.adapters.polars.fixtures import fixture_frame
 from dbt.adapters.polars.relation import PolarsRelation
 from dbt.adapters.polars.sql_rewrite import parse_and_rewrite
-from dbt.adapters.polars.utils import resolve_polars_type
+from dbt.adapters.polars.utils import polars_type_name, resolve_polars_type
 
 if TYPE_CHECKING:
     import agate
@@ -145,6 +148,7 @@ class PolarsAdapter(BaseAdapter):
 
     ConnectionManager = PolarsConnectionManager
     Relation = PolarsRelation
+    Column = PolarsColumn
 
     def __init__(self, config, mp_context):
         super().__init__(config, mp_context)
@@ -153,6 +157,7 @@ class PolarsAdapter(BaseAdapter):
         self._node_configs: dict[tuple, RelationConfig] = {}
         self._source_configs: dict[tuple, dict] = {}
         self.configs_loaded_from_manifest = False
+        compute_slots.configure(config.credentials.compute_threads)
 
     def set_macro_resolver(self, macro_resolver: Any) -> None:
         # Called when a new manifest is used
@@ -301,12 +306,14 @@ class PolarsAdapter(BaseAdapter):
             polars_goal, polars_current
         )
 
-    def get_columns_in_relation(self, relation: PolarsRelation) -> list[Column]:
+    def get_columns_in_relation(self, relation: PolarsRelation) -> list[PolarsColumn]:
         catalog = self.catalog_for_relation(relation)
         if not relation.external_location and not catalog.table_exists(relation):
             return []
         schema = catalog.get_relation(relation).collect_schema()
-        return [Column(col, str(type)) for col, type in schema.items()]
+        return [
+            PolarsColumn(col, polars_type_name(type)) for col, type in schema.items()
+        ]
 
     def list_relations_without_caching(
         self,
@@ -351,25 +358,20 @@ class PolarsAdapter(BaseAdapter):
 
     # --- persist_docs ---
     @available
-    def polars_set_relation_comment(
-        self, relation: PolarsRelation, comment: str
+    def polars_set_comments(
+        self,
+        relation: PolarsRelation,
+        relation_comment: str | None,
+        columns: dict[str, Any],
     ) -> None:
-        self.get_storage_catalog(relation.catalog).set_relation_comment(
-            relation, comment
-        )
-
-    @available
-    def polars_set_column_comments(
-        self, relation: PolarsRelation, columns: dict[str, Any]
-    ) -> None:
-        comments = {
+        column_comments = {
             name: info["description"]
             for name, info in columns.items()
             if info.get("description")
         }
-        if comments:
-            self.get_storage_catalog(relation.catalog).set_column_comments(
-                relation, comments
+        if relation_comment or column_comments:
+            self.get_storage_catalog(relation.catalog).set_comments(
+                relation, relation_comment or None, column_comments
             )
 
     # --- docs generate / catalog.json ---
@@ -518,6 +520,7 @@ class PolarsAdapter(BaseAdapter):
         return "Duration"
 
     @available
+    @holds_compute_slot
     def polars_load_csv_rows(
         self,
         relation: PolarsRelation,
@@ -764,7 +767,7 @@ class PolarsAdapter(BaseAdapter):
         tokens = [re.escape(t) for t in re.split(r"\s+", prefix) if t]
         prefix_pattern = r"\s+".join(tokens)
 
-        stripped = code.lstrip()
+        stripped = self.skip_leading_comments(code)
         m = re.match(prefix_pattern, stripped, re.DOTALL | re.IGNORECASE)
 
         if not m:
@@ -779,6 +782,19 @@ class PolarsAdapter(BaseAdapter):
             return "with " + remainder[1:]
         else:
             return remainder
+
+    @staticmethod
+    def skip_leading_comments(code: str) -> str:
+        # dbt-core injects CTEs using sqlparse, which also skips leading comments.
+        statements = sqlparse.parse(code)
+        if not statements:
+            return code
+        statement = statements[0]
+        first_token = statement.token_first(skip_ws=True, skip_cm=True)
+        if first_token is None:
+            return code.lstrip()
+        leading_tokens = statement.tokens[: statement.token_index(first_token)]
+        return code[len("".join(str(token) for token in leading_tokens)) :]
 
     def _apply_schema_change(
         self,
@@ -808,10 +824,11 @@ class PolarsAdapter(BaseAdapter):
         removed = set(existing.keys()) - set(new_cols)
 
         if on_schema_change == "fail":
+            new_types = {col: polars_type_name(new_schema[col]) for col in new_cols}
             type_changes = {
-                col: (existing[col], str(new_schema[col]))
+                col: (existing[col], new_types[col])
                 for col in new_cols
-                if col in existing and existing[col] != str(new_schema[col])
+                if col in existing and existing[col] != new_types[col]
             }
             if added or removed or type_changes:
                 raise CompilationError(
@@ -830,18 +847,21 @@ class PolarsAdapter(BaseAdapter):
         if on_schema_change == "sync_all_columns":
             if not removed:
                 return new_data, bool(added)
-            existing_df = catalog.get_relation(relation).collect()
+            existing_data = catalog.get_relation(relation)
             if added:
-                existing_df = existing_df.with_columns(
+                existing_data = existing_data.with_columns(
                     [pl.lit(None).cast(new_schema[col]).alias(col) for col in added]
                 )
-            existing_df = existing_df.select(new_cols)
-            catalog.write_relation(
-                relation,
-                pl.concat([existing_df.lazy(), new_data.lazy()]),
-                partition_by,
-                model_config,
-            )
+            synced_data = pl.concat([existing_data.select(new_cols), new_data.lazy()])
+            # A file format is overwritten in place, so it can't be read while written
+            if relation.file_format not in (None, "delta"):
+                logger.warning(
+                    f"Removing columns from {relation} with "
+                    f"file_format='{relation.file_format}' reads the whole table "
+                    "into memory. Use file_format='delta' to avoid this."
+                )
+                synced_data = synced_data.collect()
+            catalog.write_relation(relation, synced_data, partition_by, model_config)
             return None, False
 
         return new_data, False
@@ -904,6 +924,7 @@ class PolarsAdapter(BaseAdapter):
         model_config: dict | None = None,
     ) -> None:
         model_config = model_config or {}
+        catalog.validate_incremental_relation(relation, model_config)
         partition_by = _normalize_partition_by(partition_by)
         current_partitions = catalog.get_partition_columns(relation)
         if current_partitions != partition_by:
@@ -984,6 +1005,7 @@ class PolarsAdapter(BaseAdapter):
             raise DbtRuntimeError(f"Unknown incremental strategy: {strategy!r}")
 
     @available
+    @holds_compute_slot
     def polars_execute_incremental_model(
         self,
         relation: PolarsRelation,
@@ -1019,6 +1041,7 @@ class PolarsAdapter(BaseAdapter):
         )
 
     @available
+    @holds_compute_slot
     def polars_execute_model(
         self,
         relation: PolarsRelation,
@@ -1037,6 +1060,7 @@ class PolarsAdapter(BaseAdapter):
             relation, result, _normalize_partition_by(partition_by), model_config
         )
 
+    @holds_compute_slot
     def submit_python_job(
         self, parsed_model: dict, compiled_code: str
     ) -> AdapterResponse:
@@ -1099,6 +1123,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK")
 
     @available
+    @holds_compute_slot
     def polars_execute_sql_test(
         self,
         sql: str,
@@ -1135,6 +1160,89 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table
 
     @available
+    def polars_resolve_relation(self, relation: PolarsRelation) -> PolarsRelation:
+        """`relation` with the config of the model or source it names. A unit test
+        fixture's `this` only carries the name of its input."""
+        database, schema, identifier = (
+            relation.database,
+            relation.schema,
+            relation.identifier,
+        )
+        if database is None or schema is None or identifier is None:
+            return relation
+        try:
+            return self._resolve_relation(database, schema, identifier)
+        except DbtRuntimeError:
+            # e.g. a deferred relation, which isn't in this project's manifest
+            return relation
+
+    def unit_test_actual(self, code: str, extra_ctes: list | None) -> pl.LazyFrame:
+        extra_ctes = extra_ctes or []
+        cte_frames = self._evaluate_ctes(extra_ctes)
+        stripped_code = self._strip_all_ctes(code, extra_ctes)
+        if "def model(" in stripped_code:
+            return self._run_python_model(stripped_code, cte_frames or None)
+        return self._run_sql(
+            stripped_code, eager=False, extra_frames=cte_frames or None
+        )
+
+    @available
+    @holds_compute_slot
+    def polars_get_columns_in_unit_test(
+        self, sql: str, extra_ctes: list | None
+    ) -> list[PolarsColumn]:
+        schema = self.unit_test_actual(sql, extra_ctes).collect_schema()
+        return [
+            PolarsColumn(name, polars_type_name(dtype))
+            for name, dtype in schema.items()
+        ]
+
+    @available
+    @holds_compute_slot
+    def polars_execute_unit_test(
+        self,
+        sql: str,
+        extra_ctes: list | None,
+        expected_rows: list[dict],
+        expected_sql: str | None,
+    ) -> tuple[AdapterResponse, agate.Table]:
+        """The actual and expected rows, labeled in an `actual_or_expected` column
+        as dbt-core's unit test runner expects."""
+        actual = self.unit_test_actual(sql, extra_ctes)
+        schema = actual.collect_schema()
+        column_by_lower_name = {name.lower(): name for name in schema}
+        if expected_rows:
+            column_names = [
+                column_by_lower_name[key.lower()] for key in expected_rows[0]
+            ]
+        else:
+            column_names = schema.names()
+        actual = actual.select(column_names)
+
+        if expected_sql:
+            expected = self._run_sql(
+                expected_sql,
+                eager=False,
+                extra_frames={"dbt_internal_unit_test_actual": actual},
+            ).select(column_names)
+        else:
+            expected = fixture_frame(
+                expected_rows, {name: schema[name] for name in column_names}
+            ).lazy()
+
+        result = pl.concat(
+            [
+                actual.with_columns(actual_or_expected=pl.lit("actual")),
+                expected.with_columns(actual_or_expected=pl.lit("expected")),
+            ],
+            how="vertical_relaxed",
+        ).collect()
+        return AdapterResponse(_message="OK"), table_from_data(
+            result.to_dicts(), result.columns
+        )
+
+    @available
+    @holds_compute_slot
     def execute_python_test(
         self,
         parsed_model: dict,
@@ -1190,6 +1298,7 @@ class PolarsAdapter(BaseAdapter):
         return AdapterResponse(_message="OK"), table
 
     @available
+    @holds_compute_slot
     def polars_execute_snapshot(
         self,
         relation: PolarsRelation,
@@ -1416,6 +1525,7 @@ class PolarsAdapter(BaseAdapter):
             relation, rows_to_close, rows_to_insert, scd_id_col
         )
 
+    @holds_compute_slot
     def execute(
         self,
         sql: str,

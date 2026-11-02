@@ -1,0 +1,64 @@
+import pytest
+from dbt.adapters.polars.catalogs import BaseCatalog, PolarsRelation, create_catalog
+from dbt.adapters.polars.testing.mixin import is_removable_test_schema
+
+from {{ package_name }} import (
+    config_class,
+)
+
+pytest_plugins = ["dbt.adapters.polars.testing.plugin"]
+
+# Options of two test instances of your backend (e.g. two buckets or two prefixes).
+# They must not share storage: some tests check a table lands in one and not the other.
+PRIMARY_CATALOG_OPTIONS: dict = {}
+SECONDARY_CATALOG_OPTIONS: dict = {}
+
+
+def build_catalog(name: str, options: dict) -> BaseCatalog:
+    config = config_class(
+        name=name,
+        type="{{ catalog_name }}",
+        schema="unused",
+        **options,
+    )
+    return create_catalog(config, "")
+
+
+@pytest.fixture(scope="class")
+def dbt_profile_target():
+    return {
+        "type": "polars",
+        "catalogs": [
+            {
+                "name": "primary",
+                "type": "{{ catalog_name }}",
+                **PRIMARY_CATALOG_OPTIONS,
+            },
+            {
+                "name": "secondary",
+                "type": "{{ catalog_name }}",
+                **SECONDARY_CATALOG_OPTIONS,
+            },
+        ],
+    }
+
+
+@pytest.fixture
+def catalog_under_test() -> BaseCatalog:
+    return build_catalog("catalog_test", PRIMARY_CATALOG_OPTIONS)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_test_schemas():
+    """Drop this run's test schemas, and test schemas older than 24 hours."""
+    yield
+    for name, options in [
+        ("primary", PRIMARY_CATALOG_OPTIONS),
+        ("secondary", SECONDARY_CATALOG_OPTIONS),
+    ]:
+        catalog = build_catalog(name, options)
+        for schema in catalog.list_schemas():
+            if is_removable_test_schema(schema):
+                catalog.drop_schema(
+                    PolarsRelation.create(database=name, schema=schema, catalog=name)
+                )

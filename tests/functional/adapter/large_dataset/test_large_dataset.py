@@ -93,7 +93,7 @@ def _assert_streaming_memory(project):
 
 
 @pytest.mark.require_configs("default")
-@pytest.mark.skip_profiles("iceberg", "iceberg-databricks")
+@pytest.mark.skip_profiles("iceberg")
 class TestPythonModelOOM(PolarsTestMixin):
     """
     Verify sink_delta (LocalCatalog) streams 250M rows without loading all 2 GB
@@ -136,7 +136,7 @@ class TestPythonModelOOM(PolarsTestMixin):
         _assert_streaming_memory(project)
 
 
-@pytest.mark.require_profiles("iceberg", "iceberg-databricks")
+@pytest.mark.require_profiles("iceberg")
 class TestIcebergPythonModelOOM(PolarsTestMixin):
     @pytest.fixture(scope="class")
     def large_source_path(self, tmp_path_factory):

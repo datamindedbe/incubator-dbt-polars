@@ -22,6 +22,8 @@ cast({{ year_diff }} as bigint)
     {%- elif unit in microseconds_per_unit -%}
         {%- set per_unit = microseconds_per_unit[unit] -%}
 cast(floor(cast(cast({{ second_date }} as timestamp) as bigint) / {{ per_unit }}) - floor(cast(cast({{ first_date }} as timestamp) as bigint) / {{ per_unit }}) as bigint)
+    {%- elif not execute -%}
+null
     {%- else -%}
         {{ exceptions.raise_compiler_error("datediff() does not support datepart '" ~ datepart ~ "' on dbt-polars.") }}
     {%- endif -%}
