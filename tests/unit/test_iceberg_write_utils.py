@@ -489,6 +489,40 @@ def test_promoted_column_type_keeps_field_id(iceberg_table):
     )
 
 
+def test_changed_decimal_scale_is_readded(iceberg_table):
+    import pyarrow as pa
+    from pyiceberg.types import DecimalType
+
+    narrow = pa.schema([pa.field("id", pa.int64()), pa.field("d", pa.decimal128(2, 1))])
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, iceberg_table.schema(), narrow)
+    old_schema = iceberg_table.schema()
+
+    wide = pa.schema([pa.field("id", pa.int64()), pa.field("d", pa.decimal128(10, 2))])
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, old_schema, wide)
+
+    schema = iceberg_table.schema()
+    assert schema.find_field("d").field_type == DecimalType(10, 2)
+    assert schema.find_field("d").field_id != old_schema.find_field("d").field_id
+
+
+def test_pyiceberg_decimal_scale_bug_still_present():
+    pytest.importorskip("pyiceberg")
+    from pyiceberg.exceptions import ResolveError
+    from pyiceberg.schema import promote
+    from pyiceberg.types import DecimalType
+
+    try:
+        promote(DecimalType(2, 1), DecimalType(10, 2))
+    except ResolveError:
+        pytest.fail(
+            "pyiceberg now rejects decimal scale changes (apache/iceberg-python#3613). "
+            "Remove the DecimalType check from is_type_promotion in "
+            "dbt/adapters/polars/catalogs/iceberg_write_utils.py, and this test."
+        )
+
+
 # ---------------------------------------------------------------------------
 # _sync_partition_spec
 # ---------------------------------------------------------------------------

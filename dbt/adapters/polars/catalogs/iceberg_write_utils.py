@@ -229,13 +229,30 @@ def overwrite_keys_and_append(
         )
 
 
+def is_type_promotion(file_type, read_type) -> bool:
+    from pyiceberg.exceptions import ResolveError
+    from pyiceberg.schema import promote
+    from pyiceberg.types import DecimalType
+
+    # pyiceberg 0.12.0 promote() ignores the decimal scale, fixed in
+    # apache/iceberg-python#3613. See test_pyiceberg_decimal_scale_bug_still_present.
+    if isinstance(file_type, DecimalType) and isinstance(read_type, DecimalType):
+        return (
+            file_type.scale == read_type.scale
+            and file_type.precision <= read_type.precision
+        )
+    try:
+        promote(file_type, read_type)
+        return True
+    except ResolveError:
+        return False
+
+
 def _sync_schema(
     transaction: Transaction, current_schema: Schema, arrow_schema: pa.Schema
 ) -> None:
     import pyarrow as pa
-    from pyiceberg.exceptions import ResolveError
     from pyiceberg.io.pyarrow import pyarrow_to_schema
-    from pyiceberg.schema import promote
 
     current_names = {field.name for field in current_schema.fields}
     shared_columns = pyarrow_to_schema(
@@ -252,17 +269,10 @@ def _sync_schema(
         current_type = current_schema.find_field(field.name).field_type
         if current_type == field.field_type:
             continue
-        type_pairs = [
-            (current_type, field.field_type),
-            (field.field_type, current_type),
-        ]
-        for file_type, read_type in type_pairs:
-            try:
-                promote(file_type, read_type)
-                break
-            except ResolveError:
-                pass
-        else:
+        if not (
+            is_type_promotion(current_type, field.field_type)
+            or is_type_promotion(field.field_type, current_type)
+        ):
             retyped_columns.append(field)
     retyped_names = {field.name for field in retyped_columns}
     removed_names = [name for name in current_names if name not in arrow_schema.names]
