@@ -8,6 +8,7 @@
 - The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/incubator-dbt-polars <dir>`.
 - Full rewrite of the documentation for consistency and clarity.
 - `dbt.position()` macro adapted to Polars SQL.
+- dbt_expectations regex tests, through a `dispatch` setting in `dbt_project.yml`.
 
 ### Fixes
 
