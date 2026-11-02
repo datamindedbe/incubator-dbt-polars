@@ -5,9 +5,9 @@ const config = {
   title: 'dbt-polars',
   tagline: 'dbt adapter for Polars',
   url: 'https://datamindedbe.github.io',
-  baseUrl: '/incubator-dbt-polars/',
+  baseUrl: '/dbt-polars/',
   organizationName: 'datamindedbe',
-  projectName: 'incubator-dbt-polars',
+  projectName: 'dbt-polars',
   trailingSlash: false,
 
   onBrokenLinks: 'throw',
@@ -61,7 +61,7 @@ const config = {
         title: 'dbt-polars',
         items: [
           {
-            href: 'https://github.com/datamindedbe/incubator-dbt-polars',
+            href: 'https://github.com/datamindedbe/dbt-polars',
             label: 'GitHub',
             position: 'right',
             className: 'navbar-github-link',

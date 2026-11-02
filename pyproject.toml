@@ -34,10 +34,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/datamindedbe/incubator-dbt-polars"
-Documentation = "https://datamindedbe.github.io/incubator-dbt-polars/"
-Repository = "https://github.com/datamindedbe/incubator-dbt-polars"
-Changelog = "https://github.com/datamindedbe/incubator-dbt-polars/releases"
+Homepage = "https://github.com/datamindedbe/dbt-polars"
+Documentation = "https://datamindedbe.github.io/dbt-polars/"
+Repository = "https://github.com/datamindedbe/dbt-polars"
+Changelog = "https://github.com/datamindedbe/dbt-polars/releases"
 
 [dependency-groups]
 dev = [

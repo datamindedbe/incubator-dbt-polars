@@ -14,7 +14,7 @@ Like the quick start, this tutorial uses the [local catalog](../catalogs/local.m
 
 ## Loading the data
 
-For this example, we use hourly [weather data by Open-Meteo.com](https://open-meteo.com/). Download [open_meteo_raw.csv](https://github.com/datamindedbe/incubator-dbt-polars/raw/main/docs/demos/data/open_meteo_raw.csv) and put it in the `seeds/` folder of the project:
+For this example, we use hourly [weather data by Open-Meteo.com](https://open-meteo.com/). Download [open_meteo_raw.csv](https://github.com/datamindedbe/dbt-polars/raw/main/docs/demos/data/open_meteo_raw.csv) and put it in the `seeds/` folder of the project:
 
 ```text {10}
 quickstart/

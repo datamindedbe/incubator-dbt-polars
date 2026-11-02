@@ -1,6 +1,6 @@
 # {{ distribution_name }}
 
-{{ class_prefix }} catalog for [dbt-polars](https://github.com/datamindedbe/incubator-dbt-polars).
+{{ class_prefix }} catalog for [dbt-polars](https://github.com/datamindedbe/dbt-polars).
 
 ## Usage
 
@@ -34,7 +34,7 @@ my_project:
 
 Test schemas are removed by the `cleanup_test_schemas` fixture in `tests/conftest.py`: at the end of a run, and for leftovers of earlier runs older than 24 hours. Check that it works for your backend.
 
-See [Custom catalogs](https://github.com/datamindedbe/incubator-dbt-polars/blob/main/docs/guides/custom-catalog.md) for the catalog API.
+See [Custom catalogs](https://github.com/datamindedbe/dbt-polars/blob/main/docs/guides/custom-catalog.md) for the catalog API.
 
 ## Release
 
@@ -42,7 +42,7 @@ Set `version` in `pyproject.toml`, then push a matching tag (`v0.1.0`). `.github
 
 ## Template updates
 
-This project was generated from the [dbt-polars catalog template](https://github.com/datamindedbe/incubator-dbt-polars/tree/main/catalog-template). To pull in template updates:
+This project was generated from the [dbt-polars catalog template](https://github.com/datamindedbe/dbt-polars/tree/main/catalog-template). To pull in template updates:
 
 ```bash
 uvx copier update
