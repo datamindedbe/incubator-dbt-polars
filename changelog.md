@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v0.5.0
+## v0.5.1
 
 ### Implements
 
@@ -20,6 +20,7 @@
 - dbt-polars did not recognize CTEs when they started with a comment.
 - Change Polars dtype names to use double quotes instead of single quotes to generate valid SQL.
 - Type checks (`is_float`, `is_string`, ...) did not recognize Polars type like Float64.
+- Iceberg table models failed on Databricks when a column changed type, e.g. from integer to string.
 
 ## v0.5.0
 

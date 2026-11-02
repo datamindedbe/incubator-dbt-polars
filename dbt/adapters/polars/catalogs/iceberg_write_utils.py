@@ -232,16 +232,49 @@ def overwrite_keys_and_append(
 def _sync_schema(
     transaction: Transaction, current_schema: Schema, arrow_schema: pa.Schema
 ) -> None:
-    removed_columns = [
-        field.name
-        for field in current_schema.fields
-        if field.name not in arrow_schema.names
-    ]
+    import pyarrow as pa
+    from pyiceberg.exceptions import ResolveError
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+    from pyiceberg.schema import promote
+
+    current_names = {field.name for field in current_schema.fields}
+    shared_columns = pyarrow_to_schema(
+        pa.schema([field for field in arrow_schema if field.name in current_names]),
+        name_mapping=current_schema.name_mapping,
+        downcast_ns_timestamp_to_us=True,
+        format_version=transaction.table_metadata.format_version,
+    )
+    # Iceberg only allows type promotions such as int to long, and union_by_name
+    # keeps a wider existing type. Columns with any other type change are dropped
+    # and re-added, which gives them a new field id.
+    retyped_columns = []
+    for field in shared_columns.fields:
+        current_type = current_schema.find_field(field.name).field_type
+        if current_type == field.field_type:
+            continue
+        type_pairs = [
+            (current_type, field.field_type),
+            (field.field_type, current_type),
+        ]
+        for file_type, read_type in type_pairs:
+            try:
+                promote(file_type, read_type)
+                break
+            except ResolveError:
+                pass
+        else:
+            retyped_columns.append(field)
+    retyped_names = {field.name for field in retyped_columns}
+    removed_names = [name for name in current_names if name not in arrow_schema.names]
+
     # allow_incompatible_changes is required for column deletion
     with transaction.update_schema(allow_incompatible_changes=True) as update:
-        update.union_by_name(arrow_schema)
-        for column in removed_columns:
-            update.delete_column(column)
+        for name in [*removed_names, *retyped_names]:
+            update.delete_column(name)
+        for field in retyped_columns:
+            update.add_column(field.name, field.field_type, field.doc, field.required)
+        unchanged_types = [f for f in arrow_schema if f.name not in retyped_names]
+        update.union_by_name(pa.schema(unchanged_types))
 
 
 def _sync_partition_spec(transaction: Transaction, partition_by: list[str]) -> None:
