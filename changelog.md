@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+## v0.5.1
+
 ### Implements
 
+- Renames repo to dbt-polars
 - Unit tests defined in YAML, on SQL and Python models.
-- The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/incubator-dbt-polars <dir>`.
+- The Copier template for custom catalogs moved into the dbt-polars repository: `uvx copier copy gh:datamindedbe/dbt-polars <dir>`.
 - Full rewrite of the documentation for consistency and clarity.
 - `dbt.position()` macro adapted to Polars SQL.
 - dbt_expectations regex tests, through a `dispatch` setting in `dbt_project.yml`.
@@ -17,6 +20,7 @@
 - dbt-polars did not recognize CTEs when they started with a comment.
 - Change Polars dtype names to use double quotes instead of single quotes to generate valid SQL.
 - Type checks (`is_float`, `is_string`, ...) did not recognize Polars type like Float64.
+- Iceberg table models failed on Databricks when a column changed type, e.g. from integer to string.
 
 ## v0.5.0
 
@@ -30,7 +34,7 @@
 
 ### Fixes
 
-- [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/incubator-dbt-polars/issues/45)).
+- [Iceberg Catalog] Improve efficiency of merge and delete+insert models using composite keys ([#45](https://github.com/datamindedbe/dbt-polars/issues/45)).
 - [Iceberg Catalog] Merge and delete+insert no longer fail when a `unique_key` column contains NULL values.
 - [Databricks Catalog] Dropping a Delta table on Azure now deletes its storage folder. Requires installing `dbt-polars-catalog-databricks[azure]`.
 
@@ -38,14 +42,14 @@
 
 ### Implements
 
-- A source can be read from a path relative to its catalog with `external.location`: a file with any extension (`data.CSV`) or a glob (`orders/*.CSV`) ([#29](https://github.com/datamindedbe/incubator-dbt-polars/issues/29))
+- A source can be read from a path relative to its catalog with `external.location`: a file with any extension (`data.CSV`) or a glob (`orders/*.CSV`) ([#29](https://github.com/datamindedbe/dbt-polars/issues/29))
 
 ### Fixes
 
-- Fail with error on SQL statements executed through hooks ([#36](https://github.com/datamindedbe/incubator-dbt-polars/issues/36))
-- Resolve polar types in read options (`schema`, `override_schema`) ([#33](https://github.com/datamindedbe/incubator-dbt-polars/issues/33))
-- Fail with error on unknown `read_options` keys ([#34](https://github.com/datamindedbe/incubator-dbt-polars/issues/34))
-- Lazy append on incremental materialization ([#31](https://github.com/datamindedbe/incubator-dbt-polars/issues/31))
+- Fail with error on SQL statements executed through hooks ([#36](https://github.com/datamindedbe/dbt-polars/issues/36))
+- Resolve polar types in read options (`schema`, `override_schema`) ([#33](https://github.com/datamindedbe/dbt-polars/issues/33))
+- Fail with error on unknown `read_options` keys ([#34](https://github.com/datamindedbe/dbt-polars/issues/34))
+- Lazy append on incremental materialization ([#31](https://github.com/datamindedbe/dbt-polars/issues/31))
 - Full refresh of an incremental model are now atomic
 - Fail with error on unknown model config keys
 

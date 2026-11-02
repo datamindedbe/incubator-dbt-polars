@@ -447,6 +447,82 @@ def test_removed_column_is_dropped(iceberg_table):
     assert "id" in field_names
 
 
+def test_changed_column_type_is_readded(iceberg_table):
+    import pyarrow as pa
+    from pyiceberg.types import StringType
+
+    old_schema = iceberg_table.schema()
+    new_schema = pa.schema([pa.field("id", pa.string()), pa.field("val", pa.string())])
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, old_schema, new_schema)
+
+    schema = iceberg_table.schema()
+    assert schema.find_field("id").field_type == StringType()
+    assert schema.find_field("id").field_id != old_schema.find_field("id").field_id
+    assert schema.find_field("val").field_id == old_schema.find_field("val").field_id
+
+
+def test_promoted_column_type_keeps_field_id(iceberg_table):
+    import pyarrow as pa
+    from pyiceberg.types import LongType
+
+    narrow = pa.schema([pa.field("id", pa.int64()), pa.field("n", pa.int32())])
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, iceberg_table.schema(), narrow)
+    old_schema = iceberg_table.schema()
+
+    wide = pa.schema([pa.field("id", pa.int64()), pa.field("n", pa.int64())])
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, old_schema, wide)
+
+    schema = iceberg_table.schema()
+    assert schema.find_field("n").field_type == LongType()
+    assert schema.find_field("n").field_id == old_schema.find_field("n").field_id
+
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, schema, narrow)
+
+    assert iceberg_table.schema().find_field("n").field_type == LongType()
+    assert (
+        iceberg_table.schema().find_field("n").field_id
+        == schema.find_field("n").field_id
+    )
+
+
+def test_changed_decimal_scale_is_readded(iceberg_table):
+    import pyarrow as pa
+    from pyiceberg.types import DecimalType
+
+    narrow = pa.schema([pa.field("id", pa.int64()), pa.field("d", pa.decimal128(2, 1))])
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, iceberg_table.schema(), narrow)
+    old_schema = iceberg_table.schema()
+
+    wide = pa.schema([pa.field("id", pa.int64()), pa.field("d", pa.decimal128(10, 2))])
+    with iceberg_table.transaction() as txn:
+        _sync_schema(txn, old_schema, wide)
+
+    schema = iceberg_table.schema()
+    assert schema.find_field("d").field_type == DecimalType(10, 2)
+    assert schema.find_field("d").field_id != old_schema.find_field("d").field_id
+
+
+def test_pyiceberg_decimal_scale_bug_still_present():
+    pytest.importorskip("pyiceberg")
+    from pyiceberg.exceptions import ResolveError
+    from pyiceberg.schema import promote
+    from pyiceberg.types import DecimalType
+
+    try:
+        promote(DecimalType(2, 1), DecimalType(10, 2))
+    except ResolveError:
+        pytest.fail(
+            "pyiceberg now rejects decimal scale changes (apache/iceberg-python#3613). "
+            "Remove the DecimalType check from is_type_promotion in "
+            "dbt/adapters/polars/catalogs/iceberg_write_utils.py, and this test."
+        )
+
+
 # ---------------------------------------------------------------------------
 # _sync_partition_spec
 # ---------------------------------------------------------------------------
