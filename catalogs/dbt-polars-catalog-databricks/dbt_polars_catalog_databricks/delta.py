@@ -1,9 +1,15 @@
 import re
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import polars as pl
 from dbt.adapters.events.logging import AdapterLogger
-from dbt.adapters.polars.catalogs import PolarsRelation, StorageCatalog
+from dbt.adapters.polars.catalogs import (
+    PolarsRelation,
+    StorageCatalog,
+    WriteOperation,
+)
 from dbt_common.exceptions import DbtRuntimeError
 
 from dbt_polars_catalog_databricks.config import DatabricksCatalogConfig
@@ -290,44 +296,41 @@ class DatabricksDeltaCatalog(StorageCatalog):
 
     # ── write / register ─────────────────────────────────────────────────────────
 
-    def write_relation(
-        self,
-        relation: PolarsRelation,
-        data: pl.DataFrame | pl.LazyFrame,
-        partition_by: list[str],
-        model_config: dict | None = None,
-    ) -> None:
-        model_config = model_config or {}
-        self.create_schema(relation)
-
-        already_registered = self.table_exists(relation)
-        uri = self.get_uri(relation)
-
-        if already_registered:
-            super().write_relation(relation, data, partition_by, model_config)
+    @contextmanager
+    def write_operation(
+        self, relation: PolarsRelation, operation: WriteOperation
+    ) -> Iterator[None]:
+        if operation != WriteOperation.OVERWRITE:
+            yield
             return
 
+        self.create_schema(relation)
+        if self.table_exists(relation):
+            yield
+            return
+
+        uri = self.get_uri(relation)
         self.uris_pending_creation.add(uri)
         try:
-            super().write_relation(relation, data, partition_by, model_config)
+            yield
+            # Read while the table is pending, with the credentials it was created with
+            schema = self.get_relation(relation).collect_schema()
+            partition_by = self.get_partition_columns(relation)
         finally:
             self.uris_pending_creation.discard(uri)
 
-        self.register_table(relation, uri, data, partition_by)
+        self.register_table(relation, uri, schema, partition_by)
 
     def register_table(
         self,
         relation: PolarsRelation,
         uri: str,
-        data: pl.DataFrame | pl.LazyFrame,
+        schema: pl.Schema,
         partition_by: list[str],
     ) -> None:
         from databricks.sdk.errors import DatabricksError
 
         full = self.unity_catalog.table_full_name(relation)
-        schema = (
-            data.collect_schema() if isinstance(data, pl.LazyFrame) else data.schema
-        )
         columns = []
         for i, (name, dtype) in enumerate(schema.items()):
             type_name, type_text, type_json = polars_dtype_to_uc_type(dtype)

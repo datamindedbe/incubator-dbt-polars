@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Implements
+
+- Add a write_operation hook to StorageCatalog so custom catalogs can run code before and after every write.
+
 ## v0.5.1
 
 ### Implements

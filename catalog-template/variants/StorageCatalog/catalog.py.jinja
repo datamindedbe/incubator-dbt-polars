@@ -1,6 +1,13 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 
-from dbt.adapters.polars.catalogs import CatalogConfig, PolarsRelation, StorageCatalog
+from dbt.adapters.polars.catalogs import (
+    CatalogConfig,
+    PolarsRelation,
+    StorageCatalog,
+    WriteOperation,
+)
 
 
 @dataclass
@@ -72,3 +79,13 @@ class {{ class_prefix }}Catalog(StorageCatalog):
     ) -> list[PolarsRelation]:
         """All relations in the schema, or an empty list if the schema doesn't exist."""
         raise NotImplementedError
+
+    @contextmanager
+    def write_operation(
+        self, relation: PolarsRelation, operation: WriteOperation
+    ) -> Iterator[None]:
+        """
+        Optional. Wraps every write: code before `yield` runs before the write,
+        code after it only once the write succeeded.
+        """
+        yield

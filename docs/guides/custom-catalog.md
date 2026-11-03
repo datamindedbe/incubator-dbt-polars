@@ -65,6 +65,7 @@ A `StorageCatalog` stores Delta tables, or Parquet, CSV and NDJSON files, at a U
 | [table_exists](#table_exists-and-drop_relation) | Whether a relation exists. |
 | [drop_relation](#table_exists-and-drop_relation) | Drops a relation. Does nothing when it doesn't exist. |
 | [list_relations_without_caching](#list_relations_without_caching) | All relations in a schema, or an empty list when the schema doesn't exist. |
+| [write_operation](#write_operation) (optional) | Runs code before and after every write, such as registering a table in a metastore. Does nothing by default. |
 
 For backends that don't store Delta tables or files, extend `BaseCatalog` instead and implement all of its methods.
 
@@ -435,6 +436,23 @@ Fills dbt's relation cache at the start of a run and is used by dbt docs generat
 
 </TabItem>
 </Tabs>
+
+### `write_operation`
+
+Every write of a `StorageCatalog` runs inside `write_operation`, which does nothing by default. Override it to validate a table before a write or to register it in a metastore after the write. Code before `yield` runs before the write. Code after `yield` only runs when the write succeeded.
+
+```python
+    @contextmanager
+    def write_operation(
+        self, relation: PolarsRelation, operation: WriteOperation
+    ) -> Iterator[None]:
+        if operation == WriteOperation.OVERWRITE:
+            self.check_allowed(relation)
+        yield
+        self.metastore.register(relation)
+```
+
+`operation` tells which write runs. It's one of `OVERWRITE`, `TRUNCATE`, `APPEND`, `MERGE`, `DELETE`, `SNAPSHOT` and `COMMENT`. An incremental model with the delete+insert strategy runs a `DELETE` followed by an `APPEND`.
 
 ## Optional features
 
