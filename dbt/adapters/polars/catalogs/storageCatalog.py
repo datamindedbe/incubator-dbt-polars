@@ -2,7 +2,7 @@ import posixpath
 from abc import abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
-from enum import StrEnum
+from enum import Enum
 from typing import NoReturn
 
 from dbt.adapters.events.logging import AdapterLogger
@@ -47,7 +47,7 @@ def external_location_of(relation: PolarsRelation) -> str | None:
     return normalized
 
 
-class WriteOperation(StrEnum):
+class WriteOperation(str, Enum):
     """The write a StorageCatalog performs inside `write_operation`."""
 
     OVERWRITE = "overwrite"
