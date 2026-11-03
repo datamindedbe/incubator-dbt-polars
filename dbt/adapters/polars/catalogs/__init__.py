@@ -18,6 +18,7 @@ from dbt.adapters.polars.catalogs.icebergCatalog import (
 )
 from dbt.adapters.polars.catalogs.storageCatalog import (
     StorageCatalog,
+    WriteOperation,
     external_location_of,
     file_format_of,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "PolarsRelation",
     "StorageCatalog",
     "TableFormatCatalog",
+    "WriteOperation",
     "create_catalog",
     "external_location_of",
     "file_format_of",

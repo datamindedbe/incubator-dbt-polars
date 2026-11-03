@@ -1,13 +1,9 @@
 name: Docs
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "docs/**"
-      - "website/**"
-      - ".github/workflows/docs.yml"
+  workflow_run:
+    workflows: ["Publish to PyPI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -21,12 +17,16 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: website
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The released commit; workflow_run itself runs on main
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
